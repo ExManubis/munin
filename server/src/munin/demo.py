@@ -111,7 +111,7 @@ def seed(s: Session, user: str) -> None:
     svc.update_issue(s, FIGBOT, gateway, status="todo", assignee="none")
 
     svc.update_issue(s, me, status_cmd, assignee="figbot")
-    take(me, manifest)
+    svc.update_issue(s, me, manifest, status="in_progress", assignee=me.name)
     take(CODEX, landing)
 
     _spread_over_days(s, days=3)

@@ -2,6 +2,7 @@ import threading
 from pathlib import Path
 
 from sqlalchemy import Engine, create_engine, event, inspect, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.schema import CreateColumn
 
@@ -39,7 +40,11 @@ def _add_missing_columns(engine: Engine) -> None:
             for column in table.columns:
                 if column.name not in existing:
                     ddl = CreateColumn(column).compile(dialect=engine.dialect)
-                    connection.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {ddl}"))
+                    try:
+                        connection.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {ddl}"))
+                    except OperationalError as error:
+                        if "duplicate column" not in str(error):  # another munin got there first
+                            raise
 
 
 class Changes:

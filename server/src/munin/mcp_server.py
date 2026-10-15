@@ -136,12 +136,15 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         title: str,
         description: Annotated[str, Field(description="Markdown. Say what done looks like.")] = "",
         status: Status = "todo",
-        assignee: Annotated[str | None, Field(description="Agent or person to do it. Omit for anyone.")] = None,
+        assignee: Annotated[
+            str | None, Field(description='Agent or person to do it, "me" for you. Omit for anyone.')
+        ] = None,
         blocked_by: Annotated[
             list[str] | None, Field(description="Issues that must be done before anyone can start this one.")
         ] = None,
     ) -> str:
         """Create an issue. It goes to the bottom of the project's pile."""
+        assignee = _actor(ctx).name if assignee == "me" else assignee
         with sessions() as s:
             created = svc.create_issue(s, _actor(ctx), project, title, description, status, assignee, blocked_by)
             reply = f"Created {created.ref}: {created.title}"
@@ -157,7 +160,9 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         title: str | None = None,
         description: str | None = None,
         status: Status | None = None,
-        assignee: Annotated[str | None, Field(description='New assignee, or "none" to unassign.')] = None,
+        assignee: Annotated[
+            str | None, Field(description='New assignee: a name, "me" for you, "none" to unassign.')
+        ] = None,
         blocked_by: Annotated[
             list[str] | None, Field(description="Replaces what this issue waits for. [] clears it.")
         ] = None,
@@ -168,7 +173,7 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         """
         changes = {"title": title, "description": description, "status": status, "blocked_by": blocked_by}
         if assignee is not None:
-            changes["assignee"] = assignee
+            changes["assignee"] = _actor(ctx).name if assignee == "me" else assignee
         with sessions() as s:
             updated = svc.update_issue(s, _actor(ctx), issue, **changes)
             return f"Updated {_issue_line(updated)}"
@@ -242,7 +247,7 @@ def _look_for_work(sessions: sessionmaker[Session], agent: str, project: str) ->
         if available:
             return _available_text(available), ""
         issues = svc.list_issues(s, key)
-        others_working = [i for i in issues if i.status == "in_progress" and i.assignee not in (None, agent)]
+        others_working = [i for i in issues if i.status == "in_progress" and i.assignee != agent]
         questions = [i for i in issues if svc.waiting_on_human(i)]
         my_reviews = [i for i in issues if i.status == "in_review" and i.assignee == agent]
         queued = [i for i in issues if i.status == "todo" and i.assignee not in (None, agent)]
@@ -303,7 +308,7 @@ def _issue_text(issue: Issue) -> str:
         lines += ["", "Blocks:"] + [_issue_line(blocked) for blocked in issue.blocks]
     if issue.events:
         lines += ["", "History:"]
-        lines += [f"{_when(event.created_at)}  {line}" for event, line in svc.history(issue.events[-12:])]
+        lines += [f"{_when(event.created_at)}  {line}" for event, line in svc.history(issue.events)[-12:]]
     if issue.comments:
         lines += ["", "Comments:"]
         lines += [_comment_text(comment) for comment in issue.comments]

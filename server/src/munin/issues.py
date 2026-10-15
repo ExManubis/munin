@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import and_, case, exists, func, or_, select, update
+from sqlalchemy import and_, case, exists, func, select, update
 from sqlalchemy.orm import Session, aliased
 
 from munin.models import OPEN_STATUSES, STATUSES, Comment, Event, Issue, Project, utcnow
@@ -175,7 +175,9 @@ def create_issue(
     assignee = clean_assignee(assignee)
     if status == "in_progress" and actor.is_agent and assignee is None:
         assignee = actor.name
-    blockers = [get_issue(s, ref) for ref in dict.fromkeys(blocked_by or [])]
+    blockers = _resolve(s, blocked_by or [])
+    if actor.is_agent and status == "in_progress" and (waiting_for := _open(blockers)):
+        raise Conflict(f"It would be blocked by {_refs(waiting_for)}, which isn't done yet. Create it as todo.")
     bottom = s.scalar(select(func.max(Issue.position)).where(Issue.project_id == proj.id))
     issue = Issue(
         project=proj,
@@ -216,6 +218,9 @@ def update_issue(
     has in progress, and they can't start an issue whose blockers aren't done. Moving an issue
     to in_progress without naming an assignee makes the agent its assignee, which is how an
     agent takes an issue.
+
+    Status and assignee are only written over what was read, so a change someone else made in
+    the meantime is never silently undone: the second writer gets a Conflict instead.
     """
     issue = get_issue(s, ref)
     values: dict = {}
@@ -235,8 +240,11 @@ def update_issue(
         values["position"] = float(position)
     blockers = _check_blockers(s, issue, blocked_by) if blocked_by is not None else None
 
-    starting = values.get("status") == "in_progress" and issue.status != "in_progress"
-    if actor.is_agent and starting:
+    held_by_other = issue.status == "in_progress" and issue.assignee not in (None, actor.name)
+    if actor.is_agent and held_by_other and ("status" in values or "assignee" in values):
+        raise Conflict(f"{issue.ref} is in progress by {issue.assignee}. Pick another issue.")
+    already_mine = issue.status == "in_progress" and issue.assignee == actor.name
+    if actor.is_agent and values.get("status") == "in_progress" and not already_mine:
         waiting_for = open_blockers(issue) if blockers is None else _open(blockers)
         if waiting_for:
             raise Conflict(f"{issue.ref} is blocked by {_refs(waiting_for)}, which isn't done yet. Take another issue.")
@@ -245,33 +253,44 @@ def update_issue(
     before = {field: getattr(issue, field) for field in ("title", "description", "status", "assignee")}
     old_blockers = list(issue.blocked_by)
     changes = {field: new for field, new in values.items() if field in before and new != before[field]}
+    blockers_changed = blockers is not None and set(blockers) != set(old_blockers)
     if values:
         statement = update(Issue).where(Issue.id == issue.id)
-        if actor.is_agent and ("status" in values or "assignee" in values):
-            # Checked in the same statement as the write, so two agents can't both take an issue.
-            statement = statement.where(
-                or_(Issue.status != "in_progress", Issue.assignee.is_(None), Issue.assignee == actor.name)
-            )
+        if "status" in values or "assignee" in values:
+            # Checked in the same statement as the write: if someone else changed status or
+            # assignee since we read it (another agent took it, the human cancelled it), stop.
+            statement = statement.where(Issue.status == before["status"], Issue.assignee == before["assignee"])
         if "status" in changes:
             values["status_changed_at"] = now
-        if changes or blockers is not None:  # reordering the pile isn't an update to the issue
+        if changes or blockers_changed:  # reordering the pile isn't an update to the issue
             values["updated_at"] = now
         result = s.execute(statement.values(**values).execution_options(synchronize_session=False))
         if result.rowcount == 0:
             s.rollback()
             s.refresh(issue)
-            raise Conflict(f"{issue.ref} is in progress by {issue.assignee}. Pick another issue.")
+            if actor.is_agent and issue.status == "in_progress" and issue.assignee not in (None, actor.name):
+                raise Conflict(f"{issue.ref} is in progress by {issue.assignee}. Pick another issue.")
+            held = f", assigned to {issue.assignee}" if issue.assignee else ""
+            raise Conflict(f"{issue.ref} changed just now: it's {issue.status}{held}. Look at it again.")
 
     for field in ("status", "assignee", "title"):
         if field in changes:
             _record(issue, actor, now, field, before[field], changes[field])
     if "description" in changes:
         _record(issue, actor, now, "description")
-    if blockers is not None and set(blockers) != set(old_blockers):
+    if blockers_changed:
         issue.blocked_by = blockers
         if "updated_at" not in values:
             issue.updated_at = now
         _record(issue, actor, now, "blocked_by", _refs(old_blockers) or None, _refs(blockers) or None)
+        # The write lock is ours from here on, so this sees everyone else's committed blockers:
+        # two people adding opposite dependencies at once can't make a loop.
+        s.flush()
+        s.expire_all()
+        loop = next((blocker for blocker in blockers if _waits_for(blocker, issue)), None)
+        if loop is not None:
+            s.rollback()
+            raise Invalid(f"{loop.ref} already waits for {issue.ref}, so {issue.ref} can't wait for it.")
     s.commit()
     s.refresh(issue)
     return issue
@@ -286,8 +305,13 @@ def _open(blockers: list[Issue]) -> list[Issue]:
     return [blocker for blocker in blockers if blocker.status not in CLOSED_STATUSES]
 
 
+def _resolve(s: Session, refs: list[str]) -> list[Issue]:
+    """Issues for refs, once each however they're spelled (MUN-1, mun-1, " MUN-1")."""
+    return list({issue.id: issue for issue in (get_issue(s, ref) for ref in refs)}.values())
+
+
 def _check_blockers(s: Session, issue: Issue, refs: list[str]) -> list[Issue]:
-    blockers = [get_issue(s, ref) for ref in dict.fromkeys(refs)]
+    blockers = _resolve(s, refs)
     for blocker in blockers:
         if blocker.id == issue.id:
             raise Invalid(f"{issue.ref} can't block itself.")
@@ -373,7 +397,11 @@ class Available:
 def available_work(s: Session, agent: str, project: str) -> Available:
     issues = list_issues(s, project)
     return Available(
-        take=[i for i in issues if i.status == "todo" and i.assignee in (None, agent) and not open_blockers(i)],
+        take=[
+            i
+            for i in issues
+            if i.status == "todo" and i.assignee in (None, agent) and not open_blockers(i) and not waiting_on_human(i)
+        ],
         review=[i for i in issues if i.status == "in_review" and i.assignee != agent],
         answered=[i for i in issues if i.assignee == agent and i.status == "in_progress" and _answered(i, agent)],
     )
