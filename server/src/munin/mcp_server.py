@@ -17,8 +17,8 @@ INSTRUCTIONS = """\
 Munin is an issue tracker shared by you, other agents and a human.
 
 How to work:
-1. Read the project's description (list_projects): it's the brief, and it says how work is
-   delivered, for example which branch to commit to.
+1. Call list_projects first. It tells you your name in munin, and each project's description
+   is the brief: what to build and how work is delivered, for example which branch to commit to.
 2. Take the top issue from the pile: list_issues(project, status="todo") lists the pile in order.
    Take one that's unassigned or assigned to you with update_issue(issue, status="in_progress").
    If another agent already has it, munin says so; take the next one.
@@ -60,16 +60,17 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         return wrapper
 
     @tool
-    def list_projects() -> str:
-        """List projects. A project's key prefixes its issue ids, like MUN in MUN-12."""
+    def list_projects(ctx: Context) -> str:
+        """List projects with their descriptions, which are the brief for working on them.
+
+        A project's key prefixes its issue ids, like MUN in MUN-12. Also says what your name is in munin.
+        """
+        you = f"You are {_actor(ctx).name} in munin."
         with sessions() as s:
             projects = svc.list_projects(s)
             if not projects:
-                return "No projects yet. Ask the human to create one."
-            return "\n".join(
-                f"{p.key}: {p.name}" + (f" - {p.description.splitlines()[0]}" if p.description else "")
-                for p in projects
-            )
+                return f"{you}\nNo projects yet. Ask the human to create one."
+            return "\n\n".join([you, *(f"{p.key}: {p.name}\n{p.description.strip()}".strip() for p in projects)])
 
     @tool
     def list_issues(

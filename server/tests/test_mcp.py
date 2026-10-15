@@ -90,7 +90,7 @@ def test_take_work_review_and_ask(server):
     )
     assert all(not is_error for is_error, _ in results), results
     texts = [text for _, text in results]
-    assert texts[0] == "MUN: munin - The tracker itself"
+    assert texts[0] == "You are claude-code in munin.\n\nMUN: munin\nThe tracker itself"
     assert texts[1] == "MUN-1 [todo] First\nMUN-2 [todo] Second"
     assert texts[2] == "Updated MUN-1 [in_progress] First (assignee: claude-code)"
     assert texts[4] == "MUN-1 [in_progress] First (assignee: claude-code) (waiting on the human)"
