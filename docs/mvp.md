@@ -33,9 +33,9 @@ Everything else (reviewing someone else's work, unassigning yourself when you gi
 | Tool | Does |
 |---|---|
 | `list_projects` | Projects and their descriptions |
-| `list_issues` | Issues, active first and then the pile in order. Filter by project, status, assignee (`me`, or `""` for unassigned) |
+| `list_issues` | Issues, active first and then the pile in order. Filter by project, status, assignee (`me`, or `none` for unassigned) |
 | `get_issue` | An issue with its description and comments |
-| `create_issue` | A new issue at the bottom of a project's pile |
+| `create_issue` | A new issue at the bottom of a project's pile. Points out open issues with similar titles, so parallel agents notice duplicates |
 | `update_issue` | Change title, description, status or assignee. Moving to `in_progress` takes the issue |
 | `add_comment` | Comment on an issue; `ask_human` puts it in your inbox |
 

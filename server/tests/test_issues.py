@@ -158,3 +158,31 @@ def test_only_agents_ask_the_human(s, project):
     issue = svc.create_issue(s, HUMAN, "MUN", "Work")
     comment = svc.add_comment(s, HUMAN, issue.ref, "Note to self", asks_human=True)
     assert not comment.asks_human
+
+
+@pytest.mark.parametrize("nobody", ["", '""', "''", "none", "None", " null "])
+def test_however_an_agent_spells_nobody_it_unassigns(s, project, nobody):
+    issue = svc.create_issue(s, HUMAN, "MUN", "Work", assignee="codex")
+    assert svc.update_issue(s, CODEX, issue.ref, assignee=nobody).assignee is None
+    assert [i.ref for i in svc.list_issues(s, "MUN", assignee=nobody)] == [issue.ref]
+
+
+def test_similar_open_issues(s):
+    # Titles from two agents that planned the same project at the same time.
+    svc.create_project(s, "TXT", "textstats")
+    word_count = svc.create_issue(s, HUMAN, "TXT", "Create textstats.py with word_count(text)")
+    top_words = svc.create_issue(s, HUMAN, "TXT", "Add top_words(text, n) to textstats.py")
+    readme = svc.create_issue(s, HUMAN, "TXT", "Add usage section to README")
+    svc.create_issue(s, HUMAN, "TXT", "Fix tests")
+
+    def similar(title):
+        return [i.ref for i in svc.similar_open_issues(s, svc.create_issue(s, CLAUDE, "TXT", title))]
+
+    # A hint, not a verdict: real duplicates must show up, unrelated titles mustn't.
+    assert similar("Create textstats.py with word_count(text) and unit tests") == [word_count.ref]
+    assert top_words.ref in similar("Add top_words(text, n) with unit tests")
+    assert readme.ref in similar("Add README usage section for textstats")
+    assert similar("Add tests for the parser") == []
+
+    svc.update_issue(s, HUMAN, readme.ref, status="done")
+    assert readme.ref not in similar("Usage section in the README")  # closed issues don't count

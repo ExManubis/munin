@@ -84,7 +84,8 @@ def test_take_work_review_and_ask(server):
         ("update_issue", {"issue": "MUN-1", "status": "in_progress"}),
         ("add_comment", {"issue": "MUN-1", "body": "Which database?", "ask_human": True}),
         ("list_issues", {"assignee": "me"}),
-        ("create_issue", {"project": "MUN", "title": "Follow-up"}),
+        ("create_issue", {"project": "MUN", "title": "Retry failed tool calls once"}),
+        ("create_issue", {"project": "MUN", "title": "Retry a failed tool call once before asking"}),
         ("update_issue", {"issue": "MUN-1", "status": "in_review"}),
     )
     assert all(not is_error for is_error, _ in results), results
@@ -93,7 +94,12 @@ def test_take_work_review_and_ask(server):
     assert texts[1] == "MUN-1 [todo] First\nMUN-2 [todo] Second"
     assert texts[2] == "Updated MUN-1 [in_progress] First (assignee: claude-code)"
     assert texts[4] == "MUN-1 [in_progress] First (assignee: claude-code) (waiting on the human)"
-    assert texts[5] == "Created MUN-3: Follow-up"
+    assert texts[5] == "Created MUN-3: Retry failed tool calls once"
+    assert texts[6] == (
+        "Created MUN-4: Retry a failed tool call once before asking\n"
+        "These open issues look similar. If it duplicates one, set it to cancelled:\n"
+        "MUN-3 [todo] Retry failed tool calls once"
+    )
 
     with connect(settings.db_path)() as s:
         assert [c.body for c in svc.inbox(s)] == ["Which database?"]

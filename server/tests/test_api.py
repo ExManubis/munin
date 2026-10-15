@@ -65,3 +65,8 @@ def test_other_host_names_are_refused(client):
 
 def test_me(client):
     assert client.get("/api/me").json() == {"name": "me", "mcp_url": "http://127.0.0.1:7777/mcp"}
+
+
+def test_agent_names_that_mean_something_else_are_refused(client):
+    for name in ("me", "none", "Null"):
+        assert client.post("/api/agents", json={"name": name}).status_code == 422

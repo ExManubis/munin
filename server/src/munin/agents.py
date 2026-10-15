@@ -7,10 +7,12 @@ import secrets
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from munin.issues import Invalid, NotFound
+from munin.issues import UNASSIGNED, Invalid, NotFound
 from munin.models import Agent, utcnow
 
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+# "me" is how an agent refers to itself in list_issues; the rest mean unassigned.
+RESERVED_NAMES = {"me", *UNASSIGNED}
 
 
 def _hash(token: str) -> str:
@@ -26,6 +28,8 @@ def add_agent(s: Session, name: str) -> tuple[Agent, str]:
     name = name.strip()
     if not NAME_PATTERN.match(name):
         raise Invalid("An agent name is letters, digits, dots, dashes or underscores, like claude-code.")
+    if name.lower() in RESERVED_NAMES:
+        raise Invalid(f"{name!r} means something else to munin. Pick another name.")
     token = "mun_" + secrets.token_urlsafe(24)
     agent = s.scalar(select(Agent).where(Agent.name == name))
     if agent is None:

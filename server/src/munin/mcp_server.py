@@ -17,18 +17,25 @@ INSTRUCTIONS = """\
 Munin is an issue tracker shared by you, other agents and a human.
 
 How to work:
-1. Take the top issue from the pile: list_issues(project, status="todo") lists the pile in order.
+1. Read the project's description (list_projects): it's the brief, and it says how work is
+   delivered, for example which branch to commit to.
+2. Take the top issue from the pile: list_issues(project, status="todo") lists the pile in order.
    Take one that's unassigned or assigned to you with update_issue(issue, status="in_progress").
    If another agent already has it, munin says so; take the next one.
-2. Do the work. Comment on the issue when something's worth recording.
-3. When you're done, add a comment saying what you did, then set status="in_review".
-4. Review issues other agents finished: check the work, commit it and set status="done",
+3. Do the work. Comment on the issue when something's worth recording.
+4. When you're done, add a comment saying what you did, then set status="in_review".
+5. Review issues other agents finished: check the work, commit it and set status="done",
    or comment what's missing and set status="todo" so its author picks it up again.
    Don't review your own work.
 
-If you need the human, use add_comment(issue, question, ask_human=true) and work on something
-else meanwhile; their reply appears in the issue's comments. If you give up on an issue,
-comment why and set status="todo" with assignee="". Create issues for follow-up work you find.
+Planning: when the pile is empty, you can create issues that move the project toward its
+description. Check list_issues(project, status="all") first so you don't duplicate anything.
+Set duplicates and issues that aren't needed to status="cancelled".
+
+The human reads munin, not your session. To ask them something, use
+add_comment(issue, question, ask_human=true) and work on something else meanwhile; their reply
+appears in the issue's comments. If you give up on an issue, comment why and set status="todo"
+and assignee="none".
 """
 
 Status = Literal["todo", "in_progress", "in_review", "done", "cancelled"]
@@ -73,7 +80,7 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
             Field(description="Only issues with this status. Omit for open issues (todo, in progress, in review)."),
         ] = None,
         assignee: Annotated[
-            str | None, Field(description='Only issues assigned to this name. "me" is you, "" is unassigned.')
+            str | None, Field(description='Only issues assigned to this name. "me" is you, "none" is unassigned.')
         ] = None,
         limit: Annotated[int, Field(ge=1, le=200)] = 50,
     ) -> str:
@@ -104,7 +111,11 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         """Create an issue. It goes to the bottom of the project's pile."""
         with sessions() as s:
             created = svc.create_issue(s, _actor(ctx), project, title, description, status, assignee)
-            return f"Created {created.ref}: {created.title}"
+            reply = f"Created {created.ref}: {created.title}"
+            if similar := svc.similar_open_issues(s, created):
+                reply += "\nThese open issues look similar. If it duplicates one, set it to cancelled:\n"
+                reply += "\n".join(_issue_line(issue) for issue in similar)
+            return reply
 
     @tool
     def update_issue(
@@ -113,7 +124,7 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         title: str | None = None,
         description: str | None = None,
         status: Status | None = None,
-        assignee: Annotated[str | None, Field(description='New assignee. "" unassigns.')] = None,
+        assignee: Annotated[str | None, Field(description='New assignee, or "none" to unassign.')] = None,
     ) -> str:
         """Change an issue. Setting status="in_progress" takes the issue and assigns it to you.
 

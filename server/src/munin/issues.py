@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session, aliased
 from munin.models import OPEN_STATUSES, STATUSES, Comment, Issue, Project, utcnow
 
 KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
+UNASSIGNED = ("", "none", "null", "nobody", "unassigned")
+FILLER_WORDS = {"add", "and", "the", "for", "with", "from", "into", "make", "update", "fix", "create", "new"}
 REF_PATTERN = re.compile(r"^\s*([A-Za-z][A-Za-z0-9]*)-(\d+)\s*$")
 
 
@@ -118,6 +120,7 @@ def list_issues(
     elif status != "all":
         query = query.where(Issue.status == _check_status(status))
     if assignee is not None:
+        assignee = clean_assignee(assignee)
         query = query.where(Issue.assignee == assignee) if assignee else query.where(Issue.assignee.is_(None))
     query = query.order_by(_status_order(), Issue.position, Issue.id)
     if limit:
@@ -149,6 +152,7 @@ def create_issue(
     if not title.strip():
         raise Invalid("An issue needs a title.")
     status = _check_status(status)
+    assignee = clean_assignee(assignee)
     if status == "in_progress" and actor.is_agent and assignee is None:
         assignee = actor.name
     bottom = s.scalar(select(func.max(Issue.position)).where(Issue.project_id == proj.id))
@@ -158,7 +162,7 @@ def create_issue(
         title=title.strip(),
         description=description,
         status=status,
-        assignee=assignee or None,
+        assignee=assignee,
         position=(bottom or 0.0) + 1.0,
         created_by=actor.name,
     )
@@ -198,7 +202,7 @@ def update_issue(
         if status == "in_progress" and assignee is _UNSET and actor.is_agent:
             assignee = actor.name
     if assignee is not _UNSET:
-        values["assignee"] = assignee or None
+        values["assignee"] = clean_assignee(assignee)
     if position is not None:
         values["position"] = float(position)
     if not values:
@@ -218,6 +222,35 @@ def update_issue(
     s.commit()
     s.refresh(issue)
     return issue
+
+
+def clean_assignee(assignee: str | None) -> str | None:
+    """None for "nobody", however an agent spells it ("", '""', "none", "null")."""
+    name = (assignee or "").strip().strip("\"'").strip()
+    return None if name.lower() in UNASSIGNED else name
+
+
+def similar_open_issues(s: Session, issue: Issue) -> list[Issue]:
+    """Other open issues in the project whose titles share most of their words with this one.
+
+    Words from the project's own name don't count: they turn up in most of its titles.
+    """
+    project_words = _title_words(f"{issue.project.name} {issue.project.key}")
+    words = _title_words(issue.title) - project_words
+    others = s.scalars(
+        select(Issue).where(Issue.project_id == issue.project_id, Issue.id != issue.id, Issue.status.in_(OPEN_STATUSES))
+    )
+    similar = []
+    for other in others:
+        theirs = _title_words(other.title) - project_words
+        shared = words & theirs
+        if len(shared) >= 2 and len(shared) / min(len(words), len(theirs)) >= 0.6:
+            similar.append(other)
+    return similar
+
+
+def _title_words(title: str) -> set[str]:
+    return {word for word in re.findall(r"[a-z0-9_]+", title.lower()) if len(word) > 2} - FILLER_WORDS
 
 
 def _check_status(status: str) -> str:
