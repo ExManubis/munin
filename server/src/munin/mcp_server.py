@@ -208,8 +208,14 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
 
     @mcp.prompt(name="continue", description="Point this agent at a munin project and let it carry on.")
     def continue_project(project: Annotated[str, Field(description="Project key, like MUN")]) -> str:
+        with sessions() as s:
+            try:
+                found = svc.get_project(s, project)
+                named = f"the {found.name} project ({found.key})"
+            except MuninError:
+                named = f"the {project} project"
         return (
-            f"Continue the {project} project in munin. Start with list_projects to read its brief, "
+            f"Continue {named} in munin. Start with list_projects to read its brief, "
             "then take, do and review issues until there's nothing left for you to do."
         )
 
@@ -297,7 +303,7 @@ def _issue_text(issue: Issue) -> str:
         lines += ["", "Blocks:"] + [_issue_line(blocked) for blocked in issue.blocks]
     if issue.events:
         lines += ["", "History:"]
-        lines += [f"{_when(event.created_at)}  {svc.describe_event(event)}" for event in issue.events[-12:]]
+        lines += [f"{_when(event.created_at)}  {line}" for event, line in svc.history(issue.events[-12:])]
     if issue.comments:
         lines += ["", "Comments:"]
         lines += [_comment_text(comment) for comment in issue.comments]

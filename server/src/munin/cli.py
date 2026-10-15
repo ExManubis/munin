@@ -14,6 +14,7 @@ from munin.config import Settings
 from munin.db import connect
 from munin.issues import MuninError
 from munin.models import utcnow
+from munin.run import CLAUDE, run_agents
 
 MARK = Path(__file__).parent / "web" / "munin-mark-dither-on-dark.svg"
 
@@ -29,6 +30,19 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--open", action="store_true", help="open the web UI in your browser")
 
     commands.add_parser("status", help="what's waiting on you and what agents are doing")
+
+    run = commands.add_parser("run", help="start agents on a project and watch them work (munin serve must be running)")
+    run.add_argument("project", help="project key, like MUN")
+    run.add_argument("--agents", type=int, default=1, help="how many agents to start (default 1)")
+    run.add_argument(
+        "--cmd",
+        dest="template",
+        default=CLAUDE,
+        help="how to start one agent. Placeholders: {project} {prompt} {mcp_config} {url} {token} {name}. "
+        "MUNIN_TOKEN and MUNIN_URL are also set. Default: Claude Code",
+    )
+    run.add_argument("--name", help="agents are named NAME-1, NAME-2, … (default: the command's program, like claude)")
+    run.epilog = "Arguments after -- go to every agent, like: munin run MUN -- --model sonnet"
 
     demo = commands.add_parser("demo", help="look around with a sample project, in a throwaway database")
     demo.add_argument("--port", type=int, default=7778, help="port to listen on (default 7778)")
@@ -48,13 +62,21 @@ def main(argv: list[str] | None = None) -> int:
     project_add.add_argument("--description", default="", help="what the project is, for agents and you")
     project.add_parser("list", help="list projects")
 
+    # Everything after -- belongs to the agents munin run starts, not to munin.
+    argv = list(sys.argv[1:] if argv is None else argv)
+    argv, extra = (argv[: argv.index("--")], argv[argv.index("--") + 1 :]) if "--" in argv else (argv, [])
     args = parser.parse_args(argv)
+    if extra and args.command != "run":
+        parser.error("arguments after -- only go with munin run")
     settings = Settings.from_env()
     try:
         if args.command == "serve":
             return _serve(settings, args)
         if args.command == "demo":
             return _demo(settings, args)
+        if args.command == "run":
+            sessions = connect(settings.db_path)
+            return run_agents(settings, sessions, args.project, args.agents, args.template, args.name, extra)
         with connect(settings.db_path)() as s:
             if args.command == "status":
                 return _status(s)

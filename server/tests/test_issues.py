@@ -16,6 +16,7 @@ def project(s):
 
 def test_project_keys_are_upper_case_and_unique(s, project):
     assert project.key == "MUN"
+    assert svc.get_project(s, "Munin") is project  # agents sometimes use the name
     with pytest.raises(Conflict):
         svc.create_project(s, "MUN", "again")
     with pytest.raises(Invalid):

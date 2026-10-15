@@ -49,3 +49,14 @@ def test_demo_data_looks_lived_in(tmp_path):
         history = svc.recent_events(s, limit=500)
         assert history[-1].created_at < history[0].created_at  # spread out, oldest first in time
         assert all(i.created_at <= i.updated_at for i in svc.list_issues(s, status="all"))
+
+
+def test_run_arguments_reach_the_runner(monkeypatch, tmp_path):
+    import munin.cli
+
+    monkeypatch.setenv("MUNIN_DB", str(tmp_path / "munin.db"))
+    seen = {}
+    monkeypatch.setattr(munin.cli, "run_agents", lambda *args: seen.update(args=args) or 0)
+    assert main(["run", "mun", "--agents", "2", "--cmd", "codex exec {prompt}", "--", "--model", "x"]) == 0
+    _, _, project, count, template, name, extra = seen["args"]
+    assert (project, count, template, name, extra) == ("mun", 2, "codex exec {prompt}", None, ["--model", "x"])

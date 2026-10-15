@@ -1,44 +1,18 @@
 """Talks to a real munin over HTTP with the MCP SDK's client, the way an agent would."""
 
-import socket
-import threading
 import time
 
 import anyio
 import httpx2
 import pytest
-import uvicorn
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from munin import agents
 from munin import issues as svc
-from munin.app import create_app
-from munin.config import Settings
 from munin.db import connect
 
 from conftest import HUMAN
-
-
-@pytest.fixture
-def server(tmp_path):
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-    settings = Settings(db_path=tmp_path / "munin.db", port=port)
-    uv = uvicorn.Server(uvicorn.Config(create_app(settings), host="127.0.0.1", port=port, log_level="warning"))
-    thread = threading.Thread(target=uv.run, daemon=True)
-    thread.start()
-    while not uv.started:
-        time.sleep(0.01)
-    with connect(settings.db_path)() as s:
-        svc.create_project(s, "MUN", "munin", "The tracker itself")
-        svc.create_issue(s, HUMAN, "MUN", "First")
-        svc.create_issue(s, HUMAN, "MUN", "Second")
-        tokens = {name: agents.add_agent(s, name)[1] for name in ("claude-code", "codex")}
-    yield f"http://127.0.0.1:{port}/mcp", tokens, settings
-    uv.should_exit = True
-    thread.join()
 
 
 async def call(url: str, token: str | None, *calls: tuple[str, dict]) -> list[tuple[bool, str]]:
@@ -185,7 +159,7 @@ def test_prompts(server):
 
     names, text = anyio.run(prompts)
     assert names == ["continue", "work_on"]
-    assert text.startswith("Continue the MUN project in munin.")
+    assert text.startswith("Continue the munin project (MUN) in munin.")
 
 
 def test_the_web_ui_hears_about_changes(server):

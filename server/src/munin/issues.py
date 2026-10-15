@@ -53,7 +53,10 @@ def list_projects(s: Session) -> list[Project]:
 
 
 def get_project(s: Session, key: str) -> Project:
-    project = s.scalar(select(Project).where(Project.key == key.strip().upper()))
+    """A project by its key (MUN), or by its name, since agents sometimes use that."""
+    wanted = key.strip()
+    project = s.scalar(select(Project).where(Project.key == wanted.upper()))
+    project = project or s.scalar(select(Project).where(func.lower(Project.name) == wanted.lower()))
     if project is None:
         raise NotFound(f"No project with key {key!r}.")
     return project
@@ -400,6 +403,27 @@ def recent_events(s: Session, limit: int = 50, project: str | None = None) -> li
     if project:
         statement = statement.where(Issue.project_id == get_project(s, project).id)
     return list(s.scalars(statement))
+
+
+def history(events: list[Event]) -> list[tuple[Event, str]]:
+    """Each event with its line of history, where a take (moved to in_progress and assigned to
+    yourself at once) is one line: "claude-code took it"."""
+    lines: list[tuple[Event, str]] = []
+    for event in events:
+        before = lines[-1][0] if lines else None
+        took = (
+            before is not None
+            and event.kind == "assignee"
+            and before.kind == "status"
+            and before.new == "in_progress"
+            and event.new == event.actor == before.actor
+            and (event.issue_id, event.created_at) == (before.issue_id, before.created_at)
+        )
+        if took:
+            lines[-1] = (before, f"{event.actor} took it")
+        else:
+            lines.append((event, describe_event(event)))
+    return lines
 
 
 def describe_event(event: Event) -> str:
