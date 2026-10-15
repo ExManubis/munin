@@ -187,9 +187,10 @@ def create_issue(
     )
     proj.next_number += 1
     s.add(issue)
-    _record(issue, actor, "created", new=status)
+    now = utcnow()
+    _record(issue, actor, now, "created", new=status)
     if blockers:
-        _record(issue, actor, "blocked_by", new=_refs(blockers))
+        _record(issue, actor, now, "blocked_by", new=_refs(blockers))
     s.commit()
     return issue
 
@@ -257,16 +258,17 @@ def update_issue(
             s.refresh(issue)
             raise Conflict(f"{issue.ref} is in progress by {issue.assignee}. Pick another issue.")
 
+    now = values.get("updated_at") or utcnow()
     for field in ("status", "assignee", "title"):
         if field in changes:
-            _record(issue, actor, field, before[field], changes[field])
+            _record(issue, actor, now, field, before[field], changes[field])
     if "description" in changes:
-        _record(issue, actor, "description")
+        _record(issue, actor, now, "description")
     if blockers is not None and set(blockers) != set(old_blockers):
         issue.blocked_by = blockers
         if "updated_at" not in values:
-            issue.updated_at = utcnow()
-        _record(issue, actor, "blocked_by", _refs(old_blockers) or None, _refs(blockers) or None)
+            issue.updated_at = now
+        _record(issue, actor, now, "blocked_by", _refs(old_blockers) or None, _refs(blockers) or None)
     s.commit()
     s.refresh(issue)
     return issue
@@ -308,8 +310,11 @@ def _refs(issues: list[Issue]) -> str:
     return ", ".join(issue.ref for issue in issues)
 
 
-def _record(issue: Issue, actor: Actor, kind: str, old: str | None = None, new: str | None = None) -> None:
-    issue.events.append(Event(actor=actor.name, actor_kind=actor.kind, kind=kind, old=old, new=new))
+def _record(
+    issue: Issue, actor: Actor, at: datetime, kind: str, old: str | None = None, new: str | None = None
+) -> None:
+    """Add a line of history. Events from one change share their time, so a take (moved and assigned) reads as one."""
+    issue.events.append(Event(actor=actor.name, actor_kind=actor.kind, kind=kind, old=old, new=new, created_at=at))
 
 
 def clean_assignee(assignee: str | None) -> str | None:

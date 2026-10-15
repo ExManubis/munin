@@ -125,10 +125,12 @@ def _spread_over_days(s: Session, days: int) -> None:
     rows = [(e.created_at, e.id, Event) for e in s.scalars(select(Event))]
     rows += [(c.created_at, c.id, Comment) for c in s.scalars(select(Comment))]
     rows.sort(key=lambda row: row[:2])
+    moments = sorted({created for created, _, _ in rows})  # events from one change share a moment
     start, end = utcnow() - timedelta(days=days), utcnow() - timedelta(minutes=2)
-    step = (end - start) / max(len(rows) - 1, 1)
-    for n, (_, row_id, model) in enumerate(rows):
-        s.execute(update(model).where(model.id == row_id).values(created_at=start + step * n))
+    step = (end - start) / max(len(moments) - 1, 1)
+    spread = {moment: start + step * n for n, moment in enumerate(moments)}
+    for created, row_id, model in rows:
+        s.execute(update(model).where(model.id == row_id).values(created_at=spread[created]))
     s.expire_all()
     for issue in s.scalars(select(Issue)):
         times = [e.created_at for e in issue.events] + [c.created_at for c in issue.comments]

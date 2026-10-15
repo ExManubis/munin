@@ -271,3 +271,11 @@ def test_search(s, project):
     assert found("mun-2") == ["Retry rate-limited calls"]
     assert found("100%", status="all") == ["100% coverage"]
     assert found("nothing like this") == []
+
+
+def test_events_from_one_change_share_their_time(s, project):
+    issue = svc.create_issue(s, HUMAN, "MUN", "Work")
+    svc.update_issue(s, CLAUDE, issue.ref, status="in_progress")
+    taken = [e for e in svc.get_issue(s, issue.ref).events if e.actor == "claude-code"]
+    assert [e.kind for e in taken] == ["status", "assignee"]
+    assert taken[0].created_at == taken[1].created_at
