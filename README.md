@@ -12,10 +12,12 @@ It needs Python 3.13 and [uv](https://docs.astral.sh/uv/).
 cd server
 uv run munin project add MUN munin --description "What the project is, for agents and you"
 uv run munin agent add claude-code      # prints the agent's token, shown once
-uv run munin serve                      # http://127.0.0.1:7777
+uv run munin serve --open               # http://127.0.0.1:7777
 ```
 
-Open http://127.0.0.1:7777 for the web UI: your inbox, the projects and their issues, and agent tokens (you can also create projects and tokens there). The data lives in `~/.munin/munin.db`.
+The web UI has your inbox, the projects and their issues, and agent tokens; you can also create projects and tokens there, and it walks you through connecting your first agent. It updates live as agents work. The data lives in `~/.munin/munin.db`.
+
+`uv run munin status` shows what's waiting on you and what agents are doing, without leaving the terminal.
 
 The web UI and its API have no login, so munin only listens on 127.0.0.1. `--host 0.0.0.0` makes it reachable from your phone, and from everyone else on that network.
 
@@ -41,7 +43,14 @@ bearer_token_env_var = "MUNIN_TOKEN"
 
 Other clients (Pi, local models through an MCP-capable harness) need the same URL and header in their own config format.
 
-Then tell the agent something like "work on the munin project". The server tells agents the workflow when they connect.
+Then put it to work. In Claude Code, munin adds two slash commands:
+
+```
+/mcp__munin__continue MUN      pick up the project and keep going
+/mcp__munin__work_on MUN-12    do one issue
+```
+
+Any other agent: "You have access to munin, an issue tracker. Continue the MUN project. Keep going until there is nothing left for you to do." The server tells agents the workflow when they connect, and each project's description is their brief, including how work gets delivered (which branch, who merges). Headless works too: `claude -p "/mcp__munin__continue MUN"`.
 
 ### Tests
 

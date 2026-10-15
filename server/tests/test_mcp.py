@@ -71,7 +71,15 @@ def test_tools_and_instructions(server):
 
     instructions, names = anyio.run(inspect)
     assert "top issue from the pile" in instructions
-    assert names == ["list_projects", "list_issues", "get_issue", "create_issue", "update_issue", "add_comment"]
+    assert names == [
+        "list_projects",
+        "list_issues",
+        "get_issue",
+        "create_issue",
+        "update_issue",
+        "add_comment",
+        "wait_for_work",
+    ]
 
 
 def test_take_work_review_and_ask(server):
@@ -189,3 +197,58 @@ def test_the_web_ui_hears_about_changes(server):
         assert next(lines) == "retry: 3000"
         run(url, tokens["claude-code"], ("add_comment", {"issue": "MUN-1", "body": "Hello"}))
         assert [next(lines) for _ in range(3)][1] == "event: changed"
+
+
+def test_wait_for_work(server):
+    url, tokens, settings = server
+    claude, codex = tokens["claude-code"], tokens["codex"]
+
+    # Work is already there: it says so straight away.
+    ((_, text),) = run(url, claude, ("wait_for_work", {"project": "MUN"}))
+    assert text == "Ready to take (top of the pile first):\nMUN-1 [todo] First\nMUN-2 [todo] Second"
+
+    # Nothing to take, but codex is busy: wait, and hear about its work as soon as it's ready for review.
+    with connect(settings.db_path)() as s:
+        svc.update_issue(s, HUMAN, "MUN-2", blocked_by=["MUN-1"])
+    run(url, codex, ("update_issue", {"issue": "MUN-1", "status": "in_progress"}))
+    ((_, text),) = run(url, claude, ("wait_for_work", {"project": "MUN", "seconds": 1}))
+    assert text.startswith("Nothing for you yet. Still going on:\nMUN-1 [in_progress] First (assignee: codex)")
+
+    async def wait_while_codex_finishes():
+        async with anyio.create_task_group() as tasks:
+            results = []
+
+            async def waiting():
+                results.extend(await call(url, claude, ("wait_for_work", {"project": "MUN", "seconds": 20})))
+
+            tasks.start_soon(waiting)
+            await anyio.sleep(1)
+            await call(url, codex, ("update_issue", {"issue": "MUN-1", "status": "in_review"}))
+        return results
+
+    started = time.monotonic()
+    ((_, text),) = anyio.run(wait_while_codex_finishes)
+    assert time.monotonic() - started < 10
+    assert text == "Waiting for review (not your own work):\nMUN-1 [in_review] First (assignee: codex)"
+
+    # When everything's done there's nothing to wait for.
+    with connect(settings.db_path)() as s:
+        for ref in ("MUN-1", "MUN-2"):
+            svc.update_issue(s, HUMAN, ref, status="done")
+    ((_, text),) = run(url, claude, ("wait_for_work", {"project": "MUN"}))
+    assert text == "Nothing in MUN is in progress or waiting for review, so there's nothing to wait for."
+
+
+def test_wait_for_work_hears_answers(server):
+    url, tokens, settings = server
+    run(
+        url,
+        tokens["claude-code"],
+        ("update_issue", {"issue": "MUN-1", "status": "in_progress"}),
+        ("update_issue", {"issue": "MUN-2", "status": "in_progress"}),
+        ("add_comment", {"issue": "MUN-1", "body": "Which database?", "ask_human": True}),
+    )
+    with connect(settings.db_path)() as s:
+        svc.add_comment(s, HUMAN, "MUN-1", "SQLite")
+    ((_, text),) = run(url, tokens["claude-code"], ("wait_for_work", {"project": "MUN"}))
+    assert text == "The human answered you on:\nMUN-1 [in_progress] First (assignee: claude-code)"

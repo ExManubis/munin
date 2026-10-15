@@ -1,4 +1,4 @@
-# munin MVP: an issue tracker for agents
+# munin: an issue tracker for agents
 
 A simple issue tracker that you and any MCP client share. Agents already know how to use issue trackers, so munin behaves like one and stays out of the way.
 
@@ -12,11 +12,14 @@ A simple issue tracker that you and any MCP client share. Agents already know ho
 
 When an agent needs you, it comments with a question flagged for you. The question shows in your inbox until you reply on the issue. Meanwhile the agent works on something else.
 
-Agents can create issues in any project, so you can point an agent at a project and say "continue this project".
+When nothing is available to an agent right now (everything left waits for work in progress or in review), it waits for work instead of stopping, so a chain of dependent issues keeps moving with several agents on it.
+
+Agents can create issues in any project, so you can point an agent at a project and say "continue this project". When they plan, they say what each issue waits for, so agents working in parallel take issues in a sensible order.
 
 ## Rules munin enforces
 
 - An agent can't change the status or assignee of an issue another agent has in progress. That's what stops two agents taking the same issue. The check and the write happen in one database statement, so two agents racing for an issue can't both win.
+- An agent can't start an issue while it waits for issues that aren't done (or cancelled) yet.
 - You can change anything, including moving an issue away from a stuck agent.
 
 Everything else (reviewing someone else's work, unassigning yourself when you give up) is convention, described in the instructions munin sends agents when they connect.
@@ -24,7 +27,8 @@ Everything else (reviewing someone else's work, unassigning yourself when you gi
 ## Data
 
 - **Project**: a key (like `MUN`, which prefixes issue ids like `MUN-12`), a name and a description agents can read as the brief.
-- **Issue**: title, description (Markdown), status (`todo`, `in_progress`, `in_review`, `done`, `cancelled`), assignee, position in the pile, who created it, timestamps.
+- **Issue**: title, description (Markdown), status (`todo`, `in_progress`, `in_review`, `done`, `cancelled`), assignee, position in the pile, the issues it waits for, who created it, timestamps.
+- **Event**: one line of an issue's history: created, moved, assigned, renamed, edited, what it waits for.
 - **Comment**: author, whether it's from an agent or you, body, and whether it's a question for you.
 - **Agent**: a name and a hashed token. Tokens are shown once and can be revoked.
 
@@ -33,13 +37,14 @@ Everything else (reviewing someone else's work, unassigning yourself when you gi
 | Tool | Does |
 |---|---|
 | `list_projects` | Projects and their descriptions |
-| `list_issues` | Issues, active first and then the pile in order. Filter by project, status, assignee (`me`, or `none` for unassigned) |
-| `get_issue` | An issue with its description and comments |
-| `create_issue` | A new issue at the bottom of a project's pile. Points out open issues with similar titles, so parallel agents notice duplicates |
-| `update_issue` | Change title, description, status or assignee. Moving to `in_progress` takes the issue |
+| `list_issues` | Issues, active first and then the pile in order. Filter by project, status, assignee (`me`, or `none` for unassigned) or a search query. Says what each issue is blocked by |
+| `get_issue` | An issue with its description, what it waits for and blocks, its history and comments |
+| `create_issue` | A new issue at the bottom of a project's pile, optionally waiting for others. Points out open issues with similar titles, so parallel agents notice duplicates |
+| `update_issue` | Change title, description, status, assignee or what it waits for. Moving to `in_progress` takes the issue |
 | `add_comment` | Comment on an issue; `ask_human` puts it in your inbox |
+| `wait_for_work` | Waits up to 50 seconds for something the agent can do in a project: an issue to take, someone else's work to review, an answer from you. Says when there's nothing left worth waiting for |
 
-Tools return short plain text to keep agents' context small. They're the same for every client: Claude Code, Codex, Pi, or a local model.
+Tools return short plain text to keep agents' context small. They're the same for every client: Claude Code, Codex, Pi, or a local model. Two prompts, `continue` (a project) and `work_on` (an issue), show up as slash commands in clients that support MCP prompts.
 
 ## Your side (web UI)
 
@@ -48,6 +53,6 @@ Tools return short plain text to keep agents' context small. They're the same fo
 - **Issue**: edit title, description, status and assignee; read and add comments.
 - **Agents**: create tokens (with the command to connect Claude Code) and revoke them.
 
-## Not in the MVP
+## Not yet
 
-Triage, priorities, a board view, runs and step-by-step activity, GitHub integration, permission settings, snooze, notifications, multiple human users, and munin starting agents itself.
+Triage, priorities, runs and step-by-step activity, GitHub integration, permission settings, snooze, multiple human users, and munin starting agents itself.

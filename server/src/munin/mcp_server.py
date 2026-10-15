@@ -1,9 +1,14 @@
 """The MCP server agents connect to. Tools return short plain text, to keep agents' context small."""
 
 import functools
+import inspect
+import time
 from collections.abc import Callable
+from datetime import timedelta
 from typing import Annotated, Literal
 
+import anyio
+import anyio.to_thread
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
@@ -11,7 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from munin import issues as svc
 from munin.issues import Actor, MuninError
-from munin.models import Comment, Issue
+from munin.models import Comment, Issue, utcnow
 
 INSTRUCTIONS = """\
 Munin is an issue tracker shared by you, other agents and a human.
@@ -38,7 +43,14 @@ The human reads munin, not your session. To ask them something, use
 add_comment(issue, question, ask_human=true) and work on something else meanwhile; their reply
 appears in the issue's comments. If you give up on an issue, comment why and set status="todo"
 and assignee="none".
+
+Before you stop: if nothing is available to you right now but other agents are still working on
+the project, call wait_for_work(project). It returns as soon as there's something for you (an
+issue to take, work to review, an answer from the human), and tells you when there's nothing
+left worth waiting for.
 """
+# How long the project can sit still before wait_for_work stops suggesting more waiting.
+QUIET_FOR = timedelta(minutes=30)
 
 Status = Literal["todo", "in_progress", "in_review", "done", "cancelled"]
 IssueRef = Annotated[str, Field(description="Issue id, like MUN-12")]
@@ -49,13 +61,22 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
 
     def tool(fn: Callable) -> Callable:
         """Register fn as a tool, with munin errors shown to the agent as tool errors."""
+        if inspect.iscoroutinefunction(fn):
 
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
-            try:
-                return fn(*args, **kwargs)
-            except MuninError as error:
-                raise ToolError(str(error)) from error
+            @functools.wraps(fn)
+            async def wrapper(*args, **kwargs):
+                try:
+                    return await fn(*args, **kwargs)
+                except MuninError as error:
+                    raise ToolError(str(error)) from error
+        else:
+
+            @functools.wraps(fn)
+            def wrapper(*args, **kwargs):
+                try:
+                    return fn(*args, **kwargs)
+                except MuninError as error:
+                    raise ToolError(str(error)) from error
 
         # Plain text only: a structured copy of each result would double what agents read.
         mcp.add_tool(wrapper, structured_output=False)
@@ -163,6 +184,25 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
             comment = svc.add_comment(s, _actor(ctx), issue, body, ask_human)
             return f"Commented on {comment.issue.ref}" + (" and asked the human." if comment.asks_human else ".")
 
+    @tool
+    async def wait_for_work(
+        ctx: Context,
+        project: Annotated[str, Field(description="Project key, like MUN")],
+        seconds: Annotated[int, Field(ge=1, le=55, description="How long to wait before returning anyway.")] = 50,
+    ) -> str:
+        """Wait until there's something in the project for you: an issue to take, someone else's work to
+        review, or an answer from the human. Returns right away if there already is, or if nothing's left to
+        wait for. Call it again to keep waiting."""
+        agent = _actor(ctx).name
+        deadline = time.monotonic() + seconds
+        while True:
+            answer, still_going = await anyio.to_thread.run_sync(_look_for_work, sessions, agent, project)
+            if answer:
+                return answer
+            if time.monotonic() >= deadline:
+                return f"Nothing for you yet. Still going on:\n{still_going}\nCall wait_for_work again to keep waiting."
+            await anyio.sleep(min(2, max(0.1, deadline - time.monotonic())))
+
     @mcp.prompt(name="continue", description="Point this agent at a munin project and let it carry on.")
     def continue_project(project: Annotated[str, Field(description="Project key, like MUN")]) -> str:
         return (
@@ -183,6 +223,34 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
 def _actor(ctx: Context) -> Actor:
     # Set by the token check in front of /mcp (see app.py).
     return Actor(name=ctx.request_context.request.state.agent, kind="agent")
+
+
+def _look_for_work(sessions: sessionmaker[Session], agent: str, project: str) -> tuple[str | None, str]:
+    """An answer for wait_for_work if there's work or nothing to wait for, else what's still going on."""
+    key = project.strip().upper()
+    with sessions() as s:
+        available = svc.available_work(s, agent, key)
+        if available:
+            return _available_text(available), ""
+        going_on = [i for i in svc.list_issues(s, key) if i.status != "todo" or svc.waiting_on_human(i)]
+        if not going_on:
+            return f"Nothing in {key} is in progress or waiting for review, so there's nothing to wait for.", ""
+        last = svc.last_activity(s, key)
+        if last and utcnow() - last > QUIET_FOR:
+            minutes = int((utcnow() - last).total_seconds() // 60)
+            return f"Nothing has happened in {key} for {minutes} minutes. Stop unless you know more is coming.", ""
+        return None, "\n".join(_issue_line(issue) for issue in going_on)
+
+
+def _available_text(available: svc.Available) -> str:
+    sections = [
+        ("Ready to take (top of the pile first):", available.take),
+        ("Waiting for review (not your own work):", available.review),
+        ("The human answered you on:", available.answered),
+    ]
+    return "\n\n".join(
+        "\n".join([title, *(_issue_line(issue) for issue in found)]) for title, found in sections if found
+    )
 
 
 def _issue_line(issue: Issue) -> str:

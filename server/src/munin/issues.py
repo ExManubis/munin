@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import and_, case, exists, func, or_, select, update
 from sqlalchemy.orm import Session, aliased
@@ -344,6 +345,45 @@ def _check_status(status: str) -> str:
     if status not in STATUSES:
         raise Invalid(f"Unknown status {status!r}. Use one of: {', '.join(STATUSES)}.")
     return status
+
+
+# What an agent can do next
+
+
+@dataclass
+class Available:
+    """Open issues in a project that an agent could pick up right now."""
+
+    take: list[Issue]  # todo, not blocked, unassigned or assigned to the agent
+    review: list[Issue]  # in review and not the agent's own work
+    answered: list[Issue]  # the agent's issues where the human replied after the agent last spoke
+
+    def __bool__(self) -> bool:
+        return bool(self.take or self.review or self.answered)
+
+
+def available_work(s: Session, agent: str, project: str) -> Available:
+    issues = list_issues(s, project)
+    return Available(
+        take=[i for i in issues if i.status == "todo" and i.assignee in (None, agent) and not open_blockers(i)],
+        review=[i for i in issues if i.status == "in_review" and i.assignee != agent],
+        answered=[i for i in issues if i.assignee == agent and i.status == "in_progress" and _answered(i, agent)],
+    )
+
+
+def _answered(issue: Issue, agent: str) -> bool:
+    asked = any(c.asks_human and c.author == agent for c in issue.comments)
+    last_human = max((c.id for c in issue.comments if c.author_kind == "human"), default=0)
+    last_own = max((c.id for c in issue.comments if c.author == agent), default=0)
+    return asked and last_human > last_own
+
+
+def last_activity(s: Session, project: str) -> datetime | None:
+    """When anything last happened to the project's issues: a change or a comment."""
+    project_id = get_project(s, project).id
+    changed = s.scalar(select(func.max(Event.created_at)).join(Issue).where(Issue.project_id == project_id))
+    commented = s.scalar(select(func.max(Comment.created_at)).join(Issue).where(Issue.project_id == project_id))
+    return max((moment for moment in (changed, commented) if moment), default=None)
 
 
 # Activity
