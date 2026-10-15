@@ -200,18 +200,23 @@ export function openNewProject() {
     placeholder: 'What this project is, where the code lives, and how to check work is done.',
   }), 'new-project:description');
 
-  // Suggest a key from the name until the human types one.
+  // Suggest a key from the name until the human types one; the hint shows it in an id.
+  const keyHint = h('span', { class: 'hint' });
+  const showKey = () => (keyHint.textContent = `Prefixes issue ids, like ${key.value || 'GW'}-12.`);
   let keyTouched = Boolean(key.value);
   key.addEventListener('input', () => {
     keyTouched = true;
     key.value = key.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
     drafts.set('new-project:key', key.value);
+    showKey();
   });
   name.addEventListener('input', () => {
     if (keyTouched) return;
     key.value = name.value.toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^[0-9]+/, '').slice(0, 3);
     drafts.set('new-project:key', key.value);
+    showKey();
   });
+  showKey();
 
   const error = h('p', { class: 'form-error', role: 'alert' });
   const create = primary('Create project');
@@ -226,14 +231,14 @@ export function openNewProject() {
   });
 
   const field = (label, hint, input) => h('label', { class: 'field' },
-    h('span', { class: 'label' }, label), input, hint && h('span', { class: 'hint' }, hint));
+    h('span', { class: 'label' }, label), input, typeof hint === 'string' ? h('span', { class: 'hint' }, hint) : hint);
 
   open(sheet({
     head: h('span', { class: 'label' }, 'New project'),
     body: [
       h('div', { class: 'field-row' },
         field('Name', null, name),
-        field('Key', 'Prefixes issue ids, like GW-12.', key)),
+        field('Key', keyHint, key)),
       field('Brief', 'Agents read this to understand the project.', brief),
       error,
     ],

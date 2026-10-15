@@ -23,6 +23,10 @@ export function liveAgents() {
 
 export const isWorking = (agent) => !agent.revoked && agent.working_on.length > 0;
 
+// Working, and heard from in the last 10 minutes.
+export const isBusy = (agent) => isWorking(agent)
+  && Boolean(agent.last_seen_at) && Date.now() - new Date(agent.last_seen_at) < 10 * 60 * 1000;
+
 export function openCount(project) {
   const c = project.counts || {};
   return (c.todo || 0) + (c.in_progress || 0) + (c.in_review || 0);

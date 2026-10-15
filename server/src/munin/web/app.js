@@ -4,7 +4,7 @@
 // while it waits on something the event stream doesn't announce.
 
 import { api, ApiError } from './api.js';
-import { store, liveAgents, openCount, isWorking } from './store.js';
+import { store, liveAgents, openCount, isWorking, isBusy } from './store.js';
 import { h, kbd, MOD, icon, avatar, agentAvatar, updateTimes, toast } from './ui.js';
 import { openNewIssue, openNewProject, openShortcuts, onCreated, dialogOpen, closeDialog } from './dialogs.js';
 import { openPalette } from './palette.js';
@@ -95,7 +95,7 @@ async function refresh({ live = false } = {}) {
 // and projects. Raw last-seen times are left out so every agent call doesn't redraw.
 function sharedState() {
   return [
-    store.agents.map((a) => [a.name, a.revoked, a.working_on.map((w) => w.id + w.status),
+    store.agents.map((a) => [a.name, a.revoked, isBusy(a), a.working_on.map((w) => w.id + w.status),
       !a.last_seen_at ? 'never' : Date.now() - Date.parse(a.last_seen_at) < 30 * 60 * 1000 ? 'live' : 'quiet']),
     store.projects,
   ];

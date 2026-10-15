@@ -6,8 +6,8 @@ import { store, openCount, quietAgent, remember } from '../store.js';
 import { markdown } from '../markdown.js';
 import { openNewIssue, openNewProject } from '../dialogs.js';
 import {
-  h, kbd, MOD, icon, personAvatar, statusIcon, time, parseTime, topbar, bindDraft, drafts, onModEnter, toast, firstLine,
-  changeIssue, agentPrompts,
+  h, kbd, MOD, icon, svg, personAvatar, statusIcon, time, parseTime, topbar, logoMark, bindDraft, drafts, onModEnter, toast,
+  firstLine, changeIssue, agentPrompts,
 } from '../ui.js';
 
 const GROUPS = [
@@ -20,6 +20,7 @@ const GROUPS = [
 
 const expanded = new Set(); // "KEY:done" when a collapsed group is open
 const handoff = new Set(); // keys of projects whose "Put an agent on it" panel is open
+const reopened = new Set(); // finished projects whose list the human asked to see anyway
 let editing = null; // key of the project whose brief is being edited
 let drag = null; // { pile, from } while a Todo row is being dragged
 let cardDrag = null; // { issue, pile, from } while a board card is being dragged
@@ -44,6 +45,7 @@ export const view = {
     groups.todo.sort((a, b) => a.position - b.position || number(a) - number(b));
 
     const open = groups.in_progress.length + groups.in_review.length + groups.todo.length;
+    const finished = !open && groups.done.length > 0 && !reopened.has(project.key);
     const layout = layoutOf(project.key);
     const setLayout = (value) => () => {
       remember(layoutKey(project.key), value);
@@ -54,7 +56,8 @@ export const view = {
       topbar(
         [
           h('span', { class: 'title' }, project.name),
-          h('span', { class: 'mono muted wide-only' }, `${project.key} · ${open} open`),
+          h('span', { class: 'mono muted wide-only' }, project.key),
+          progress(groups, 'wide-only'),
           h('span', { class: 'tabs layout-tabs', role: 'tablist', 'aria-label': 'Layout' },
             h('button', { type: 'button', role: 'tab', 'aria-selected': String(layout === 'list'), onclick: setLayout('list') }, 'List'),
             h('button', { type: 'button', role: 'tab', 'aria-selected': String(layout === 'board'), onclick: setLayout('board') }, 'Board')),
@@ -72,16 +75,18 @@ export const view = {
           }, h('span', { class: 'wide-only' }, 'Put an agent on it'), h('span', { class: 'phone-only' }, 'Agent')),
           h('button', { type: 'button', class: 'btn primary small', onclick: openNewIssue }, 'New issue', h('span', { class: 'key' }, 'C')),
         ]),
-      brief(project, ctx),
+      brief(project, ctx, progress(groups, 'phone-only')),
       showingHandoff
         ? h('section', { class: 'handoff-panel' },
           h('div', { class: 'brief-head' },
             h('span', { class: 'label' }, 'Put an agent on it'),
             h('span', { class: 'hint' }, 'Paste one of these into an agent that has munin connected.')),
           agentPrompts(`/mcp__munin__continue ${project.key}`,
-            `You have access to munin, an issue tracker. Continue the ${project.key} project. Keep going until there is nothing left for you to do.`))
+            `You have access to munin, an issue tracker. Continue the ${project.key} project. Keep going until there is nothing left for you to do.`,
+            [['From a terminal in the repo', `munin run ${project.key} --agents 2`, 'Starts two Claude Code agents on this project. munin serve must be running.']]))
         : null,
-      !issues.length
+      finished ? allDone(project, groups, ctx) : null,
+      finished ? null : !issues.length
         ? h('div', { class: 'empty-state small' },
           h('h2', {}, 'No issues yet'),
           h('p', {}, 'Create the first one and it goes on the pile, where agents pick it up.'),
@@ -107,9 +112,68 @@ export const view = {
 
 const number = (issue) => Number(issue.id.split('-').pop());
 
+// Progress: a row of pixel segments (done, in review, in progress, todo) and "6 of 10 done".
+// Cancelled issues don't count.
+const SHADES = [['done', '#EDEDED', 'done'], ['in_review', '#7A7A7A', 'in review'], ['in_progress', '#4E4E4E', 'in progress'], ['todo', '#2A2A2A', 'todo']];
+const CELLS = 20;
+
+function progress(groups, cls) {
+  const counts = SHADES.map(([status]) => groups[status].length);
+  const total = counts.reduce((a, b) => a + b, 0);
+  if (!total) return null;
+  // Largest remainder, so the cells always add up to CELLS.
+  const exact = counts.map((n) => (n * CELLS) / total);
+  const cells = exact.map(Math.floor);
+  const order = exact.map((x, i) => [x - cells[i], i]).sort((a, b) => b[0] - a[0]);
+  const short = CELLS - cells.reduce((a, b) => a + b, 0);
+  for (let k = 0; k < short; k++) cells[order[k][1]] += 1;
+  const shapes = [];
+  let x = 0;
+  SHADES.forEach(([, fill], i) => {
+    for (let n = 0; n < cells[i]; n++, x += 5) shapes.push(['rect', { x, y: 0, width: 4, height: 8, fill }]);
+  });
+  const bar = svg(CELLS * 5 - 1, `0 0 ${CELLS * 5 - 1} 8`, shapes, { cls: 'progress-bar' });
+  bar.setAttribute('height', 8);
+  const summary = SHADES.map(([, , label], i) => `${counts[i]} ${label}`).join(' · ');
+  return h('span', { class: ['progress', cls], title: summary },
+    bar, h('span', { class: 'mono muted' }, `${counts[0]} of ${total} done`));
+}
+
+// Nothing open and something done: a calm finished state instead of an empty list.
+function allDone(project, groups, ctx) {
+  const cancelled = groups.cancelled.length;
+  return h('div', { class: 'empty-state finished' },
+    h('div', { class: 'viewfinder' }, h('span', { class: 'mark-frame' }, logoMark())),
+    h('h2', {}, `Nothing left in ${project.key}`),
+    h('p', { class: 'mono' }, `${groups.done.length} done${cancelled ? ` · ${cancelled} cancelled` : ''}`),
+    h('p', {}, 'To plan the next round, add issues or put an agent on it.'),
+    h('div', { class: 'finished-actions' },
+      h('button', {
+        type: 'button',
+        class: 'btn small',
+        onclick: () => {
+          handoff.add(project.key);
+          ctx.rerender();
+          document.querySelector('.handoff-panel')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        },
+      }, 'Put an agent on it'),
+      h('button', {
+        type: 'button',
+        class: 'link',
+        onclick: () => {
+          reopened.add(project.key);
+          expanded.add(`${project.key}:done`);
+          ctx.rerender();
+        },
+      }, 'Show what was done')));
+}
+
 // The brief --------------------------------------------------------------------
 
-function brief(project, ctx) {
+const briefKey = (key) => `munin:brief:${key}`;
+const BRIEF_LINES = 5;
+
+function brief(project, ctx, phoneProgress) {
   const key = project.key;
   if (editing === key) {
     const name = bindDraft(h('input', { class: 'input', 'aria-label': 'Project name' }), `project-name:${key}`, project.name);
@@ -153,16 +217,37 @@ function brief(project, ctx) {
         h('button', { type: 'button', class: 'link', onclick: cancel }, 'Cancel'),
         h('span', { class: 'hint' }, 'Markdown works: **bold**, `code`, lists and links.')));
   }
+  // Long briefs are clamped to about five lines; the choice is remembered per project.
+  const expanded = remember(briefKey(key)) === 'open';
+  const text = project.description
+    ? markdown(project.description, 'brief-text')
+    : h('p', { class: 'muted brief-text' }, 'No brief yet. Tell agents what this project is, where its code lives and how to check their work.');
+  const body = h('div', { class: ['brief-body', !expanded && 'clamped'] }, text);
+  const more = h('button', {
+    type: 'button',
+    class: 'link brief-more',
+    hidden: true,
+    onclick: () => {
+      remember(briefKey(key), expanded ? 'closed' : 'open');
+      ctx.rerender();
+    },
+  }, expanded ? 'Show less' : 'Show all');
+  // Measured before the next paint, so the button doesn't flicker on redraws.
+  requestAnimationFrame(() => {
+    const overflows = body.scrollHeight > BRIEF_LINES * 22 + 4;
+    more.hidden = !overflows;
+    body.classList.toggle('overflows', overflows);
+  });
   return h('section', { class: 'brief' },
+    phoneProgress,
     h('div', { class: 'brief-head' },
       h('span', { class: 'label' }, 'Brief'),
-      h('span', { class: 'hint' }, 'What agents read about this project'),
+      h('span', { class: 'hint wide-only' }, 'What agents read about this project'),
       h('span', { class: 'spacer' }),
       h('button', { type: 'button', class: 'link edit', onclick: () => { editing = key; ctx.rerender(); document.querySelector('[data-keep^="project-brief:"]')?.focus(); } }, 'Edit'),
       kbd('E')),
-    project.description
-      ? markdown(project.description, 'brief-text')
-      : h('p', { class: 'muted brief-text' }, 'No brief yet. Tell agents what this project is, where its code lives and how to check their work.'));
+    body,
+    more);
 }
 
 // Groups and rows -----------------------------------------------------------------

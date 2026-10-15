@@ -148,10 +148,10 @@ function connect(agents, me, ctx) {
     created
       ? h('div', { class: 'token', role: 'status' },
         h('div', { class: 'token-head' },
-          h('span', { class: 'label' }, `Token for ${created.name} · shown once`),
+          h('span', { class: 'label' }, `Token for ${created.name}`),
           copyButton(() => created.token)),
         h('code', { class: 'token-value' }, created.token),
-        h('p', { class: 'hint' }, 'munin only keeps a hash. If you lose it, create a new token for the same name.'))
+        h('p', { class: 'hint' }, 'Shown once: munin only keeps a hash. If you lose it, create a new token for the same name.'))
       : null,
     h('div', { class: 'tabs', role: 'tablist' },
       h('button', { type: 'button', role: 'tab', 'aria-selected': String(tab === 'claude'), onclick: setTab('claude') }, 'Claude Code'),

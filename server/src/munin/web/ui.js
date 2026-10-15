@@ -2,7 +2,7 @@
 // Everything is built with createElement and text nodes; nothing here parses HTML.
 
 import { api } from './api.js';
-import { store, kindOf, isWorking } from './store.js';
+import { store, kindOf, isWorking, isBusy } from './store.js';
 
 export const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl ';
 
@@ -99,19 +99,49 @@ export function icon(name, { color = C.muted, size = 12 } = {}) {
 export function avatar(name, { kind, idle = false, size = 18 } = {}) {
   if (!name) return svg(size, '0 0 18 18', [frame18(C.muted, { 'stroke-dasharray': '1 1' })], { cls: 'avatar', label: 'Unassigned' });
   if ((kind || kindOf(name)) === 'agent') {
+    const eye = (x) => ['rect', { x, y: 7, width: 2, height: 4, fill: C.text, class: 'eye' }];
     const shapes = idle
       ? [frame18(C.line), R(5, 8, 2, 2, C.muted), R(11, 8, 2, 2, C.muted)]
-      : [frame18(C.muted), R(5, 7, 2, 4, C.text), R(11, 7, 2, 4, C.text)];
+      : [frame18(C.muted), eye(5), eye(11)];
     return svg(size, '0 0 18 18', shapes, { cls: 'avatar' });
   }
   const style = size === 18 ? null : `width:${size}px;height:${size}px;font-size:${size < 16 ? 9 : 10}px`;
   return h('span', { class: 'avatar person', 'aria-hidden': 'true', style }, (name.trim()[0] || '?').toUpperCase());
 }
 
-// An avatar for an agent name, dimmed while that agent has nothing in progress.
+// An avatar for an agent name, dimmed while that agent has nothing in progress,
+// and blinking now and then while it's busy.
 export function agentAvatar(name, opts) {
   const agent = store.agents.find((a) => a.name === name);
-  return avatar(name, { kind: 'agent', idle: agent ? !isWorking(agent) : false, ...opts });
+  const el = avatar(name, { kind: 'agent', idle: agent ? !isWorking(agent) : false, ...opts });
+  if (agent && isBusy(agent)) blink(el, name);
+  return el;
+}
+
+const calm = matchMedia('(prefers-reduced-motion: reduce)');
+
+function nameHash(name) {
+  let n = 2166136261;
+  for (const ch of name) n = Math.imul(n ^ ch.codePointAt(0), 16777619) >>> 0;
+  return n;
+}
+
+// A 120 ms blink every 4 to 7 seconds. Period and phase come from the name, and the phase is
+// pinned to the page's clock, so one agent's squares blink together and survive redraws.
+function blink(el, name) {
+  if (calm.matches || !el.animate) return;
+  const hash = nameHash(name);
+  const period = 4000 + (hash % 3001);
+  const shut = 120 / period;
+  for (const eye of el.querySelectorAll('.eye')) {
+    const animation = eye.animate([
+      { transform: 'scaleY(1)', offset: 0 },
+      { transform: 'scaleY(1)', offset: 1 - shut },
+      { transform: 'scaleY(0.25)', offset: 1 - shut / 2 },
+      { transform: 'scaleY(1)', offset: 1 },
+    ], { duration: period, iterations: Infinity });
+    animation.startTime = -((hash >>> 12) % period);
+  }
 }
 
 // Agents, people and nobody, each with the right square.
@@ -257,17 +287,19 @@ export function toggle(on, label, onchange) {
     h('span', { class: 'toggle-knob' }));
 }
 
-// Copyable ways to point an agent at a project or an issue.
-export function agentPrompts(slash, prompt) {
+// Copyable ways to point an agent at a project or an issue: [label, text, hint?] rows.
+export function agentPrompts(slash, prompt, extra = []) {
   const rows = [
     ['Claude Code', slash],
     ['Any agent', prompt],
     ['Headless', `claude -p "${prompt}"`],
+    ...extra,
   ];
   return h('div', { class: 'handoff' },
-    rows.map(([label, text]) => h('div', { class: 'handoff-row' },
+    rows.map(([label, text, hint]) => h('div', { class: 'handoff-row' },
       h('div', { class: 'handoff-head' }, h('span', { class: 'label' }, label), copyButton(() => text)),
-      h('code', {}, text))));
+      h('code', {}, text),
+      hint ? h('p', { class: 'hint' }, hint) : null)));
 }
 
 export async function copyText(text) {
