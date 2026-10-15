@@ -241,6 +241,7 @@ def update_issue(
         if waiting_for:
             raise Conflict(f"{issue.ref} is blocked by {_refs(waiting_for)}, which isn't done yet. Take another issue.")
 
+    now = utcnow()
     before = {field: getattr(issue, field) for field in ("title", "description", "status", "assignee")}
     old_blockers = list(issue.blocked_by)
     changes = {field: new for field, new in values.items() if field in before and new != before[field]}
@@ -252,16 +253,15 @@ def update_issue(
                 or_(Issue.status != "in_progress", Issue.assignee.is_(None), Issue.assignee == actor.name)
             )
         if "status" in changes:
-            values["status_changed_at"] = utcnow()
+            values["status_changed_at"] = now
         if changes or blockers is not None:  # reordering the pile isn't an update to the issue
-            values["updated_at"] = utcnow()
+            values["updated_at"] = now
         result = s.execute(statement.values(**values).execution_options(synchronize_session=False))
         if result.rowcount == 0:
             s.rollback()
             s.refresh(issue)
             raise Conflict(f"{issue.ref} is in progress by {issue.assignee}. Pick another issue.")
 
-    now = values.get("updated_at") or utcnow()
     for field in ("status", "assignee", "title"):
         if field in changes:
             _record(issue, actor, now, field, before[field], changes[field])

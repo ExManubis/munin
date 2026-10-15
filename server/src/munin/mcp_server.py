@@ -236,8 +236,8 @@ def _actor(ctx: Context) -> Actor:
 
 def _look_for_work(sessions: sessionmaker[Session], agent: str, project: str) -> tuple[str | None, str]:
     """An answer for wait_for_work if there's work or nothing worth waiting for, else what's still going on."""
-    key = project.strip().upper()
     with sessions() as s:
+        key = svc.get_project(s, project).key
         available = svc.available_work(s, agent, key)
         if available:
             return _available_text(available), ""
