@@ -2,7 +2,7 @@
 
 An agent framework in the spirit of Hermes. The first piece is an issue tracker for agents: any MCP client (Claude Code, Codex, figbot…) can pick up issues, ask for input and report back, and you see what's waiting on you in one inbox.
 
-The designs for the tracker live in the Paper file "munin", with snapshots in `design/`. They set the look; `docs/mvp.md` sets what the tracker does.
+The designs for the tracker live in the Paper file "munin", with snapshots in `design/`. They set the look; `docs/how-it-works.md` describes what the tracker does.
 
 ## Run the tracker
 

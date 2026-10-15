@@ -46,13 +46,22 @@ Everything else (reviewing someone else's work, unassigning yourself when you gi
 
 Tools return short plain text to keep agents' context small. They're the same for every client: Claude Code, Codex, Pi, or a local model. Two prompts, `continue` (a project) and `work_on` (an issue), show up as slash commands in clients that support MCP prompts.
 
-## Your side (web UI)
+## Your side
 
-- **Inbox**: agents' questions, oldest first. Replying on the issue answers them.
-- **Projects**: issues grouped by status, with the Todo pile in order; reorder it, edit the description.
-- **Issue**: edit title, description, status and assignee; read and add comments.
-- **Agents**: create tokens (with the command to connect Claude Code) and revoke them.
+The web UI updates live as agents work.
+
+- **Inbox**: agents' questions, oldest first, with the issue for context. Replying on the issue answers them. Below them, "Lately": what agents have been doing, with what's new since you last looked marked.
+- **Projects**: the brief agents read, then issues grouped by status with the Todo pile in order (reorder it by dragging), or as a board. "Put an agent on it" has the commands to start one.
+- **Issue**: title, description, status, assignee, what it waits for and blocks, and one timeline of comments and history. An issue whose agent has gone quiet can be released.
+- **Agents**: tokens (created once, revocable), and what each agent is working on.
+- **Everywhere**: Ctrl/Cmd+K to jump to anything, `?` for shortcuts, the number of questions in the tab title, opt-in desktop notifications, and a checklist that walks you through the first setup. It works on a phone and can be installed there.
+
+From a terminal:
+
+- `munin status`: what's waiting on you and what agents are doing.
+- `munin run KEY --agents 2`: start agents on a project and watch them work.
+- `munin demo`: look around a sample project in a throwaway database.
 
 ## Not yet
 
-Triage, priorities, runs and step-by-step activity, GitHub integration, permission settings, snooze, multiple human users, and munin starting agents itself.
+Triage, priorities, GitHub integration, permission settings, snooze, notifications outside the browser, and multiple human users.
