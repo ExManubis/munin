@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>munin — motion &amp; type</title>
+<style>
+  @font-face { font-family: "DM"; src: local("Departure Mono"), local("DepartureMono-Regular"); }
+  @font-face { font-family: "Munin Block"; src: url("font/MuninBlock-Regular.woff2") format("woff2"), url("font/MuninBlock-Regular.otf") format("opentype"); }
+  :root { --bg: #0a0a0a; --fg: #ededed; --mute: #8a8a8a; --line: #262626; --dot: #ffffff12; --paper: #f2f2f2; --ink: #0a0a0a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: var(--fg); font: 14px/1.6 "DM", ui-monospace, Menlo, monospace;
+    background: radial-gradient(circle, var(--dot) 1px, transparent 1.4px) 0 0 / 14px 14px, var(--bg); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  svg { display: block; width: 100%; height: auto; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+  .label { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--mute); }
+  .mb { font-family: "Munin Block", "DM", monospace; -webkit-font-smoothing: none; font-smooth: never; }
+  .vf { --c: #5a5a5a; --s: 14px;
+    background:
+      linear-gradient(var(--c),var(--c)) top left / var(--s) 1px no-repeat, linear-gradient(var(--c),var(--c)) top left / 1px var(--s) no-repeat,
+      linear-gradient(var(--c),var(--c)) top right / var(--s) 1px no-repeat, linear-gradient(var(--c),var(--c)) top right / 1px var(--s) no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom left / var(--s) 1px no-repeat, linear-gradient(var(--c),var(--c)) bottom left / 1px var(--s) no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom right / var(--s) 1px no-repeat, linear-gradient(var(--c),var(--c)) bottom right / 1px var(--s) no-repeat; }
+
+  .top { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
+  .brand { display: flex; align-items: center; gap: 14px; font-size: 16px; }
+  .brand .vf { --s: 8px; --c: #9a9a9a; width: 36px; height: 36px; display: grid; place-items: center; }
+  .brand .vf svg { width: 16px; }
+  nav { display: flex; gap: 28px; }
+
+  /* hero sequence */
+  .hero { padding: 40px 0 10px; }
+  .hero .vf { --s: 22px; --c: #6a6a6a; padding: 90px 80px 80px; }
+  .seq { position: relative; aspect-ratio: 61 / 13; width: 854px; max-width: 100%; margin: 0 auto; }   /* 14 px per unit */
+  .seq .layer { position: absolute; inset: 0; opacity: 0; transition: opacity .45s ease; }
+  .seq .layer.on { opacity: 1; }
+  .seq.reset .layer, .seq.reset .layer * { transition: none !important; }
+  .seq .scan .s { transform-box: fill-box; transform-origin: left center; transform: scaleX(0); transition: transform .3s cubic-bezier(.2,.8,.2,1) var(--d); }
+  .seq .go .scan .s { transform: scaleX(1); }
+  .seq .dith .lv { opacity: 0; transition: opacity .22s steps(2); }
+  .seq .go .dith .lv0 { opacity: 1; transition-delay: 0s; } .seq .go .dith .lv1 { opacity: 1; transition-delay: .2s; }
+  .seq .go .dith .lv2 { opacity: 1; transition-delay: .4s; } .seq .go .dith .lv3 { opacity: 1; transition-delay: .6s; }
+  .seq .led .o { opacity: 0; transition: opacity .18s var(--d); }
+  .seq .go .led .o { opacity: 1; }
+  .seq .led { filter: drop-shadow(0 0 .35px #fff9); }
+  .phases { display: flex; gap: 12px; justify-content: center; margin-top: 54px; }
+  .ph { border: 1px dashed #333; padding: 8px 16px; font-size: 11px; letter-spacing: .16em; color: #666; min-width: 140px; text-align: center; transition: all .3s; }
+  .ph.on { border-color: #bbb; color: #fff; }
+  .strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 18px; }
+  .strip div { border: 1px solid var(--line); padding: 26px 22px 30px; position: relative; }
+  .strip span { position: absolute; left: 12px; bottom: 6px; font-size: 9px; letter-spacing: .16em; color: var(--mute); }
+
+  section { padding: 90px 0 20px; }
+  .sec-h { display: flex; align-items: baseline; gap: 18px; margin-bottom: 26px; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+  .sec-h h2 { font-weight: normal; font-size: 13px; letter-spacing: .16em; margin: 0; text-transform: uppercase; }
+  .sec-h .label { margin-left: auto; }
+  .prompt { color: var(--mute); }
+
+  /* treatment columns */
+  .tcs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .tc { border: 1px solid var(--line); background: #0c0c0c; display: flex; flex-direction: column; }
+  .tc header { padding: 11px 14px; border-bottom: 1px solid var(--line); font-size: 11px; letter-spacing: .16em; display: flex; gap: 12px; }
+  .tc .n { color: var(--mute); }
+  .tc .big { padding: 40px 70px 26px; }
+  .tc .wm { padding: 10px 50px 40px; border-bottom: 1px solid var(--line); }
+  .tc .lt { background: var(--paper); padding: 30px 28px; }
+  .tc .fav { display: flex; gap: 22px; align-items: flex-end; justify-content: center; padding: 22px; border-top: 1px solid var(--line); }
+  .tc p { margin: 0; padding: 12px 14px 14px; color: #a2a2a2; font-size: 12px; border-top: 1px solid var(--line); flex: 1; }
+
+  /* motion loops */
+  .loops { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .loop { border: 1px solid var(--line); background: #0c0c0c; }
+  .loop .st { height: 230px; display: grid; place-items: center; }
+  .loop .st > div { width: 144px; }   /* 18 units × 8 px: dither sub-pixels land on whole pixels */
+  .loop footer { border-top: 1px solid var(--line); padding: 12px 14px; display: flex; justify-content: space-between; font-size: 11px; letter-spacing: .16em; }
+  .loop footer span:last-child { color: var(--mute); }
+  .recall .o { animation: recall 2.6s linear infinite both; animation-delay: var(--d); }
+  @keyframes recall { 0% { opacity: .28; } 8% { opacity: 1; } 30%, 100% { opacity: .28; } }
+  .write .s { transform-box: fill-box; transform-origin: left center; animation: write 3.2s cubic-bezier(.2,.8,.2,1) infinite both; animation-delay: var(--d); }
+  @keyframes write { 0% { transform: scaleX(0); opacity: 1; } 18% { transform: scaleX(1); } 70% { opacity: 1; } 82%, 100% { transform: scaleX(1); opacity: 0; } }
+  .fade .lv { animation: fade 3.6s steps(1) infinite both; }
+  .fade .lv0 { animation: none; } .fade .lv1 { animation-delay: .4s; } .fade .lv2 { animation-delay: .2s; } .fade .lv3 { animation-delay: 0s; }
+  @keyframes fade { 0%, 35% { opacity: 1; } 40%, 70% { opacity: 0; } 75%, 100% { opacity: 1; } }
+
+  /* in use */
+  .uses { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; }
+  .panel { border: 1px solid var(--line); background: #0c0c0c; position: relative; overflow: hidden; }
+  .panel > .label { position: absolute; top: 12px; left: 14px; font-size: 10px; z-index: 2; }
+  .s6 { grid-column: span 6; } .s12 { grid-column: span 12; } .s5 { grid-column: span 5; } .s7 { grid-column: span 7; }
+  .term { margin: 44px 20px 20px; border: 1px solid #2c2c2c; border-radius: 10px; background: #060606; overflow: hidden; position: relative; }
+  .term::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(#0000 0 2px, #0000004d 2px 3px); }
+  .term .bar { display: flex; gap: 7px; padding: 11px 13px; border-bottom: 1px solid #1d1d1d; align-items: center; }
+  .term .bar i { width: 11px; height: 11px; border-radius: 50%; background: #2e2e2e; display: block; }
+  .term .bar span { margin: 0 auto; font-size: 11px; color: #666; padding-right: 50px; }
+  .term pre { margin: 0; padding: 18px 22px 22px; font: 13px/1.25 "DM", ui-monospace, monospace; color: #dcdcdc; }
+  .term .art { display: block; line-height: 1; font-size: 11px; margin: 12px 0 14px; color: #f0f0f0; text-shadow: 0 0 6px #fff5; }
+  .term .c { color: #7a7a7a; } .term .cur { background: #dcdcdc; }
+  .app { margin: 44px 20px 20px; border: 1px solid #2c2c2c; border-radius: 10px; background: #0a0a0a; overflow: hidden; }
+  .app .bar { height: 34px; border-bottom: 1px solid #1d1d1d; display: flex; gap: 7px; align-items: center; padding: 0 13px; }
+  .app .bar i { width: 11px; height: 11px; border-radius: 50%; background: #2e2e2e; display: block; }
+  .app .body { height: 300px; display: grid; place-items: center; align-content: center; gap: 26px;
+    background: radial-gradient(circle, #ffffff10 1px, transparent 1.3px) 0 0/12px 12px; }
+  .app .body .m { width: 108px; }
+  .app .body .t { font-size: 16px; color: #cfcfcf; }
+  .bar8 { display: flex; gap: 3px; }
+  .bar8 b { width: 8px; height: 8px; background: #2a2a2a; animation: fill 2.4s steps(1) infinite; }
+  @keyframes fill { 0%, 100% { background: #2a2a2a; } 40%, 90% { background: #e8e8e8; } }
+  .site { margin: 44px 20px 20px; border: 1px solid #222; background: var(--bg); }
+  .site nav { display: flex; justify-content: space-between; align-items: center; padding: 16px 22px; border-bottom: 1px solid #1a1a1a; }
+  .site nav .lock { width: 118px; }
+  .site nav .links { display: flex; gap: 22px; font-size: 16px; color: #9a9a9a; }
+  .site .hs { display: grid; grid-template-columns: 1.1fr 1fr; align-items: center; padding: 36px 30px 40px; gap: 20px; }
+  .site h3 { font-weight: normal; font-size: 32px; line-height: 1.1; margin: 0 0 16px; }
+  .site p { color: #9a9a9a; font-size: 13px; margin: 0 0 22px; max-width: 360px; }
+  .site .btn { display: inline-block; border: 1px dashed #555; padding: 8px 16px; font-size: 16px; }
+  .og { margin: 64px 20px 20px; aspect-ratio: 1200 / 630; border: 1px solid #222; display: grid; place-items: center; align-content: center; gap: 22px;
+    background: radial-gradient(circle, #ffffff12 1px, transparent 1.4px) 0 0/12px 12px, #0a0a0a; }
+  .og .lk { width: 62%; }
+  .og .t { font-size: 16px; color: #bdbdbd; }
+
+  /* font */
+  .fhead { display: grid; grid-template-columns: 1.2fr 1fr; gap: 30px; align-items: end; margin-bottom: 36px; }
+  .fhead .name { font-size: 96px; line-height: 1; }
+  .facts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 24px; font-size: 12px; color: #a9a9a9; }
+  .facts b { display: block; font-weight: normal; color: var(--mute); font-size: 10px; letter-spacing: .16em; }
+  .dl { display: flex; gap: 12px; margin-top: 22px; }
+  .dl a { border: 1px dashed #444; padding: 8px 14px; font-size: 11px; letter-spacing: .16em; }
+  .dl a:hover { border-color: #aaa; }
+  .metrics { position: relative; height: 176px; margin: 10px 0 40px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); overflow: hidden; isolation: isolate; }
+  .metrics .word { position: absolute; left: 150px; top: 24px; font-size: 128px; line-height: 128px; }
+  .metrics .bl { display: inline-block; width: 0; height: 0; vertical-align: baseline; position: relative; }   /* sits exactly on the baseline */
+  .metrics .bl i { position: absolute; left: -150px; width: 1152px; border-top: 1px dashed #3a3a3a; z-index: -1; }
+  .metrics .bl span { position: absolute; left: 0; top: -9px; background: var(--bg); padding-right: 10px; font: 10px/1.6 "DM", monospace; letter-spacing: .14em; color: var(--mute); }
+  .water div { display: flex; align-items: baseline; gap: 24px; border-bottom: 1px solid var(--line); padding: 14px 0; overflow: hidden; white-space: nowrap; }
+  .water span:first-child { width: 60px; flex: none; font: 10px/1 "DM", monospace; color: var(--mute); letter-spacing: .14em; }
+  .glyphs { display: grid; grid-template-columns: repeat(12, 1fr); border-left: 1px solid var(--line); border-top: 1px solid var(--line); margin-top: 36px; }
+  .gc { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); height: 92px; position: relative; display: grid; place-items: center; }
+  .gc .g { font-family: "Munin Block"; font-size: 48px; line-height: 1; }
+  .gc .u { position: absolute; bottom: 4px; left: 6px; font-size: 8px; color: #555; letter-spacing: .1em; }
+
+  .notes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  .notes div { border-top: 1px solid var(--line); padding-top: 14px; color: #a9a9a9; font-size: 13px; }
+  .notes b { display: block; color: var(--fg); font-weight: normal; letter-spacing: .14em; font-size: 11px; margin-bottom: 8px; }
+  footer.site-f { display: flex; justify-content: space-between; padding: 80px 0 40px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .recall .o, .write .s, .fade .lv, .bar8 b { animation: none !important; }
+    .seq .layer { transition: none; }
+  }
+  @media (max-width: 980px) { .tcs, .loops, .strip, .notes, .fhead, .site .hs { grid-template-columns: 1fr; } .uses > * { grid-column: span 12; } nav.main { display: none; } .glyphs { grid-template-columns: repeat(6, 1fr); } .hero .vf { padding: 50px 24px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="brand mb" href="#"><span class="vf">{{PIX}}</span>munin</a>
+    <nav class="label main"><a href="#treatments">Treatments</a><a href="#motion">Motion</a><a href="#use">In use</a><a href="#font">Font</a></nav>
+  </div>
+
+  <div class="hero">
+    <div class="vf">
+      <div class="seq" id="seq">
+        <div class="layer" data-k="scan">{{L_SCAN}}</div>
+        <div class="layer" data-k="dith">{{L_DITH}}</div>
+        <div class="layer" data-k="led">{{L_LED}}</div>
+      </div>
+      <div class="phases"><span class="ph" data-k="scan">01 SCAN IN</span><span class="ph" data-k="dith">02 DITHER</span><span class="ph" data-k="led">03 LIGHT UP</span></div>
+    </div>
+    <div class="strip">
+      <div>{{S_SCAN}}<span>08 SCANLINE</span></div>
+      <div>{{S_DITH}}<span>10 DITHER</span></div>
+      <div>{{S_LED}}<span>07 LED</span></div>
+    </div>
+  </div>
+
+  <section id="treatments">
+    <div class="sec-h"><h2>Treatments</h2><span class="prompt">$ ls brand/logo/treatments</span><span class="label">Mark · wordmark · lockup</span></div>
+    <div class="tcs">{{COLS}}</div>
+  </section>
+
+  <section id="motion">
+    <div class="sec-h"><h2>Motion</h2><span class="prompt">$ munin --watch</span><span class="label">Loops for UI states</span></div>
+    <div class="loops">
+      <div class="loop"><div class="st recall"><div>{{M_LED}}</div></div><footer><span>RECALL</span><span>LOADING · SEARCH</span></footer></div>
+      <div class="loop"><div class="st write"><div>{{M_SCAN}}</div></div><footer><span>WRITE</span><span>SAVING · SYNC</span></footer></div>
+      <div class="loop"><div class="st fade"><div>{{M_DITH}}</div></div><footer><span>FADE</span><span>IDLE · OFFLINE</span></footer></div>
+    </div>
+  </section>
+
+  <section id="use">
+    <div class="sec-h"><h2>In use</h2><span class="prompt">$ munin --mockups</span><span class="label">Placeholder copy</span></div>
+    <div class="uses">
+      <div class="panel s6">
+        <span class="label">Terminal · half-block splash</span>
+        <div class="term">
+          <div class="bar"><i></i><i></i><i></i><span>~/code — zsh</span></div>
+<pre><span class="c">$</span> munin
+<span class="art">{{TERM}}</span>munin 0.1.0  <span class="c">·  ready</span>
+<span class="c">›</span> <span class="cur"> </span></pre>
+        </div>
+      </div>
+      <div class="panel s6">
+        <span class="label">App · loading</span>
+        <div class="app">
+          <div class="bar"><i></i><i></i><i></i></div>
+          <div class="body recall">
+            <div class="m">{{M_LED}}</div>
+            <div class="t mb">Remembering…</div>
+            <div class="bar8"><b></b><b style="animation-delay:.15s"></b><b style="animation-delay:.3s"></b><b style="animation-delay:.45s"></b><b style="animation-delay:.6s"></b><b style="animation-delay:.75s"></b><b style="animation-delay:.9s"></b><b style="animation-delay:1.05s"></b></div>
+          </div>
+        </div>
+      </div>
+      <div class="panel s7">
+        <span class="label">Website · header + hero</span>
+        <div class="site">
+          <nav><div class="lock">{{LOCK_FLAT}}</div><div class="links mb"><span>Docs</span><span>Blog</span><span>GitHub</span></div></nav>
+          <div class="hs">
+            <div><h3 class="mb">Huginn thinks.<br>Munin remembers.</h3><p>Placeholder copy. Headlines and UI labels are set in Munin Block at 16 px multiples, and body text in Departure Mono.</p><span class="btn mb">Get started →</span></div>
+            <div>{{MARK_DITH}}</div>
+          </div>
+        </div>
+      </div>
+      <div class="panel s5">
+        <span class="label">Social card · 1200×630</span>
+        <div class="og"><div class="lk">{{LOCK_DITH}}</div><div class="t mb">Huginn thinks. Munin remembers.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="font">
+    <div class="sec-h"><h2>Munin Block</h2><span class="prompt">$ ls brand/font</span><span class="label">The wordmark, extended into a typeface</span></div>
+    <div class="fhead">
+      <div class="name mb">Munin Block</div>
+      <div>
+        <div class="facts">
+          <div><b>GLYPHS</b>{{NGLYPHS}}: a–z, A–Z, 0–9, punctuation, arrows</div>
+          <div><b>GRID</b>1 px = 64 units · em 16 px (UPM 1024)</div>
+          <div><b>STROKE</b>2 px, the same as the raven</div>
+          <div><b>METRICS</b>x-height 8 · cap 11 · descender 3</div>
+        </div>
+        <div class="dl"><a href="font/MuninBlock-Regular.otf">↓ OTF</a><a href="font/MuninBlock-Regular.ttf">↓ TTF</a><a href="font/MuninBlock-Regular.woff2">↓ WOFF2</a></div>
+      </div>
+    </div>
+    <div class="metrics">
+      <div class="word mb"><span class="bl"><i style="top:-88px"><span>CAP 11</span></i><i style="top:-64px"><span>X-HEIGHT 8</span></i><i style="top:0"><span>BASELINE</span></i><i style="top:24px"><span>DESC 3</span></i></span>Munin gjqy</div>
+    </div>
+    <div class="water mb">
+      <div><span>16 PX</span><span style="font-size:16px">Huginn thinks. Munin remembers. The quick brown fox jumps over the lazy dog 0123456789</span></div>
+      <div><span>32 PX</span><span style="font-size:32px">Huginn thinks. Munin remembers. The quick brown fox</span></div>
+      <div><span>48 PX</span><span style="font-size:48px">Odin's ravens fly at dawn → 2026</span></div>
+      <div><span>64 PX</span><span style="font-size:64px">MEMORY &amp; THOUGHT</span></div>
+    </div>
+    <div class="glyphs">{{GLYPHS}}</div>
+  </section>
+
+  <section>
+    <div class="sec-h"><h2>Notes</h2><span class="label">For discussion</span></div>
+    <div class="notes">
+      <div><b>ONE BITMAP</b>Scanline, Dither and LED all render from the same 16 × 16 raven and Block lettering, so they line up pixel for pixel and can morph into each other.</div>
+      <div><b>MOTION</b>Suggested states: Recall for loading or search, Write for saving, and Fade for idle or offline. The light-up sequence at the top suits a launch screen or a site intro.</div>
+      <div><b>FONT</b>Munin Block 0.1 is pixel-perfect at multiples of 16 px. It has no kerning or accented letters yet. Those are worth adding if it goes beyond headings and UI labels.</div>
+    </div>
+  </section>
+
+  <footer class="site-f label"><span>munin / brand / pixel-r03.html</span><span>brand/logo/treatments · brand/font</span></footer>
+</div>
+<script>
+(() => {
+  const seq = document.getElementById('seq');
+  const layers = Object.fromEntries([...seq.querySelectorAll('.layer')].map(l => [l.dataset.k, l]));
+  const chips = [...document.querySelectorAll('.ph')];
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches || location.hash === '#still';
+  const mark = k => chips.forEach(c => c.classList.toggle('on', c.dataset.k === k));
+  const on = (k, v = true) => layers[k].classList.toggle('on', v);
+  const show = k => { on(k); layers[k].classList.add('go'); mark(k); };
+  if (still) { show('led'); return; }
+  let timers = [];
+  const at = (ms, fn) => timers.push(setTimeout(fn, ms));
+  function run() {
+    timers.forEach(clearTimeout); timers = [];
+    seq.classList.add('reset');
+    Object.values(layers).forEach(l => l.classList.remove('on', 'go'));
+    void seq.offsetWidth;
+    seq.classList.remove('reset');
+    at(60, () => show('scan'));
+    at(1900, () => show('dith'));          // each phase dissolves over the previous one
+    at(2500, () => on('scan', false));
+    at(3500, () => show('led'));
+    at(4300, () => on('dith', false));
+    at(7000, () => { on('led', false); mark(''); });
+    at(7600, run);
+  }
+  run();
+})();
+</script>
+</body>
+</html>

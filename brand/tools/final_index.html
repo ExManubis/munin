@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>munin — brand assets</title>
+<link rel="icon" href="favicon/favicon.svg" type="image/svg+xml">
+<style>
+  @font-face { font-family: "Munin Block"; src: url("font/MuninBlock-Regular.woff2") format("woff2"), url("font/MuninBlock-Regular.otf") format("opentype"); }
+  @font-face { font-family: "DM"; src: local("Departure Mono"), local("DepartureMono-Regular"); }
+  :root { --bg: #0a0a0a; --fg: #ededed; --mute: #8a8a8a; --line: #262626; --dot: #ffffff12; --paper: #f4f4f4; --ink: #0a0a0a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: var(--fg); font: 14px/1.6 "DM", ui-monospace, Menlo, monospace;
+    background: radial-gradient(circle, var(--dot) 1px, transparent 1.4px) 0 0 / 14px 14px, var(--bg); }
+  a { color: inherit; }
+  img { display: block; }
+  .px { image-rendering: pixelated; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+  .mb { font-family: "Munin Block", "DM", monospace; -webkit-font-smoothing: none; }
+  .label { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--mute); }
+  .vf { --c: #5a5a5a; --s: 18px;
+    background:
+      linear-gradient(var(--c),var(--c)) top left / var(--s) 1px no-repeat, linear-gradient(var(--c),var(--c)) top left / 1px var(--s) no-repeat,
+      linear-gradient(var(--c),var(--c)) top right / var(--s) 1px no-repeat, linear-gradient(var(--c),var(--c)) top right / 1px var(--s) no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom left / var(--s) 1px no-repeat, linear-gradient(var(--c),var(--c)) bottom left / 1px var(--s) no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom right / var(--s) 1px no-repeat, linear-gradient(var(--c),var(--c)) bottom right / 1px var(--s) no-repeat; }
+  .top { display: flex; align-items: center; justify-content: space-between; padding: 24px 0; }
+  .hero { padding: 100px 0 70px; display: grid; place-items: center; gap: 30px; }
+  .hero .vf { padding: 90px 110px; }
+  .hero .meta { display: flex; gap: 28px; }
+  section { padding: 80px 0 10px; }
+  .sec-h { display: flex; align-items: baseline; gap: 18px; margin-bottom: 26px; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+  .sec-h h2 { font-weight: normal; font-size: 16px; margin: 0; }
+  .sec-h .label { margin-left: auto; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+  .card { border: 1px solid var(--line); background: #0c0c0c; }
+  .card .pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .card .pair img, .hero img, .clear img { max-width: 100%; height: auto; }
+  .card .pair > div { height: 220px; display: grid; place-items: center; padding: 30px; }
+  .card .pair > div:last-child { background: var(--paper); }
+  .card footer { display: flex; justify-content: space-between; padding: 10px 14px; border-top: 1px solid var(--line); font-size: 11px; letter-spacing: .14em; }
+  .card footer a { color: var(--mute); text-decoration: none; margin-left: 12px; } .card footer a:hover { color: #fff; }
+  .rules { display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; }
+  .clear { display: grid; place-items: center; padding: 40px; }
+  .clear .box { outline: 1px dashed #6a6a6a; padding: 32px; position: relative; background: repeating-linear-gradient(45deg, #ffffff08 0 6px, transparent 6px 12px); }
+  .clear .box img { background: var(--bg); }
+  .clear .box span { position: absolute; top: 8px; left: 8px; font-size: 9px; color: var(--mute); letter-spacing: .14em; }
+  .sizes { display: flex; align-items: flex-end; gap: 30px; padding: 40px 30px; }
+  .sizes div { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; font-size: 10px; color: var(--mute); letter-spacing: .14em; }
+  .sw { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+  .sw div { border: 1px solid var(--line); }
+  .sw i { display: block; height: 120px; }
+  .sw p { margin: 0; padding: 10px 12px; font-size: 12px; display: flex; justify-content: space-between; }
+  .sw p span { color: var(--mute); }
+  .icons { display: flex; align-items: flex-end; gap: 28px; padding: 36px 30px; flex-wrap: wrap; }
+  .icons figure { margin: 0; display: flex; flex-direction: column; gap: 10px; font-size: 10px; color: var(--mute); letter-spacing: .12em; }
+  .tab { display: flex; align-items: center; gap: 10px; background: #242424; border-radius: 9px 9px 0 0; padding: 0 16px; height: 36px; width: 230px; font: 12.5px -apple-system, system-ui, sans-serif; color: #eee; }
+  .tab.light { background: #fff; color: #222; }
+  .social { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .social img { width: 100%; border: 1px solid var(--line); }
+  .font { display: grid; grid-template-columns: 1.2fr 1fr; gap: 30px; align-items: end; }
+  .font .big { font-size: 96px; line-height: 1; }
+  .font p { font-size: 32px; margin: 18px 0 0; line-height: 1.25; }
+  .donts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+  .donts div { border: 1px solid var(--line); height: 170px; display: grid; place-items: center; position: relative; overflow: hidden; }
+  .donts div::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top right, transparent calc(50% - 1px), #ff4d4d88 50%, transparent calc(50% + 1px)); }
+  .donts span { position: absolute; bottom: 8px; left: 10px; font-size: 10px; letter-spacing: .14em; color: var(--mute); }
+  pre { background: #060606; border: 1px solid var(--line); padding: 18px 20px; margin: 0; overflow: auto; font: 12.5px/1.6 "DM", monospace; color: #cfcfcf; }
+  footer.site { display: flex; justify-content: space-between; padding: 80px 0 40px; }
+  @media (max-width: 900px) { .grid2, .grid4, .rules, .sw, .social, .font, .donts { grid-template-columns: 1fr; } .hero .vf { padding: 50px 30px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <img src="svg/munin-lockup-horizontal-white.svg" height="22" alt="munin">
+    <span class="label">Brand assets · v1.1</span>
+  </div>
+
+  <div class="hero">
+    <div class="vf"><img src="svg/munin-lockup-horizontal-white.svg" width="590" alt="munin"></div>
+    <div class="meta label"><span>16 × 16 pixel raven</span><span>Block wordmark</span><span>Dithered at 2×</span></div>
+  </div>
+
+  <section>
+    <div class="sec-h"><h2 class="mb">Logo</h2><span class="label">SVG · PNG @2–32× · white / black</span></div>
+    <div class="grid2">
+      <div class="card"><div class="pair"><div><img src="svg/munin-lockup-horizontal-white.svg" width="236"></div><div><img src="svg/munin-lockup-horizontal-black.svg" width="236"></div></div>
+        <footer><span>LOCKUP · HORIZONTAL</span><span><a href="svg/munin-lockup-horizontal.svg">SVG</a><a href="png/lockup-horizontal/">PNG</a></span></footer></div>
+      <div class="card"><div class="pair"><div><img src="svg/munin-lockup-stacked-white.svg" width="152"></div><div><img src="svg/munin-lockup-stacked-black.svg" width="152"></div></div>
+        <footer><span>LOCKUP · STACKED</span><span><a href="svg/munin-lockup-stacked.svg">SVG</a><a href="png/lockup-stacked/">PNG</a></span></footer></div>
+      <div class="card"><div class="pair"><div><img src="svg/munin-mark-white.svg" width="128"></div><div><img src="svg/munin-mark-black.svg" width="128"></div></div>
+        <footer><span>MARK</span><span><a href="svg/munin-mark.svg">SVG</a><a href="png/mark/">PNG</a></span></footer></div>
+      <div class="card"><div class="pair"><div><img src="svg/munin-wordmark-white.svg" width="228"></div><div><img src="svg/munin-wordmark-black.svg" width="228"></div></div>
+        <footer><span>WORDMARK</span><span><a href="svg/munin-wordmark.svg">SVG</a><a href="png/wordmark/">PNG</a></span></footer></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><h2 class="mb">Space &amp; size</h2><span class="label">Even scales only</span></div>
+    <div class="rules">
+      <div class="card clear"><div class="box"><span>4 UNITS</span><img class="px" src="png/lockup-horizontal/munin-lockup-horizontal-white@8x.png" width="472"></div></div>
+      <div class="card sizes">
+        <div><img class="px" src="png/mark/munin-mark-white@2x.png" width="32">MARK MIN · 32 PX</div>
+        <div><img class="px" src="png/lockup-horizontal/munin-lockup-horizontal-white@2x.png" width="118">LOCKUP MIN · 118 PX</div>
+        <div><img src="svg/solid/munin-mark-white.svg" width="16">BELOW 2× · SOLID</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><h2 class="mb">Colour</h2><span class="label">Monochrome only</span></div>
+    <div class="sw">
+      <div><i style="background:#0a0a0a"></i><p>Ink <span>#0A0A0A</span></p></div>
+      <div><i style="background:#f4f4f4"></i><p>Paper <span>#F4F4F4</span></p></div>
+      <div><i style="background:#1e1e1e"></i><p>Dot <span>#1E1E1E</span></p></div>
+      <div><i style="background:#4e4e4e"></i><p>Rule <span>#4E4E4E</span></p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><h2 class="mb">Icons</h2><span class="label">Favicon · touch · Android · macOS · iOS</span></div>
+    <div class="card icons">
+      <figure><div class="tab"><img src="favicon/favicon-32.png" width="16" height="16">munin</div><div class="tab light"><img src="favicon/favicon-32.png" width="16" height="16">munin</div>FAVICON TILE</figure>
+      <figure><img class="px" src="favicon/favicon-16.png" width="48">16</figure>
+      <figure><img class="px" src="favicon/favicon-32.png" width="64">32</figure>
+      <figure><img class="px" src="favicon/favicon-48.png" width="96">48</figure>
+      <figure><img src="favicon/apple-touch-icon.png" width="120" style="border-radius:27px">APPLE TOUCH</figure>
+      <figure><img src="favicon/maskable-512.png" width="120" style="border-radius:50%">MASKABLE</figure>
+    </div>
+    <div class="card icons" style="margin-top:18px">
+      <figure><img src="app-icon/macos/app-icon-macos-1024.png" width="260">MACOS · ICNS</figure>
+      <figure><img src="app-icon/ios/app-icon-ios-1024.png" width="220" style="border-radius:49px">IOS · 1024</figure>
+      <figure><img src="app-icon/macos/AppIcon.iconset/icon_128x128.png" width="128">128</figure>
+      <figure><img src="app-icon/macos/AppIcon.iconset/icon_32x32@2x.png" width="64">64</figure>
+      <figure><img class="px" src="app-icon/macos/AppIcon.iconset/icon_32x32.png" width="32">32</figure>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><h2 class="mb">Social</h2><span class="label">1200 × 630 · 1280 × 640</span></div>
+    <div class="social"><img src="social/og-image.png"><img src="social/og-image-tagline.png"></div>
+  </section>
+
+  <section>
+    <div class="sec-h"><h2 class="mb">Typeface</h2><span class="label"><a href="font/MuninBlock-Regular.otf">OTF</a> · <a href="font/MuninBlock-Regular.ttf">TTF</a> · <a href="font/MuninBlock-Regular.woff2">WOFF2</a></span></div>
+    <div class="font"><div class="mb big">Munin Block</div><div class="label">96 glyphs · 2 px stroke · em 16 px · use at 16, 32, 48, 64…</div></div>
+    <p class="mb" style="font-size:32px;margin:22px 0 0">Huginn thinks. Munin remembers. 0123456789 → ready</p>
+  </section>
+
+  <section>
+    <div class="sec-h"><h2 class="mb">Don't</h2><span class="label">Keep the pixels intact</span></div>
+    <div class="donts">
+      <div><img src="png/lockup-horizontal/munin-lockup-horizontal-white@2x.png" width="190" style="filter:blur(1.4px)"><span>SMOOTH OR BLUR</span></div>
+      <div><img src="svg/munin-lockup-horizontal-white.svg" width="190" style="transform:rotate(-14deg)"><span>ROTATE</span></div>
+      <div><img src="svg/munin-lockup-horizontal-white.svg" width="190" style="filter:invert(48%) sepia(90%) saturate(900%) hue-rotate(195deg)"><span>ADD COLOUR</span></div>
+      <div><img src="svg/munin-lockup-horizontal-white.svg" width="160" style="transform:scaleX(1.45)"><span>STRETCH</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><h2 class="mb">Website head</h2><span class="label">favicon/head.html</span></div>
+<pre>&lt;link rel="icon" href="/favicon.ico" sizes="48x48"&gt;
+&lt;link rel="icon" href="/favicon.svg" type="image/svg+xml"&gt;
+&lt;link rel="apple-touch-icon" href="/apple-touch-icon.png"&gt;
+&lt;link rel="manifest" href="/site.webmanifest"&gt;
+&lt;meta name="theme-color" content="#0a0a0a"&gt;
+&lt;meta property="og:image" content="/og-image.png"&gt;</pre>
+  </section>
+
+  <footer class="site label"><span>munin / brand / final</span><span>Generated by brand/tools/export_final.py</span></footer>
+</div>
+</body>
+</html>

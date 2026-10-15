@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>munin — logo exploration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bitcount+Prop+Single&family=Jersey+15+Charted&display=swap" rel="stylesheet">
+<style>
+  @font-face { font-family: "DM"; src: local("Departure Mono"), local("DepartureMono-Regular"); }
+  :root {
+    --bg: #0a0a0a; --fg: #ededed; --mute: #8a8a8a; --dim: #4a4a4a; --line: #262626; --dot: #ffffff12;
+    --paper: #f2f2f2; --ink: #0a0a0a;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; color: var(--fg); font: 14px/1.6 "DM", ui-monospace, Menlo, monospace;
+    background: radial-gradient(circle, var(--dot) 1px, transparent 1.4px) 0 0 / 14px 14px, var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+  .label { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--mute); }
+
+  /* viewfinder corners, like the Figment mark */
+  .vf { --c: #5a5a5a; --s: 14px;
+    background:
+      linear-gradient(var(--c),var(--c)) top left / var(--s) 1px no-repeat,
+      linear-gradient(var(--c),var(--c)) top left / 1px var(--s) no-repeat,
+      linear-gradient(var(--c),var(--c)) top right / var(--s) 1px no-repeat,
+      linear-gradient(var(--c),var(--c)) top right / 1px var(--s) no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom left / var(--s) 1px no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom left / 1px var(--s) no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom right / var(--s) 1px no-repeat,
+      linear-gradient(var(--c),var(--c)) bottom right / 1px var(--s) no-repeat; }
+
+  /* header */
+  .top { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
+  .brand { display: flex; align-items: center; gap: 14px; font-size: 15px; }
+  .brand .vf { --s: 8px; --c: #9a9a9a; width: 36px; height: 36px; display: grid; place-items: center; }
+  .brand .vf svg { width: 18px; height: 18px; }
+  nav { display: flex; gap: 28px; }
+
+  /* hero */
+  .hero { min-height: min(88vh, 820px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 24px 0 40px; }
+  .hero .vf { --s: 22px; --c: #6a6a6a; width: min(560px, 90vw); aspect-ratio: 100/68; padding: 28px 36px; }
+  .hero .vf svg { width: 100%; height: 100%; display: block; }
+  .word { font-family: "Bitcount Prop Single", "DM", monospace; font-size: clamp(64px, 11vw, 132px); line-height: .9; letter-spacing: .02em; }
+  .chips { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  .chip { border: 1px dashed #3a3a3a; padding: 9px 18px; font-size: 11px; letter-spacing: .16em; color: #bdbdbd; min-width: 150px; text-align: center; }
+  .chip:hover { border-color: #8a8a8a; color: #fff; }
+  .meta { display: flex; justify-content: space-between; width: 100%; padding-top: 24px; }
+
+  .ht circle { transform-box: fill-box; transform-origin: center; animation: pop .7s cubic-bezier(.2,.9,.3,1.2) both; }
+  .ht .glint { animation: blink 6s 1.6s infinite; }
+  @keyframes pop { from { opacity: 0; transform: scale(.15); } }
+  @keyframes blink { 0%, 93%, 100% { opacity: 1; } 95.5% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .ht circle, .ht .glint { animation: none; } }
+
+  /* sections */
+  section { padding: 96px 0 24px; }
+  .sec-h { display: flex; align-items: baseline; gap: 18px; margin-bottom: 28px; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+  .sec-h h2 { font-weight: normal; font-size: 13px; letter-spacing: .16em; margin: 0; text-transform: uppercase; }
+  .sec-h .label { margin-left: auto; }
+  .prompt { color: var(--mute); }
+
+  /* concept cards */
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
+  .card { border: 1px solid var(--line); background: #0c0c0c; display: flex; flex-direction: column; }
+  .card header { display: flex; gap: 14px; align-items: baseline; padding: 14px 18px; border-bottom: 1px solid var(--line); font-size: 12px; letter-spacing: .16em; }
+  .card .n { color: var(--mute); }
+  .card .k { margin-left: auto; font-size: 10px; color: var(--mute); }
+  .card .stage { margin: 22px; height: 330px; padding: 26px 34px; }
+  .card .stage svg { width: 100%; height: 100%; display: block; }
+  .card p { margin: 0 22px 20px; color: #a9a9a9; font-size: 13px; line-height: 1.65; min-height: 64px; }
+  .card footer { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr 1.2fr; border-top: 1px solid var(--line); }
+  .tile { position: relative; height: 124px; display: flex; align-items: center; justify-content: center; padding: 18px 18px 26px; border-right: 1px solid var(--line); }
+  .tile:last-child { border-right: 0; }
+  .tile > svg { width: 100%; height: 100%; }
+  .tile span { position: absolute; left: 10px; bottom: 6px; font-size: 9px; letter-spacing: .16em; color: var(--mute); }
+  .tile.light { background: var(--paper); }
+  .tile.light span { color: #777; }
+  .tile.sizes { gap: 14px; align-items: flex-end; padding-bottom: 32px; }
+  .sz svg { width: 100%; height: 100%; display: block; }
+
+  /* size test */
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { border-bottom: 1px solid var(--line); padding: 18px 10px; text-align: center; font-weight: normal; }
+  th { text-align: left; font-size: 11px; letter-spacing: .16em; color: #bdbdbd; width: 220px; }
+  thead th, thead td { color: var(--mute); font-size: 10px; letter-spacing: .16em; padding: 8px 10px; }
+  td svg { width: 100%; height: 100%; display: block; }
+
+  /* in use */
+  .uses { display: grid; grid-template-columns: repeat(12, 1fr); gap: 24px; }
+  .panel { border: 1px solid var(--line); background: #0c0c0c; position: relative; overflow: hidden; }
+  .panel > .label { position: absolute; top: 12px; left: 14px; font-size: 10px; }
+  .span-12 { grid-column: span 12; } .span-7 { grid-column: span 7; } .span-5 { grid-column: span 5; } .span-6 { grid-column: span 6; }
+
+  /* browser tabs */
+  .browser { padding: 44px 0 0; }
+  .tabs { display: flex; align-items: flex-end; gap: 2px; padding: 0 14px; background: #161616; height: 46px; }
+  .tab { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 16px; border-radius: 9px 9px 0 0; font: 12.5px/1 -apple-system, system-ui, sans-serif; color: #9a9a9a; width: 220px; }
+  .tab.on { background: #242424; color: #eee; }
+  .tab svg { width: 16px; height: 16px; flex: none; image-rendering: pixelated; }
+  .tab .x { margin-left: auto; color: #666; }
+  .tab .g { width: 16px; height: 16px; border-radius: 50%; background: #3a3a3a; flex: none; }
+  .omni { background: #242424; padding: 9px 14px; display: flex; gap: 10px; align-items: center; }
+  .omni div { flex: 1; background: #161616; border-radius: 16px; padding: 7px 16px; font: 12.5px/1 -apple-system, system-ui, sans-serif; color: #aaa; }
+  .page-mock { height: 168px; display: grid; place-items: center; background: var(--bg); }
+  .page-mock .brand { font-size: 18px; }
+
+  /* app icons */
+  .icons { display: flex; align-items: flex-end; justify-content: center; gap: 30px; padding: 70px 24px 50px; }
+  .icon { width: 128px; height: 128px; border-radius: 28px; overflow: hidden; display: grid; place-items: center; padding: 16px;
+    background: radial-gradient(circle, #ffffff14 1px, transparent 1.3px) 0 0/8px 8px, linear-gradient(160deg, #1b1b1b, #050505);
+    box-shadow: inset 0 0 0 1px #ffffff1a, 0 18px 40px #0008; }
+  .icon svg { width: 100%; height: 100%; }
+  .icon.px { padding: 26px; }
+  .icon.px svg { image-rendering: pixelated; }
+  .icon.sm { width: 64px; height: 64px; border-radius: 14px; padding: 8px; }
+  .icon.sm.px { padding: 12px; }
+  .icon.paper { background: radial-gradient(circle, #0000000f 1px, transparent 1.3px) 0 0/8px 8px, linear-gradient(160deg, #fafafa, #e3e3e3); box-shadow: inset 0 0 0 1px #0000001a, 0 18px 40px #0008; }
+
+  /* terminal */
+  .term { margin: 44px 20px 20px; border: 1px solid #2c2c2c; border-radius: 10px; background: #070707; }
+  .term .bar { display: flex; gap: 7px; padding: 11px 13px; border-bottom: 1px solid #1d1d1d; align-items: center; }
+  .term .bar i { width: 11px; height: 11px; border-radius: 50%; background: #2e2e2e; display: block; }
+  .term .bar span { margin: 0 auto; font-size: 11px; color: #666; padding-right: 50px; }
+  .term pre { margin: 0; padding: 18px 22px 22px; font: 12px/1.15 "DM", ui-monospace, monospace; color: #dcdcdc; }
+  .term pre .art { display: block; font-size: 10.5px; line-height: 1; margin: 10px 0 14px; color: #e8e8e8; }
+  .term pre .art i { font-style: normal; color: #6a6a6a; }
+  .term .c { color: #8a8a8a; } .term .b { background: #dcdcdc; color: #dcdcdc; }
+
+  /* lockups */
+  .lock { display: flex; align-items: center; gap: 22px; }
+  .lock svg { height: 64px; width: auto; }
+  .lock .w { font-size: 54px; line-height: 1; letter-spacing: -.01em; }
+  .lockups { display: flex; flex-direction: column; gap: 0; }
+  .lockups > div { padding: 58px 40px 46px; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid var(--line); }
+  .lockups > div:last-child { border-bottom: 0; }
+  .lockups .paper { background: var(--paper); color: var(--ink); }
+  .lockups .paper .label { color: #777; }
+  .stack { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .stack svg { height: 92px; width: auto; }
+  .brand.big { font-size: 40px; gap: 26px; }
+  .brand.big .vf { --s: 16px; width: 92px; height: 92px; }
+  .brand.big .vf svg { width: 48px; height: 48px; }
+  .stack .w { font-family: "Bitcount Prop Single", "DM", monospace; font-size: 46px; line-height: 1; }
+
+  /* social card */
+  .og { aspect-ratio: 1200/630; margin: 44px 20px 20px; border: 1px solid #222; position: relative; overflow: hidden;
+    background: radial-gradient(circle, #ffffff14 1px, transparent 1.4px) 0 0/12px 12px, #0a0a0a; display: grid; grid-template-columns: 1.15fr 1fr; align-items: center; }
+  .og .art { padding: 6% 0 6% 7%; }
+  .og .art svg { width: 100%; display: block; }
+  .og .copy { padding-right: 9%; }
+  .og .copy .word { font-size: clamp(40px, 5.2vw, 72px); }
+  .og .copy p { color: #9a9a9a; font-size: 13px; margin: 14px 0 0; }
+  .og .corner { position: absolute; font-size: 9px; letter-spacing: .16em; color: #666; }
+
+  /* notes */
+  .notes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  .notes div { border-top: 1px solid var(--line); padding-top: 14px; color: #a9a9a9; font-size: 13px; }
+  .notes b { display: block; color: var(--fg); font-weight: normal; letter-spacing: .14em; font-size: 11px; margin-bottom: 8px; }
+  footer.site { display: flex; justify-content: space-between; padding: 80px 0 40px; }
+
+  @media (max-width: 860px) {
+    .grid, .notes { grid-template-columns: 1fr; }
+    .uses > * { grid-column: span 12 !important; }
+    nav { display: none; }
+    th { width: 110px; }
+    .og { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="brand" href="#"><span class="vf">{{PIX}}</span>munin</a>
+    <nav class="label"><a href="#concepts">Concepts</a><a href="#sizes">Size test</a><a href="#use">In use</a></nav>
+  </div>
+
+  <div class="hero">
+    <div class="vf">{{HERO}}</div>
+    <div class="word">munin</div>
+    <div class="chips">
+      <a class="chip" href="#contour">01 CONTOUR</a><a class="chip" href="#facet">02 FACET</a>
+      <a class="chip" href="#halftone">03 HALFTONE</a><a class="chip" href="#pixel">04 PIXEL</a>
+    </div>
+    <div class="meta label"><span>Logo exploration · R01</span><span>Huginn thinks · Muninn remembers</span><span>15.10.2026 · CPH</span></div>
+  </div>
+
+  <section id="concepts">
+    <div class="sec-h"><h2>Concepts</h2><span class="prompt">$ ls munin/brand/logo</span><span class="label">4 directions · 1 raven</span></div>
+    <div class="grid">{{CARDS}}</div>
+  </section>
+
+  <section id="sizes">
+    <div class="sec-h"><h2>Size test</h2><span class="prompt">$ munin --scale</span><span class="label">Where each mark holds up</span></div>
+    <table>
+      <thead><tr><th></th><td>128</td><td>64</td><td>32</td><td>24</td><td>16</td></tr></thead>
+      <tbody>{{SIZES}}</tbody>
+    </table>
+  </section>
+
+  <section id="use">
+    <div class="sec-h"><h2>In use</h2><span class="prompt">$ munin --mockups</span><span class="label">Placeholder copy</span></div>
+    <div class="uses">
+      <div class="panel span-7 browser">
+        <span class="label">Favicon · 04 Pixel</span>
+        <div class="tabs">
+          <div class="tab on">{{PIX}}munin<span class="x">×</span></div>
+          <div class="tab"><span class="g"></span>Figment Engineering<span class="x">×</span></div>
+        </div>
+        <div class="omni"><div>munin.dev</div></div>
+        <div class="page-mock"><a class="brand"><span class="vf">{{PIX}}</span>munin</a></div>
+      </div>
+
+      <div class="panel span-5">
+        <span class="label">App icon</span>
+        <div class="icons">
+          <div class="icon">{{ICON_CONTOUR}}</div>
+          <div class="icon px">{{PIX}}</div>
+          <div class="icon sm">{{ICON_FACET}}</div>
+        </div>
+      </div>
+
+      <div class="panel span-6">
+        <span class="label">Terminal splash · facet tones as ░▒▓█</span>
+        <div class="term">
+          <div class="bar"><i></i><i></i><i></i><span>~/code — zsh</span></div>
+<pre><span class="c">$</span> munin
+<span class="art">{{TERM}}</span>munin 0.1.0  <span class="c">·  ready</span>
+<span class="c">›</span> <span class="b">_</span></pre>
+        </div>
+      </div>
+
+      <div class="panel span-6">
+        <span class="label">Social card · 1200×630</span>
+        <div class="og">
+          <div class="art">{{HALFTONE_CARD}}</div>
+          <div class="copy"><div class="word">munin</div><p>Huginn thinks.<br>Munin remembers.</p></div>
+          <span class="corner" style="left:16px;bottom:12px">MUNIN</span><span class="corner" style="right:16px;bottom:12px">64.1°N 21.9°W</span>
+        </div>
+      </div>
+
+      <div class="panel span-12 lockups">
+        <div><span class="label" style="position:absolute;top:12px;left:14px">Lockups</span>
+          <div class="lock">{{FACET}}<span class="w">munin</span></div>
+        </div>
+        <div class="paper" style="position:relative">
+          <div class="lock">{{CONTOUR_LIGHT}}<span class="w">munin</span></div>
+        </div>
+        <div style="gap:90px">
+          <div class="stack">{{CONTOUR}}<span class="w">munin</span></div>
+          <a class="brand big"><span class="vf">{{PIX}}</span>munin</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-h"><h2>Notes</h2><span class="label">For discussion</span></div>
+    <div class="notes">
+      <div><b>MY PICK</b>01 Contour as the primary mark: it's one colour, it's distinctive, and the rings fit a project named after memory. 04 Pixel takes over at 32 px and below.</div>
+      <div><b>SYSTEM</b>02 Facet and 03 Halftone are the same geometry, so either one can sit next to the Figment cube as a sibling. Halftone also works as an animated hero or loading state.</div>
+      <div><b>NEXT</b>Pick a direction and I'll refine the curves, tune the optical weight at each size, export the favicon, app icon and social set, and pick between Departure Mono and Bitcount for the wordmark.</div>
+    </div>
+  </section>
+
+  <footer class="site label"><span>munin / brand / mockups.html</span><span>SVGs → brand/logo/</span></footer>
+</div>
+</body>
+</html>
