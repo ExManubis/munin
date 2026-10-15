@@ -1,0 +1,180 @@
+"""The MCP server agents connect to. Tools return short plain text, to keep agents' context small."""
+
+import functools
+from collections.abc import Callable
+from typing import Annotated, Literal
+
+from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import Field
+from sqlalchemy.orm import Session, sessionmaker
+
+from munin import issues as svc
+from munin.issues import Actor, MuninError
+from munin.models import Comment, Issue
+
+INSTRUCTIONS = """\
+Munin is an issue tracker shared by you, other agents and a human.
+
+How to work:
+1. Take the top issue from the pile: list_issues(project, status="todo") lists the pile in order.
+   Take one that's unassigned or assigned to you with update_issue(issue, status="in_progress").
+   If another agent already has it, munin says so; take the next one.
+2. Do the work. Comment on the issue when something's worth recording.
+3. When you're done, add a comment saying what you did, then set status="in_review".
+4. Review issues other agents finished: check the work, commit it and set status="done",
+   or comment what's missing and set status="todo" so its author picks it up again.
+   Don't review your own work.
+
+If you need the human, use add_comment(issue, question, ask_human=true) and work on something
+else meanwhile; their reply appears in the issue's comments. If you give up on an issue,
+comment why and set status="todo" with assignee="". Create issues for follow-up work you find.
+"""
+
+Status = Literal["todo", "in_progress", "in_review", "done", "cancelled"]
+IssueRef = Annotated[str, Field(description="Issue id, like MUN-12")]
+
+
+def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
+    mcp = MCPServer(name="munin", instructions=INSTRUCTIONS)
+
+    def tool(fn: Callable) -> Callable:
+        """Register fn as a tool, with munin errors shown to the agent as tool errors."""
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except MuninError as error:
+                raise ToolError(str(error)) from error
+
+        # Plain text only: a structured copy of each result would double what agents read.
+        mcp.add_tool(wrapper, structured_output=False)
+        return wrapper
+
+    @tool
+    def list_projects() -> str:
+        """List projects. A project's key prefixes its issue ids, like MUN in MUN-12."""
+        with sessions() as s:
+            projects = svc.list_projects(s)
+            if not projects:
+                return "No projects yet. Ask the human to create one."
+            return "\n".join(
+                f"{p.key}: {p.name}" + (f" - {p.description.splitlines()[0]}" if p.description else "")
+                for p in projects
+            )
+
+    @tool
+    def list_issues(
+        ctx: Context,
+        project: Annotated[str | None, Field(description="Project key, like MUN. Omit for all projects.")] = None,
+        status: Annotated[
+            Status | Literal["all"] | None,
+            Field(description="Only issues with this status. Omit for open issues (todo, in progress, in review)."),
+        ] = None,
+        assignee: Annotated[
+            str | None, Field(description='Only issues assigned to this name. "me" is you, "" is unassigned.')
+        ] = None,
+        limit: Annotated[int, Field(ge=1, le=200)] = 50,
+    ) -> str:
+        """List issues, most active first and then in pile order (the top of the pile comes first)."""
+        if assignee == "me":
+            assignee = _actor(ctx).name
+        with sessions() as s:
+            found = svc.list_issues(s, project, status, assignee, limit)
+            if not found:
+                return "No issues match."
+            return "\n".join(_issue_line(issue) for issue in found)
+
+    @tool
+    def get_issue(issue: IssueRef) -> str:
+        """Get an issue with its description and comments."""
+        with sessions() as s:
+            return _issue_text(svc.get_issue(s, issue))
+
+    @tool
+    def create_issue(
+        ctx: Context,
+        project: Annotated[str, Field(description="Project key, like MUN")],
+        title: str,
+        description: Annotated[str, Field(description="Markdown. Say what done looks like.")] = "",
+        status: Status = "todo",
+        assignee: Annotated[str | None, Field(description="Agent or person to do it. Omit for anyone.")] = None,
+    ) -> str:
+        """Create an issue. It goes to the bottom of the project's pile."""
+        with sessions() as s:
+            created = svc.create_issue(s, _actor(ctx), project, title, description, status, assignee)
+            return f"Created {created.ref}: {created.title}"
+
+    @tool
+    def update_issue(
+        ctx: Context,
+        issue: IssueRef,
+        title: str | None = None,
+        description: str | None = None,
+        status: Status | None = None,
+        assignee: Annotated[str | None, Field(description='New assignee. "" unassigns.')] = None,
+    ) -> str:
+        """Change an issue. Setting status="in_progress" takes the issue and assigns it to you.
+
+        Fails if another agent has the issue in progress.
+        """
+        changes = {"title": title, "description": description, "status": status}
+        if assignee is not None:
+            changes["assignee"] = assignee
+        with sessions() as s:
+            updated = svc.update_issue(s, _actor(ctx), issue, **changes)
+            return f"Updated {_issue_line(updated)}"
+
+    @tool
+    def add_comment(
+        ctx: Context,
+        issue: IssueRef,
+        body: Annotated[str, Field(description="Markdown")],
+        ask_human: Annotated[
+            bool, Field(description="True if this is a question for the human. It shows in their inbox.")
+        ] = False,
+    ) -> str:
+        """Comment on an issue."""
+        with sessions() as s:
+            comment = svc.add_comment(s, _actor(ctx), issue, body, ask_human)
+            return f"Commented on {comment.issue.ref}" + (" and asked the human." if comment.asks_human else ".")
+
+    return mcp
+
+
+def _actor(ctx: Context) -> Actor:
+    # Set by the token check in front of /mcp (see app.py).
+    return Actor(name=ctx.request_context.request.state.agent, kind="agent")
+
+
+def _issue_line(issue: Issue) -> str:
+    parts = [f"{issue.ref} [{issue.status}]", issue.title]
+    if issue.assignee:
+        parts.append(f"(assignee: {issue.assignee})")
+    if svc.waiting_on_human(issue):
+        parts.append("(waiting on the human)")
+    return " ".join(parts)
+
+
+def _issue_text(issue: Issue) -> str:
+    lines = [
+        f"{issue.ref}: {issue.title}",
+        f"Project: {issue.project.key} · Status: {issue.status} · Assignee: {issue.assignee or 'none'}"
+        f" · Created by {issue.created_by} {_when(issue.created_at)}",
+        "",
+        issue.description or "(no description)",
+    ]
+    if issue.comments:
+        lines += ["", "Comments:"]
+        lines += [_comment_text(comment) for comment in issue.comments]
+    return "\n".join(lines)
+
+
+def _comment_text(comment: Comment) -> str:
+    asks = " (question for the human)" if comment.asks_human else ""
+    return f"\n{comment.author} ({comment.author_kind}), {_when(comment.created_at)}{asks}:\n{comment.body}"
+
+
+def _when(moment) -> str:
+    return moment.strftime("%Y-%m-%d %H:%M UTC")
