@@ -64,7 +64,7 @@ def test_other_host_names_are_refused(client):
 
 
 def test_me(client):
-    assert client.get("/api/me").json() == {"name": "me", "mcp_url": "http://localhost/mcp"}
+    assert client.get("/api/me").json() == {"name": "me", "mcp_url": "http://localhost/mcp", "version": "0.2.0"}
     assert client.get("/api/me", headers={"Host": "127.0.0.1:7777"}).json()["mcp_url"] == "http://127.0.0.1:7777/mcp"
 
 
@@ -85,3 +85,35 @@ def test_reordering_does_not_count_as_an_update(client):
 def test_agent_names_that_mean_something_else_are_refused(client):
     for name in ("me", "none", "Null"):
         assert client.post("/api/agents", json={"name": name}).status_code == 422
+
+
+def test_dependencies_history_and_activity(client):
+    client.post("/api/projects", json={"key": "MUN", "name": "munin"})
+    client.post("/api/issues", json={"project": "MUN", "title": "Schema"})
+    created = client.post("/api/issues", json={"project": "MUN", "title": "API", "blocked_by": ["MUN-1"]}).json()
+    assert created["blocked_by"] == ["MUN-1"]
+    assert created["waits_for"] == [{"id": "MUN-1", "title": "Schema", "status": "todo", "assignee": None}]
+    assert [e["kind"] for e in created["events"]] == ["created", "blocked_by"]
+    assert client.get("/api/issues/MUN-1").json()["blocks"][0]["id"] == "MUN-2"
+
+    done = client.patch("/api/issues/MUN-1", json={"status": "done"}).json()
+    assert done["status_changed_at"].endswith("Z")
+    assert client.get("/api/issues/MUN-2").json()["blocked_by"] == []  # done blockers don't count
+
+    activity = client.get("/api/activity", params={"limit": 2}).json()
+    assert [(a["issue"]["id"], a["text"]) for a in activity] == [
+        ("MUN-1", "me moved it from todo to done"),
+        ("MUN-2", "me set it to wait for MUN-1"),
+    ]
+    assert [i["id"] for i in client.get("/api/issues", params={"q": "schema", "status": "all"}).json()] == ["MUN-1"]
+
+
+def test_agents_show_what_they_are_working_on(client, settings):
+    client.post("/api/projects", json={"key": "MUN", "name": "munin"})
+    client.post("/api/issues", json={"project": "MUN", "title": "Work"})
+    client.post("/api/agents", json={"name": "claude-code"})
+    client.post("/api/agents", json={"name": "codex"})
+    with connect(settings.db_path)() as s:
+        svc.update_issue(s, CLAUDE, "MUN-1", status="in_progress")
+    agents = {a["name"]: [i["id"] for i in a["working_on"]] for a in client.get("/api/agents").json()}
+    assert agents == {"claude-code": ["MUN-1"], "codex": []}

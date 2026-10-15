@@ -186,3 +186,88 @@ def test_similar_open_issues(s):
 
     svc.update_issue(s, HUMAN, readme.ref, status="done")
     assert readme.ref not in similar("Usage section in the README")  # closed issues don't count
+
+
+def test_history_records_what_happened(s, project):
+    issue = svc.create_issue(s, HUMAN, "MUN", "Work")
+    svc.update_issue(s, CLAUDE, issue.ref, status="in_progress")
+    svc.update_issue(s, CLAUDE, issue.ref, title="Better title", description="Details")
+    svc.update_issue(s, CLAUDE, issue.ref, status="in_review")
+    svc.update_issue(s, HUMAN, issue.ref, position=-1)  # reordering isn't history
+
+    history = [svc.describe_event(event) for event in svc.get_issue(s, issue.ref).events]
+    assert history == [
+        "me created it",
+        "claude-code moved it from todo to in_progress",
+        "claude-code assigned it to claude-code",
+        "claude-code renamed it from 'Work'",
+        "claude-code edited the description",
+        "claude-code moved it from in_progress to in_review",
+    ]
+    assert [e.kind for e in svc.recent_events(s, limit=2)] == ["status", "description"]
+
+
+def test_status_changed_at_moves_only_with_the_status(s, project):
+    issue = svc.create_issue(s, HUMAN, "MUN", "Work")
+    created = issue.status_changed_at
+    svc.update_issue(s, HUMAN, issue.ref, title="Renamed")
+    assert svc.get_issue(s, issue.ref).status_changed_at == created
+    svc.update_issue(s, CLAUDE, issue.ref, status="in_progress")
+    assert svc.get_issue(s, issue.ref).status_changed_at > created
+
+
+def test_agents_cannot_start_an_issue_before_its_blockers_are_done(s, project):
+    schema = svc.create_issue(s, HUMAN, "MUN", "Schema")
+    api = svc.create_issue(s, CLAUDE, "MUN", "API", blocked_by=[schema.ref])
+    assert [b.ref for b in svc.open_blockers(api)] == [schema.ref]
+    assert [b.ref for b in svc.get_issue(s, schema.ref).blocks] == [api.ref]
+
+    with pytest.raises(Conflict, match="MUN-2 is blocked by MUN-1"):
+        svc.update_issue(s, CODEX, api.ref, status="in_progress")
+    svc.update_issue(s, CLAUDE, schema.ref, status="in_progress")
+    svc.update_issue(s, CLAUDE, schema.ref, status="in_review")
+    with pytest.raises(Conflict):  # in review isn't done
+        svc.update_issue(s, CODEX, api.ref, status="in_progress")
+    svc.update_issue(s, CODEX, schema.ref, status="done")
+    assert svc.update_issue(s, CODEX, api.ref, status="in_progress").assignee == "codex"
+
+
+def test_cancelled_blockers_and_humans_do_not_block(s, project):
+    first = svc.create_issue(s, HUMAN, "MUN", "First")
+    second = svc.create_issue(s, HUMAN, "MUN", "Second", blocked_by=[first.ref])
+    assert svc.update_issue(s, HUMAN, second.ref, status="in_progress").status == "in_progress"  # people decide
+    svc.update_issue(s, HUMAN, second.ref, status="todo")
+    svc.update_issue(s, HUMAN, first.ref, status="cancelled")
+    assert svc.update_issue(s, CLAUDE, second.ref, status="in_progress").status == "in_progress"
+
+
+def test_blockers_can_be_changed_but_not_made_circular(s, project):
+    a = svc.create_issue(s, HUMAN, "MUN", "A")
+    b = svc.create_issue(s, HUMAN, "MUN", "B", blocked_by=[a.ref])
+    c = svc.create_issue(s, HUMAN, "MUN", "C", blocked_by=[b.ref])
+
+    with pytest.raises(Invalid, match="can't block itself"):
+        svc.update_issue(s, HUMAN, a.ref, blocked_by=[a.ref])
+    with pytest.raises(Invalid, match="MUN-3 already waits for MUN-1"):
+        svc.update_issue(s, HUMAN, a.ref, blocked_by=[c.ref])
+
+    svc.update_issue(s, CLAUDE, c.ref, blocked_by=[a.ref, "mun-2"])
+    assert [i.ref for i in svc.get_issue(s, c.ref).blocked_by] == ["MUN-1", "MUN-2"]
+    svc.update_issue(s, CLAUDE, c.ref, blocked_by=[])
+    assert svc.get_issue(s, c.ref).blocked_by == []
+    assert svc.describe_event(svc.get_issue(s, c.ref).events[-1]) == "claude-code removed what it waited for"
+
+
+def test_search(s, project):
+    svc.create_issue(s, HUMAN, "MUN", "Stream tool output to Telegram", description="Edit one message in place")
+    svc.create_issue(s, HUMAN, "MUN", "Retry rate-limited calls", description="Back off on a 429 with jitter")
+    svc.create_issue(s, HUMAN, "MUN", "100% coverage", status="done")
+
+    def found(query, status=None):
+        return [i.title for i in svc.list_issues(s, "MUN", status=status, query=query)]
+
+    assert found("telegram") == ["Stream tool output to Telegram"]
+    assert found("JITTER 429") == ["Retry rate-limited calls"]  # every word, in title or description
+    assert found("mun-2") == ["Retry rate-limited calls"]
+    assert found("100%", status="all") == ["100% coverage"]
+    assert found("nothing like this") == []

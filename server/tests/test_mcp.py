@@ -139,3 +139,53 @@ def test_revoked_tokens_stop_working(server):
         agents.revoke_agent(s, "codex")
     response = httpx2.post(url, headers={"Authorization": f"Bearer {tokens['codex']}"}, json={})
     assert response.status_code == 401
+
+
+def test_dependencies_through_mcp(server):
+    url, tokens, _ = server
+    results = run(
+        url,
+        tokens["claude-code"],
+        ("create_issue", {"project": "MUN", "title": "Wire it up", "blocked_by": ["MUN-1", "MUN-2"]}),
+        ("list_issues", {"project": "MUN", "status": "todo"}),
+        ("update_issue", {"issue": "MUN-3", "status": "in_progress"}),
+        ("update_issue", {"issue": "MUN-3", "blocked_by": ["MUN-1"]}),
+        ("get_issue", {"issue": "MUN-3"}),
+    )
+    texts = [text for _, text in results]
+    assert texts[1].splitlines()[-1] == "MUN-3 [todo] Wire it up (blocked by MUN-1, MUN-2)"
+    assert results[2] == (
+        True,
+        "Error executing tool update_issue: MUN-3 is blocked by MUN-1, MUN-2, which isn't "
+        "done yet. Take another issue.",
+    )
+    assert "Waits for:\nMUN-1 [todo] First" in texts[4]
+    assert "History:" in texts[4] and "claude-code set it to wait for MUN-1" in texts[4]
+
+
+def test_prompts(server):
+    url, tokens, _ = server
+
+    async def prompts():
+        async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {tokens['codex']}"}) as http:
+            async with streamable_http_client(url, http_client=http) as (read, write, *_):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    listed = await session.list_prompts()
+                    got = await session.get_prompt("continue", {"project": "MUN"})
+                    return [p.name for p in listed.prompts], got.messages[0].content.text
+
+    names, text = anyio.run(prompts)
+    assert names == ["continue", "work_on"]
+    assert text.startswith("Continue the MUN project in munin.")
+
+
+def test_the_web_ui_hears_about_changes(server):
+    url, tokens, _ = server
+    base = url.removesuffix("/mcp")
+
+    with httpx2.stream("GET", f"{base}/api/stream", timeout=5) as response:
+        lines = response.iter_lines()
+        assert next(lines) == "retry: 3000"
+        run(url, tokens["claude-code"], ("add_comment", {"issue": "MUN-1", "body": "Hello"}))
+        assert [next(lines) for _ in range(3)][1] == "event: changed"

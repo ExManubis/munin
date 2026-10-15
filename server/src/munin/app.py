@@ -14,7 +14,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from munin import agents
 from munin.api import router
 from munin.config import Settings
-from munin.db import connect
+from munin.db import Changes, connect
 from munin.issues import Conflict, Invalid, MuninError, NotFound
 from munin.mcp_server import build_mcp
 
@@ -37,6 +37,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="munin", lifespan=lifespan)
     app.state.settings = settings
     app.state.sessions = sessions
+    app.state.changes = Changes(sessions)
     if settings.host in LOOPBACK:
         # The API has no login, so refuse other Host names: that stops web pages using DNS rebinding to reach it.
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(LOOPBACK))

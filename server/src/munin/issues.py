@@ -3,15 +3,16 @@
 import re
 from dataclasses import dataclass
 
-from sqlalchemy import case, exists, func, or_, select, update
+from sqlalchemy import and_, case, exists, func, or_, select, update
 from sqlalchemy.orm import Session, aliased
 
-from munin.models import OPEN_STATUSES, STATUSES, Comment, Issue, Project, utcnow
+from munin.models import OPEN_STATUSES, STATUSES, Comment, Event, Issue, Project, utcnow
 
 KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
 UNASSIGNED = ("", "none", "null", "nobody", "unassigned")
 FILLER_WORDS = {"add", "and", "the", "for", "with", "from", "into", "make", "update", "fix", "create", "new"}
 REF_PATTERN = re.compile(r"^\s*([A-Za-z][A-Za-z0-9]*)-(\d+)\s*$")
+CLOSED_STATUSES = ("done", "cancelled")
 
 
 @dataclass(frozen=True)
@@ -110,22 +111,36 @@ def list_issues(
     status: str | None = None,
     assignee: str | None = None,
     limit: int | None = None,
+    query: str | None = None,
 ) -> list[Issue]:
-    """Issues in pile order. Without a status, only open issues (todo, in progress, in review)."""
-    query = select(Issue).join(Project)
+    """Issues in pile order. Without a status, only open issues (todo, in progress, in review).
+
+    query matches an issue id exactly, or words in titles and descriptions.
+    """
+    statement = select(Issue).join(Project)
     if project:
-        query = query.where(Issue.project_id == get_project(s, project).id)
+        statement = statement.where(Issue.project_id == get_project(s, project).id)
     if status is None:
-        query = query.where(Issue.status.in_(OPEN_STATUSES))
+        statement = statement.where(Issue.status.in_(OPEN_STATUSES))
     elif status != "all":
-        query = query.where(Issue.status == _check_status(status))
+        statement = statement.where(Issue.status == _check_status(status))
     if assignee is not None:
         assignee = clean_assignee(assignee)
-        query = query.where(Issue.assignee == assignee) if assignee else query.where(Issue.assignee.is_(None))
-    query = query.order_by(_status_order(), Issue.position, Issue.id)
+        statement = statement.where(Issue.assignee == assignee if assignee else Issue.assignee.is_(None))
+    if query and query.strip():
+        statement = statement.where(_matches(query.strip()))
+    statement = statement.order_by(_status_order(), Issue.position, Issue.id)
     if limit:
-        query = query.limit(limit)
-    return list(s.scalars(query))
+        statement = statement.limit(limit)
+    return list(s.scalars(statement))
+
+
+def _matches(query: str):
+    """An issue id matches that issue; otherwise every word must be in the title or description."""
+    if match := REF_PATTERN.match(query):
+        return and_(Project.key == match.group(1).upper(), Issue.number == int(match.group(2)))
+    text = func.lower(Issue.title + " " + Issue.description)
+    return and_(*(text.contains(word, autoescape=True) for word in query.lower().split()))
 
 
 def get_issue(s: Session, ref: str) -> Issue:
@@ -147,6 +162,7 @@ def create_issue(
     description: str = "",
     status: str = "todo",
     assignee: str | None = None,
+    blocked_by: list[str] | None = None,
 ) -> Issue:
     proj = get_project(s, project)
     if not title.strip():
@@ -155,6 +171,7 @@ def create_issue(
     assignee = clean_assignee(assignee)
     if status == "in_progress" and actor.is_agent and assignee is None:
         assignee = actor.name
+    blockers = [get_issue(s, ref) for ref in dict.fromkeys(blocked_by or [])]
     bottom = s.scalar(select(func.max(Issue.position)).where(Issue.project_id == proj.id))
     issue = Issue(
         project=proj,
@@ -165,9 +182,13 @@ def create_issue(
         assignee=assignee,
         position=(bottom or 0.0) + 1.0,
         created_by=actor.name,
+        blocked_by=blockers,
     )
     proj.next_number += 1
     s.add(issue)
+    _record(issue, actor, "created", new=status)
+    if blockers:
+        _record(issue, actor, "blocked_by", new=_refs(blockers))
     s.commit()
     return issue
 
@@ -182,12 +203,14 @@ def update_issue(
     status: str | None = None,
     assignee: str | None | object = _UNSET,
     position: float | None = None,
+    blocked_by: list[str] | None = None,
 ) -> Issue:
     """Change an issue.
 
-    The one rule: an agent can't change the status or assignee of an issue another
-    agent has in progress. Moving an issue to in_progress without naming an assignee
-    makes the agent its assignee, which is how an agent takes an issue.
+    Two rules for agents: they can't change the status or assignee of an issue another agent
+    has in progress, and they can't start an issue whose blockers aren't done. Moving an issue
+    to in_progress without naming an assignee makes the agent its assignee, which is how an
+    agent takes an issue.
     """
     issue = get_issue(s, ref)
     values: dict = {}
@@ -205,25 +228,87 @@ def update_issue(
         values["assignee"] = clean_assignee(assignee)
     if position is not None:
         values["position"] = float(position)
-    if not values:
-        return issue
+    blockers = _check_blockers(s, issue, blocked_by) if blocked_by is not None else None
 
-    statement = update(Issue).where(Issue.id == issue.id)
-    if actor.is_agent and ("status" in values or "assignee" in values):
-        # Checked in the same statement as the write, so two agents can't both take an issue.
-        statement = statement.where(
-            or_(Issue.status != "in_progress", Issue.assignee.is_(None), Issue.assignee == actor.name)
-        )
-    if set(values) != {"position"}:  # reordering the pile isn't an update to the issue
-        values["updated_at"] = utcnow()
-    result = s.execute(statement.values(**values).execution_options(synchronize_session=False))
-    if result.rowcount == 0:
-        s.rollback()
-        s.refresh(issue)
-        raise Conflict(f"{issue.ref} is in progress by {issue.assignee}. Pick another issue.")
+    starting = values.get("status") == "in_progress" and issue.status != "in_progress"
+    if actor.is_agent and starting:
+        waiting_for = open_blockers(issue) if blockers is None else _open(blockers)
+        if waiting_for:
+            raise Conflict(f"{issue.ref} is blocked by {_refs(waiting_for)}, which isn't done yet. Take another issue.")
+
+    before = {field: getattr(issue, field) for field in ("title", "description", "status", "assignee")}
+    old_blockers = list(issue.blocked_by)
+    changes = {field: new for field, new in values.items() if field in before and new != before[field]}
+    if values:
+        statement = update(Issue).where(Issue.id == issue.id)
+        if actor.is_agent and ("status" in values or "assignee" in values):
+            # Checked in the same statement as the write, so two agents can't both take an issue.
+            statement = statement.where(
+                or_(Issue.status != "in_progress", Issue.assignee.is_(None), Issue.assignee == actor.name)
+            )
+        if "status" in changes:
+            values["status_changed_at"] = utcnow()
+        if changes or blockers is not None:  # reordering the pile isn't an update to the issue
+            values["updated_at"] = utcnow()
+        result = s.execute(statement.values(**values).execution_options(synchronize_session=False))
+        if result.rowcount == 0:
+            s.rollback()
+            s.refresh(issue)
+            raise Conflict(f"{issue.ref} is in progress by {issue.assignee}. Pick another issue.")
+
+    for field in ("status", "assignee", "title"):
+        if field in changes:
+            _record(issue, actor, field, before[field], changes[field])
+    if "description" in changes:
+        _record(issue, actor, "description")
+    if blockers is not None and set(blockers) != set(old_blockers):
+        issue.blocked_by = blockers
+        if "updated_at" not in values:
+            issue.updated_at = utcnow()
+        _record(issue, actor, "blocked_by", _refs(old_blockers) or None, _refs(blockers) or None)
     s.commit()
     s.refresh(issue)
     return issue
+
+
+def open_blockers(issue: Issue) -> list[Issue]:
+    """The issues this one waits for that aren't done (or cancelled) yet."""
+    return _open(issue.blocked_by)
+
+
+def _open(blockers: list[Issue]) -> list[Issue]:
+    return [blocker for blocker in blockers if blocker.status not in CLOSED_STATUSES]
+
+
+def _check_blockers(s: Session, issue: Issue, refs: list[str]) -> list[Issue]:
+    blockers = [get_issue(s, ref) for ref in dict.fromkeys(refs)]
+    for blocker in blockers:
+        if blocker.id == issue.id:
+            raise Invalid(f"{issue.ref} can't block itself.")
+        if _waits_for(blocker, issue):
+            raise Invalid(f"{blocker.ref} already waits for {issue.ref}, so {issue.ref} can't wait for it.")
+    return blockers
+
+
+def _waits_for(issue: Issue, target: Issue) -> bool:
+    """Whether issue is blocked by target, directly or through other issues."""
+    seen, stack = set(), list(issue.blocked_by)
+    while stack:
+        current = stack.pop()
+        if current.id == target.id:
+            return True
+        if current.id not in seen:
+            seen.add(current.id)
+            stack.extend(current.blocked_by)
+    return False
+
+
+def _refs(issues: list[Issue]) -> str:
+    return ", ".join(issue.ref for issue in issues)
+
+
+def _record(issue: Issue, actor: Actor, kind: str, old: str | None = None, new: str | None = None) -> None:
+    issue.events.append(Event(actor=actor.name, actor_kind=actor.kind, kind=kind, old=old, new=new))
 
 
 def clean_assignee(assignee: str | None) -> str | None:
@@ -261,6 +346,36 @@ def _check_status(status: str) -> str:
     return status
 
 
+# Activity
+
+
+def recent_events(s: Session, limit: int = 50, project: str | None = None) -> list[Event]:
+    """What happened lately, newest first."""
+    statement = select(Event).join(Issue).order_by(Event.id.desc()).limit(limit)
+    if project:
+        statement = statement.where(Issue.project_id == get_project(s, project).id)
+    return list(s.scalars(statement))
+
+
+def describe_event(event: Event) -> str:
+    """One line of history, like "claude-code moved it to in_review"."""
+    who, old, new = event.actor, event.old, event.new
+    match event.kind:
+        case "created":
+            return f"{who} created it"
+        case "status":
+            return f"{who} moved it from {old} to {new}"
+        case "assignee":
+            return f"{who} assigned it to {new}" if new else f"{who} unassigned {old}"
+        case "title":
+            return f"{who} renamed it from {old!r}"
+        case "description":
+            return f"{who} edited the description"
+        case "blocked_by":
+            return f"{who} set it to wait for {new}" if new else f"{who} removed what it waited for"
+    return f"{who} changed {event.kind}"
+
+
 # Comments and the inbox
 
 
@@ -292,7 +407,7 @@ def inbox(s: Session) -> list[Comment]:
     query = (
         select(Comment)
         .join(Issue)
-        .where(Comment.asks_human, ~_unanswered(), Issue.status.not_in(("done", "cancelled")))
+        .where(Comment.asks_human, ~_unanswered(), Issue.status.not_in(CLOSED_STATUSES))
         .order_by(Comment.id)
     )
     return list(s.scalars(query))
@@ -300,6 +415,6 @@ def inbox(s: Session) -> list[Comment]:
 
 def waiting_on_human(issue: Issue) -> bool:
     last_question = max((c.id for c in issue.comments if c.asks_human), default=None)
-    if last_question is None or issue.status in ("done", "cancelled"):
+    if last_question is None or issue.status in CLOSED_STATUSES:
         return False
     return not any(c.author_kind == "human" and c.id > last_question for c in issue.comments)

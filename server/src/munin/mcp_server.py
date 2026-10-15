@@ -30,6 +30,8 @@ How to work:
 
 Planning: when the pile is empty, you can create issues that move the project toward its
 description. Check list_issues(project, status="all") first so you don't duplicate anything.
+When one issue needs another finished first, set blocked_by: nobody can take it until its
+blockers are done, so agents working in parallel don't trip over each other.
 Set duplicates and issues that aren't needed to status="cancelled".
 
 The human reads munin, not your session. To ask them something, use
@@ -83,20 +85,23 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         assignee: Annotated[
             str | None, Field(description='Only issues assigned to this name. "me" is you, "none" is unassigned.')
         ] = None,
+        query: Annotated[
+            str | None, Field(description="Words to look for in titles and descriptions, or an issue id.")
+        ] = None,
         limit: Annotated[int, Field(ge=1, le=200)] = 50,
     ) -> str:
         """List issues, most active first and then in pile order (the top of the pile comes first)."""
         if assignee == "me":
             assignee = _actor(ctx).name
         with sessions() as s:
-            found = svc.list_issues(s, project, status, assignee, limit)
+            found = svc.list_issues(s, project, status, assignee, limit, query)
             if not found:
                 return "No issues match."
             return "\n".join(_issue_line(issue) for issue in found)
 
     @tool
     def get_issue(issue: IssueRef) -> str:
-        """Get an issue with its description and comments."""
+        """Get an issue with its description, what it waits for, its history and comments."""
         with sessions() as s:
             return _issue_text(svc.get_issue(s, issue))
 
@@ -108,10 +113,13 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         description: Annotated[str, Field(description="Markdown. Say what done looks like.")] = "",
         status: Status = "todo",
         assignee: Annotated[str | None, Field(description="Agent or person to do it. Omit for anyone.")] = None,
+        blocked_by: Annotated[
+            list[str] | None, Field(description="Issues that must be done before anyone can start this one.")
+        ] = None,
     ) -> str:
         """Create an issue. It goes to the bottom of the project's pile."""
         with sessions() as s:
-            created = svc.create_issue(s, _actor(ctx), project, title, description, status, assignee)
+            created = svc.create_issue(s, _actor(ctx), project, title, description, status, assignee, blocked_by)
             reply = f"Created {created.ref}: {created.title}"
             if similar := svc.similar_open_issues(s, created):
                 reply += "\nThese open issues look similar. If it duplicates one, set it to cancelled:\n"
@@ -126,12 +134,15 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         description: str | None = None,
         status: Status | None = None,
         assignee: Annotated[str | None, Field(description='New assignee, or "none" to unassign.')] = None,
+        blocked_by: Annotated[
+            list[str] | None, Field(description="Replaces what this issue waits for. [] clears it.")
+        ] = None,
     ) -> str:
         """Change an issue. Setting status="in_progress" takes the issue and assigns it to you.
 
-        Fails if another agent has the issue in progress.
+        Fails if another agent has the issue in progress, or if it's blocked by issues that aren't done.
         """
-        changes = {"title": title, "description": description, "status": status}
+        changes = {"title": title, "description": description, "status": status, "blocked_by": blocked_by}
         if assignee is not None:
             changes["assignee"] = assignee
         with sessions() as s:
@@ -152,6 +163,20 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
             comment = svc.add_comment(s, _actor(ctx), issue, body, ask_human)
             return f"Commented on {comment.issue.ref}" + (" and asked the human." if comment.asks_human else ".")
 
+    @mcp.prompt(name="continue", description="Point this agent at a munin project and let it carry on.")
+    def continue_project(project: Annotated[str, Field(description="Project key, like MUN")]) -> str:
+        return (
+            f"Continue the {project} project in munin. Start with list_projects to read its brief, "
+            "then take, do and review issues until there's nothing left for you to do."
+        )
+
+    @mcp.prompt(name="work_on", description="Have this agent work on one munin issue.")
+    def work_on(issue: IssueRef) -> str:
+        return (
+            f"Work on {issue} in munin. Read it with get_issue and its project's brief with list_projects, "
+            "take it, do it, and move it to review when you're done."
+        )
+
     return mcp
 
 
@@ -166,6 +191,8 @@ def _issue_line(issue: Issue) -> str:
         parts.append(f"(assignee: {issue.assignee})")
     if svc.waiting_on_human(issue):
         parts.append("(waiting on the human)")
+    if issue.status not in svc.CLOSED_STATUSES and (waiting_for := svc.open_blockers(issue)):
+        parts.append(f"(blocked by {', '.join(blocker.ref for blocker in waiting_for)})")
     return " ".join(parts)
 
 
@@ -177,6 +204,13 @@ def _issue_text(issue: Issue) -> str:
         "",
         issue.description or "(no description)",
     ]
+    if issue.blocked_by:
+        lines += ["", "Waits for:"] + [_issue_line(blocker) for blocker in issue.blocked_by]
+    if issue.blocks:
+        lines += ["", "Blocks:"] + [_issue_line(blocked) for blocked in issue.blocks]
+    if issue.events:
+        lines += ["", "History:"]
+        lines += [f"{_when(event.created_at)}  {svc.describe_event(event)}" for event in issue.events[-12:]]
     if issue.comments:
         lines += ["", "Comments:"]
         lines += [_comment_text(comment) for comment in issue.comments]
