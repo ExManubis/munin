@@ -6,7 +6,7 @@ The designs for the tracker live in the Paper file "munin", with snapshots in `d
 
 ## Run the tracker
 
-It needs Python 3.13 and [uv](https://docs.astral.sh/uv/).
+It needs Python 3.13 and [uv](https://docs.astral.sh/uv/). To look around first, `cd server && uv run munin demo` opens munin with a sample project in a throwaway database.
 
 ```bash
 cd server

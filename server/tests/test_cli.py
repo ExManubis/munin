@@ -34,3 +34,18 @@ def test_errors_are_short(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("MUNIN_DB", str(tmp_path / "munin.db"))
     assert main(["agent", "revoke", "nobody"]) == 1
     assert capsys.readouterr().err == "munin: No agent named 'nobody'.\n"
+
+
+def test_demo_data_looks_lived_in(tmp_path):
+    from munin.demo import seed
+
+    with connect(tmp_path / "demo.db")() as s:
+        seed(s, "me")
+        assert [p.key for p in svc.list_projects(s)] == ["MUN", "WEB"]
+        assert [c.issue.ref for c in svc.inbox(s)] == ["MUN-1", "MUN-3"]
+        statuses = {i.ref: i.status for i in svc.list_issues(s, status="all")}
+        assert statuses["MUN-3"] == "in_review" and statuses["MUN-6"] == "todo" and statuses["MUN-11"] == "done"
+        assert [b.ref for b in svc.open_blockers(svc.get_issue(s, "MUN-9"))] == ["MUN-8"]
+        history = svc.recent_events(s, limit=500)
+        assert history[-1].created_at < history[0].created_at  # spread out, oldest first in time
+        assert all(i.created_at <= i.updated_at for i in svc.list_issues(s, status="all"))

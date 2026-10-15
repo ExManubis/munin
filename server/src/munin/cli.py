@@ -1,6 +1,7 @@
 import argparse
 import re
 import sys
+import tempfile
 import threading
 import webbrowser
 from datetime import datetime
@@ -29,6 +30,10 @@ def main(argv: list[str] | None = None) -> int:
 
     commands.add_parser("status", help="what's waiting on you and what agents are doing")
 
+    demo = commands.add_parser("demo", help="look around with a sample project, in a throwaway database")
+    demo.add_argument("--port", type=int, default=7778, help="port to listen on (default 7778)")
+    demo.add_argument("--no-open", action="store_true", help="don't open the web UI in your browser")
+
     agent = commands.add_parser("agent", help="manage agent tokens").add_subparsers(dest="action", required=True)
     agent_add = agent.add_parser("add", help="create an agent and print its token (or a new token for an existing one)")
     agent_add.add_argument("name", help="name the agent shows up as, like claude-code")
@@ -48,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "serve":
             return _serve(settings, args)
+        if args.command == "demo":
+            return _demo(settings, args)
         with connect(settings.db_path)() as s:
             if args.command == "status":
                 return _status(s)
@@ -60,19 +67,34 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _serve(settings: Settings, args: argparse.Namespace) -> int:
-    import uvicorn
-
-    from munin.app import create_app
-
     settings = Settings(
         db_path=settings.db_path,
         host=args.host or settings.host,
         port=args.port or settings.port,
         user=settings.user,
     )
+    return _run(settings, f"database {settings.db_path}", open_browser=args.open)
+
+
+def _demo(settings: Settings, args: argparse.Namespace) -> int:
+    from munin.demo import seed
+
+    db_path = Path(tempfile.mkdtemp(prefix="munin-demo-")) / "demo.db"
+    with connect(db_path)() as s:
+        seed(s, settings.user)
+    settings = Settings(db_path=db_path, host="127.0.0.1", port=args.port, user=settings.user)
+    note = "a sample project in a throwaway database; your own data isn't touched"
+    return _run(settings, note, open_browser=not args.no_open)
+
+
+def _run(settings: Settings, note: str, open_browser: bool) -> int:
+    import uvicorn
+
+    from munin.app import create_app
+
     print("\n".join(raven()))
-    print(f"\n  munin {version('munin')} · {settings.url}\n  database {settings.db_path}\n")
-    if args.open:
+    print(f"\n  munin {version('munin')} · {settings.url}\n  {note}\n")
+    if open_browser:
         threading.Timer(1.0, webbrowser.open, [settings.url]).start()
     # Open live streams from the web UI shouldn't hold up Ctrl+C.
     uvicorn.run(create_app(settings), host=settings.host, port=settings.port, timeout_graceful_shutdown=2)
