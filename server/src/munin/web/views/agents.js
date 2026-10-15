@@ -1,8 +1,9 @@
 // Agents: who can connect over MCP, with a token each. Add one, copy its setup, revoke it.
 
 import { api } from '../api.js';
-import { store } from '../store.js';
-import { h, agentAvatar, time, topbar, bindDraft, drafts, toast, copyButton, isActive } from '../ui.js';
+import { store, isWorking } from '../store.js';
+import { h, agentAvatar, statusIcon, time, topbar, bindDraft, drafts, toast, copyButton, toggle } from '../ui.js';
+import { notificationsSupported, notificationsOn, toggleNotifications } from '../notify.js';
 
 let created = null; // { name, token } for the token just created; shown once
 let tab = 'claude';
@@ -32,7 +33,8 @@ export const view = {
           h('code', {}, me.mcp_url),
           copyButton(() => me.mcp_url)),
         table(agents, ctx),
-        connect(agents, me, ctx)));
+        connect(agents, me, ctx),
+        notifications(ctx)));
   },
 };
 
@@ -43,21 +45,48 @@ function table(agents, ctx) {
       ? h('div', { class: 'agent-table', role: 'table', 'aria-label': 'Agents' },
         h('div', { class: 'agent-row head', role: 'row' },
           h('span', { class: 'label', role: 'columnheader' }, 'Agent'),
-          h('span', { class: 'label', role: 'columnheader' }, 'Last seen'),
+          h('span', { class: 'label', role: 'columnheader' }, 'Doing'),
           h('span', { class: 'label', role: 'columnheader' }, 'Token'),
           h('span', { role: 'columnheader' })),
         agents.map((a) => h('div', { class: ['agent-row', a.revoked && 'revoked'], role: 'row' },
           h('span', { class: 'agent-name', role: 'cell' }, agentAvatar(a.name), h('span', {}, a.name)),
-          h('span', { class: 'agent-seen', role: 'cell' },
-            a.revoked ? h('span', { class: 'label' }, 'Revoked')
-              : a.last_seen_at ? [time(a.last_seen_at, { long: true }), isActive(a) ? h('span', { class: 'muted' }, ' · active') : null]
-                : h('span', { class: 'muted' }, 'Never connected')),
+          h('span', { class: 'agent-seen', role: 'cell' }, doing(a)),
           h('span', { class: 'mono muted', role: 'cell' }, `mun_…${a.token_hint}`),
           h('span', { class: 'agent-action', role: 'cell' },
             a.revoked
               ? h('button', { type: 'button', class: 'link', onclick: () => issueToken(a.name, ctx) }, 'New token')
               : h('button', { type: 'button', class: 'link', onclick: () => revoke(a.name, ctx) }, 'Revoke')))))
       : h('p', { class: 'muted' }, 'No agents yet. Add one below, then paste the command into its terminal.'));
+}
+
+// Working on what, idle since when, or never connected.
+function doing(agent) {
+  const seen = agent.last_seen_at ? time(agent.last_seen_at, { long: true, prefix: 'seen ', cls: 'muted' }) : null;
+  if (agent.revoked) return h('span', { class: 'agent-state' }, h('span', { class: 'label' }, 'Revoked'));
+  if (!agent.last_seen_at) return h('span', { class: 'agent-state muted' }, 'Never connected');
+  if (!isWorking(agent)) return h('span', { class: 'agent-state' }, h('span', { class: 'state' }, 'Idle'), ' · ', seen);
+  return h('span', { class: 'agent-state' },
+    h('span', { class: 'state working' }, 'Working'), ' · ', seen,
+    agent.working_on.map((issue) => h('a', { class: 'working-on', href: `#/issues/${issue.id}` },
+      statusIcon(issue.status), h('span', { class: 'mono' }, issue.id), h('span', { class: 'working-title' }, issue.title))));
+}
+
+function notifications(ctx) {
+  if (!notificationsSupported) return null;
+  const on = notificationsOn();
+  const denied = Notification.permission === 'denied';
+  return h('section', { class: 'section' },
+    h('div', { class: 'section-head' }, h('h2', {}, 'Notifications')),
+    h('div', { class: 'setting' },
+      h('div', { class: 'setting-main' },
+        h('div', {}, 'Notify me when an agent asks something'),
+        h('div', { class: 'hint' }, denied
+          ? 'Your browser blocks notifications from munin. Allow them in the site settings first.'
+          : 'A desktop notification for each new question, and when an agent moves work to In review. Only while munin is open in a tab.')),
+      toggle(on, 'Notify me when an agent asks something', async () => {
+        await toggleNotifications();
+        ctx.rerender();
+      })));
 }
 
 async function revoke(name, ctx) {

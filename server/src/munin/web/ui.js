@@ -1,7 +1,8 @@
 // DOM helpers, pixel icons, identities, relative times, drafts and toasts.
 // Everything is built with createElement and text nodes; nothing here parses HTML.
 
-import { store, kindOf, ACTIVE_MS } from './store.js';
+import { api } from './api.js';
+import { store, kindOf, isWorking } from './store.js';
 
 export const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl ';
 
@@ -81,6 +82,8 @@ const ICONS = {
   ],
   list: (c) => [R(0, 1, 12, 2, c), R(0, 5, 12, 2, c), R(0, 9, 8, 2, c)],
   plus: (c) => [R(5, 0, 2, 12, c), R(0, 5, 12, 2, c)],
+  search: (c) => [['rect', { x: 1.5, y: 1.5, width: 6, height: 6, fill: 'none', stroke: c }], R(8, 8, 3, 3, c)],
+  board: (c) => [R(0, 0, 3, 12, c), R(4.5, 0, 3, 8, c), R(9, 0, 3, 10, c)],
   up: (c) => [R(5, 1, 2, 10, c), R(3, 3, 2, 2, c), R(7, 3, 2, 2, c), R(1, 5, 2, 2, c), R(9, 5, 2, 2, c)],
   down: (c) => [R(5, 1, 2, 10, c), R(3, 7, 2, 2, c), R(7, 7, 2, 2, c), R(1, 5, 2, 2, c), R(9, 5, 2, 2, c)],
   top: (c) => [R(1, 0, 10, 2, c), R(5, 3, 2, 9, c), R(3, 5, 2, 2, c), R(7, 5, 2, 2, c), R(1, 7, 2, 2, c), R(9, 7, 2, 2, c)],
@@ -105,15 +108,16 @@ export function avatar(name, { kind, idle = false, size = 18 } = {}) {
   return h('span', { class: 'avatar person', 'aria-hidden': 'true', style }, (name.trim()[0] || '?').toUpperCase());
 }
 
-export function isActive(agent) {
-  const seen = parseTime(agent.last_seen_at);
-  return !agent.revoked && seen && Date.now() - seen < ACTIVE_MS;
-}
-
-// An avatar for an agent name, dimmed when that agent hasn't called munin lately.
+// An avatar for an agent name, dimmed while that agent has nothing in progress.
 export function agentAvatar(name, opts) {
   const agent = store.agents.find((a) => a.name === name);
-  return avatar(name, { kind: 'agent', idle: agent ? !isActive(agent) : false, ...opts });
+  return avatar(name, { kind: 'agent', idle: agent ? !isWorking(agent) : false, ...opts });
+}
+
+// Agents, people and nobody, each with the right square.
+export function personAvatar(name, opts) {
+  if (!name) return avatar(null, opts);
+  return kindOf(name) === 'agent' ? agentAvatar(name, opts) : avatar(name, { kind: 'human', ...opts });
 }
 
 export const logoMark = () => h('img', { src: 'munin-mark-dither-on-dark.svg', alt: '', width: 36, height: 36 });
@@ -197,10 +201,73 @@ export function firstLine(text) {
 
 // Toasts and clipboard -----------------------------------------------------------
 
-export function toast(message, { error = false, href } = {}) {
+// A short message in the corner. `action` adds a button, like { label: 'Undo', run }.
+export function toast(message, { error = false, href, action } = {}) {
   const el = h(href ? 'a' : 'div', { class: ['toast', error && 'error'], href, role: error ? 'alert' : 'status' }, message);
+  if (action) {
+    el.append(' · ', h('button', {
+      type: 'button',
+      class: 'toast-action',
+      onclick: () => {
+        el.remove();
+        action.run();
+      },
+    }, action.label));
+  }
   document.getElementById('toasts').append(el);
-  setTimeout(() => el.remove(), error ? 7000 : 4000);
+  setTimeout(() => el.remove(), error ? 7000 : action ? 9000 : 4000);
+}
+
+// Change an issue's status and/or assignee, with a toast that can undo it.
+export async function changeIssue(issue, changes, reload) {
+  const before = {};
+  for (const key of Object.keys(changes)) before[key] = key === 'assignee' ? issue.assignee || '' : issue[key];
+  const status = changes.status !== undefined && changes.status !== issue.status;
+  const assignee = changes.assignee !== undefined && (changes.assignee || null) !== (issue.assignee || null);
+  if (!status && !assignee) return;
+  let message;
+  if (status && assignee && changes.status === 'todo' && !changes.assignee) message = `Put ${issue.id} back on the pile`;
+  else if (status) message = `Moved ${issue.id} to ${statusLabel(changes.status)}`;
+  else message = changes.assignee ? `Assigned ${issue.id} to ${changes.assignee}` : `Unassigned ${issue.id}`;
+  try {
+    await api.updateIssue(issue.id, changes);
+    toast(message, {
+      action: {
+        label: 'Undo',
+        run: async () => {
+          try {
+            await api.updateIssue(issue.id, before);
+            toast(`Undone: ${issue.id} is back as it was`);
+          } catch (err) {
+            toast(err.message, { error: true });
+          }
+          reload();
+        },
+      },
+    });
+  } catch (err) {
+    toast(err.message, { error: true });
+  }
+  reload();
+}
+
+// An on/off switch: solid when on, dotted when off.
+export function toggle(on, label, onchange) {
+  return h('button', { type: 'button', class: ['toggle', on && 'on'], role: 'switch', 'aria-checked': String(on), 'aria-label': label, onclick: onchange },
+    h('span', { class: 'toggle-knob' }));
+}
+
+// Copyable ways to point an agent at a project or an issue.
+export function agentPrompts(slash, prompt) {
+  const rows = [
+    ['Claude Code', slash],
+    ['Any agent', prompt],
+    ['Headless', `claude -p "${prompt}"`],
+  ];
+  return h('div', { class: 'handoff' },
+    rows.map(([label, text]) => h('div', { class: 'handoff-row' },
+      h('div', { class: 'handoff-head' }, h('span', { class: 'label' }, label), copyButton(() => text)),
+      h('code', {}, text))));
 }
 
 export async function copyText(text) {

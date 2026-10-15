@@ -42,6 +42,7 @@ export const api = {
   createProject: (fields) => request('POST', '/api/projects', fields),
   updateProject: (key, fields) => request('PATCH', `/api/projects/${enc(key)}`, fields),
 
+  // params: project, status ("all" for every status), assignee, q (an id or words), limit
   issues: (params) => get(`/api/issues?${new URLSearchParams(params)}`),
   issue: (id) => get(`/api/issues/${enc(id)}`),
   createIssue: (fields) => request('POST', '/api/issues', fields),
@@ -49,6 +50,7 @@ export const api = {
   comment: (id, body) => request('POST', `/api/issues/${enc(id)}/comments`, { body }),
 
   inbox: () => get('/api/inbox'),
+  activity: (params) => get(`/api/activity?${new URLSearchParams(params)}`),
 
   agents: () => get('/api/agents'),
   addAgent: (name) => request('POST', '/api/agents', { name }),

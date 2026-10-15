@@ -1,8 +1,10 @@
-// The new-issue and new-project dialogs, both in the one <dialog id="dialog">.
+// Dialogs, all in the one <dialog id="dialog">: new issue, new project and the shortcut list.
+// The command palette (palette.js) opens in it too.
 
 import { api } from './api.js';
 import { store, liveAgents } from './store.js';
-import { h, kbd, MOD, avatar, agentAvatar, bindDraft, drafts, toast } from './ui.js';
+import { h, kbd, MOD, avatar, agentAvatar, statusIcon, bindDraft, drafts, toast } from './ui.js';
+import { issuePicker } from './search.js';
 
 const dialog = document.getElementById('dialog');
 let afterChange = () => {};
@@ -19,12 +21,18 @@ dialog.addEventListener('mousedown', (e) => {
   if (e.target === dialog) dialog.close();
 });
 
-function open(content, focus) {
+export function openDialog(content, focus, kind = '') {
   if (dialog.open) dialog.close();
+  dialog.className = kind ? `modal modal-${kind}` : 'modal';
+  dialog.dataset.kind = kind;
   dialog.replaceChildren(content);
   dialog.showModal();
   focus?.focus();
 }
+
+export const dialogOpen = (kind) => dialog.open && (kind === undefined || dialog.dataset.kind === kind);
+export const closeDialog = () => dialog.open && dialog.close();
+const open = openDialog;
 
 function sheet({ head, body, foot, submit }) {
   const form = h('form', { class: 'sheet', novalidate: true },
@@ -107,6 +115,46 @@ export function openNewIssue() {
     return button;
   });
 
+  // Optional: issues this one waits for.
+  const waits = drafts.get('new-issue:waits') || [];
+  const waitsBox = h('div', { class: 'waits' });
+  let picking = false;
+  const drawWaits = () => {
+    drafts.set('new-issue:waits', waits);
+    waitsBox.replaceChildren(...[
+      h('span', { class: 'label' }, 'Waits for'),
+      waits.map((issue) => h('span', { class: 'dep-chip' },
+        statusIcon(issue.status), h('span', { class: 'mono' }, issue.id), h('span', { class: 'dep-chip-title' }, issue.title),
+        h('button', {
+          type: 'button',
+          class: 'dep-remove',
+          'aria-label': `Remove ${issue.id}`,
+          onclick: () => {
+            waits.splice(waits.indexOf(issue), 1);
+            drawWaits();
+          },
+        }, '×'))),
+      picking
+        ? issuePicker({
+          key: 'new-issue:waits-search',
+          exclude: (i) => waits.some((w) => w.id === i.id),
+          onPick: (issue) => {
+            waits.push({ id: issue.id, title: issue.title, status: issue.status });
+            picking = false;
+            drawWaits();
+            title.focus();
+          },
+          onCancel: () => {
+            picking = false;
+            drawWaits();
+          },
+        })
+        : h('button', { type: 'button', class: 'link', onclick: () => { picking = true; drawWaits(); waitsBox.querySelector('input')?.focus(); } },
+          waits.length ? '+ Another' : '+ Add'),
+    ].flat());
+  };
+  drawWaits();
+
   const error = h('p', { class: 'form-error', role: 'alert' });
   const create = primary('Create in Todo');
 
@@ -121,9 +169,10 @@ export function openNewIssue() {
       description: description.value.trim(),
       status: 'todo',
       assignee,
+      blocked_by: waits.map((w) => w.id),
     });
     lastProject = project.value;
-    for (const key of ['title', 'description', 'assignee']) drafts.delete(`new-issue:${key}`);
+    for (const key of ['title', 'description', 'assignee', 'waits', 'waits-search']) drafts.delete(`new-issue:${key}`);
     dialog.close();
     toast(`Created ${issue.id} · ${issue.title}`, { href: `#/issues/${issue.id}` });
     afterChange();
@@ -131,7 +180,7 @@ export function openNewIssue() {
 
   open(sheet({
     head: [h('span', { class: 'label' }, 'New issue in'), h('label', { class: 'select-chip' }, project)],
-    body: [title, description, error],
+    body: [title, description, waitsBox, error],
     foot: [
       h('div', { class: 'assign' }, h('span', { class: 'label' }, 'Assign'), h('div', { class: 'seg', role: 'group', 'aria-label': 'Assignee' }, buttons)),
       create,
@@ -191,4 +240,27 @@ export function openNewProject() {
     foot: [h('span', { class: 'hint' }, 'You can change the name and brief later.'), create],
     submit,
   }), name);
+}
+
+// Keyboard shortcuts ------------------------------------------------------------------
+
+const SHORTCUTS = [
+  ['Anywhere', [[[`${MOD.trim()} K`], 'Search or jump to anything'], [['C'], 'New issue'], [['?'], 'This list']]],
+  ['Inbox', [[['J', 'K'], 'Next and previous question'], [['↵'], 'Open the issue'], [['R'], 'Write an answer']]],
+  ['Issue', [[['E'], 'Edit title and description'], [['R'], 'Write a comment']]],
+  ['Project', [[['E'], 'Edit the brief'], [['B'], 'Switch between list and board']]],
+  ['Writing', [[[`${MOD.trim()} ↵`], 'Send or save'], [['Esc'], 'Cancel, or close a dialog']]],
+  ['Lists and search', [[['↑', '↓'], 'Move'], [['↵'], 'Choose'], [['Esc'], 'Close']]],
+];
+
+export function openShortcuts() {
+  const sheet = h('div', { class: 'sheet', tabindex: -1 },
+    h('header', { class: 'sheet-head' },
+      h('div', { class: 'sheet-title' }, h('span', { class: 'label' }, 'Keyboard shortcuts')),
+      h('button', { type: 'button', class: 'close', onclick: () => dialog.close() }, h('span', { class: 'label' }, 'Close'), kbd('Esc'))),
+    h('div', { class: 'sheet-body shortcuts' },
+      SHORTCUTS.map(([group, keys]) => h('section', {},
+        h('h2', { class: 'label' }, group),
+        keys.map(([combo, what]) => h('div', { class: 'shortcut' }, h('span', { class: 'shortcut-keys' }, combo.map(kbd)), h('span', {}, what)))))));
+  open(sheet, sheet, 'small');
 }

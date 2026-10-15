@@ -1,12 +1,13 @@
-// A project's issues grouped by status, with its brief and the reorderable Todo pile.
-// Also the plain list of projects that the phone tab bar opens.
+// A project's issues, as a list grouped by status or as a board, with its brief and the
+// reorderable Todo pile. Also the plain list of projects that the phone tab bar opens.
 
 import { api, ApiError } from '../api.js';
-import { store, openCount, kindOf } from '../store.js';
+import { store, openCount, quietAgent, remember } from '../store.js';
 import { markdown } from '../markdown.js';
 import { openNewIssue, openNewProject } from '../dialogs.js';
 import {
-  h, kbd, MOD, icon, avatar, agentAvatar, statusIcon, time, topbar, bindDraft, drafts, onModEnter, toast, firstLine,
+  h, kbd, MOD, icon, personAvatar, statusIcon, time, parseTime, topbar, bindDraft, drafts, onModEnter, toast, firstLine,
+  changeIssue, agentPrompts,
 } from '../ui.js';
 
 const GROUPS = [
@@ -18,8 +19,14 @@ const GROUPS = [
 ];
 
 const expanded = new Set(); // "KEY:done" when a collapsed group is open
+const handoff = new Set(); // keys of projects whose "Put an agent on it" panel is open
 let editing = null; // key of the project whose brief is being edited
 let drag = null; // { pile, from } while a Todo row is being dragged
+let cardDrag = null; // { issue, pile, from } while a board card is being dragged
+
+// List or board, remembered per project.
+const layoutKey = (key) => `munin:layout:${key}`;
+const layoutOf = (key) => (remember(layoutKey(key)) === 'board' ? 'board' : 'list');
 
 export const view = {
   title: (data) => data.project.name,
@@ -37,22 +44,61 @@ export const view = {
     groups.todo.sort((a, b) => a.position - b.position || number(a) - number(b));
 
     const open = groups.in_progress.length + groups.in_review.length + groups.todo.length;
-    return h('div', { class: 'page project' },
+    const layout = layoutOf(project.key);
+    const setLayout = (value) => () => {
+      remember(layoutKey(project.key), value);
+      ctx.rerender();
+    };
+    const showingHandoff = handoff.has(project.key);
+    return h('div', { class: ['page', 'project', layout === 'board' && 'boarded'] },
       topbar(
-        [h('span', { class: 'title' }, project.name), h('span', { class: 'mono muted' }, `${project.key} · ${open} open`)],
-        h('button', { type: 'button', class: 'btn primary small', onclick: openNewIssue }, 'New issue', h('span', { class: 'key' }, 'C'))),
+        [
+          h('span', { class: 'title' }, project.name),
+          h('span', { class: 'mono muted wide-only' }, `${project.key} · ${open} open`),
+          h('span', { class: 'tabs layout-tabs', role: 'tablist', 'aria-label': 'Layout' },
+            h('button', { type: 'button', role: 'tab', 'aria-selected': String(layout === 'list'), onclick: setLayout('list') }, 'List'),
+            h('button', { type: 'button', role: 'tab', 'aria-selected': String(layout === 'board'), onclick: setLayout('board') }, 'Board')),
+        ],
+        [
+          h('button', {
+            type: 'button',
+            class: 'link handoff-toggle',
+            'aria-expanded': String(showingHandoff),
+            onclick: () => {
+              if (showingHandoff) handoff.delete(project.key);
+              else handoff.add(project.key);
+              ctx.rerender();
+            },
+          }, h('span', { class: 'wide-only' }, 'Put an agent on it'), h('span', { class: 'phone-only' }, 'Agent')),
+          h('button', { type: 'button', class: 'btn primary small', onclick: openNewIssue }, 'New issue', h('span', { class: 'key' }, 'C')),
+        ]),
       brief(project, ctx),
-      issues.length
-        ? h('div', { class: 'groups' }, GROUPS.map((g) => group(g, groups[g.status], project, ctx)))
-        : h('div', { class: 'empty-state small' },
+      showingHandoff
+        ? h('section', { class: 'handoff-panel' },
+          h('div', { class: 'brief-head' },
+            h('span', { class: 'label' }, 'Put an agent on it'),
+            h('span', { class: 'hint' }, 'Paste one of these into an agent that has munin connected.')),
+          agentPrompts(`/mcp__munin__continue ${project.key}`,
+            `You have access to munin, an issue tracker. Continue the ${project.key} project. Keep going until there is nothing left for you to do.`))
+        : null,
+      !issues.length
+        ? h('div', { class: 'empty-state small' },
           h('h2', {}, 'No issues yet'),
           h('p', {}, 'Create the first one and it goes on the pile, where agents pick it up.'),
-          h('button', { type: 'button', class: 'btn', onclick: openNewIssue }, 'New issue', h('span', { class: 'key' }, 'C'))));
+          h('button', { type: 'button', class: 'btn', onclick: openNewIssue }, 'New issue', h('span', { class: 'key' }, 'C')))
+        : layout === 'board'
+          ? board(project, groups, ctx)
+          : h('div', { class: 'groups' }, GROUPS.map((g) => group(g, groups[g.status], project, ctx))));
   },
 
-  onKey(e) {
+  onKey(e, { project }, ctx) {
     if (e.key === 'e') {
       document.querySelector('.brief .edit')?.click();
+      return true;
+    }
+    if (e.key === 'b') {
+      remember(layoutKey(project.key), layoutOf(project.key) === 'board' ? 'list' : 'board');
+      ctx.rerender();
       return true;
     }
     return false;
@@ -145,9 +191,36 @@ function group(g, issues, project, ctx) {
       : null);
 }
 
+// "Waits for MUN-1", linking to the first open blocker.
+function waitsChip(issue) {
+  const ids = issue.blocked_by;
+  if (!ids.length || issue.status === 'done' || issue.status === 'cancelled') return null;
+  return h('a', { class: 'chip quiet', href: `#/issues/${ids[0]}`, title: `Waits for ${ids.join(', ')}` },
+    `Waits for ${ids[0]}${ids.length > 1 ? ` +${ids.length - 1}` : ''}`);
+}
+
+function waitingChip(issue) {
+  if (!issue.waiting_on_human) return null;
+  const asked = store.inbox.find((i) => i.issue.id === issue.id);
+  return h('a', { class: 'chip', href: asked ? `#/inbox/${asked.question.id}` : `#/issues/${issue.id}`, title: 'An agent asked you something on this issue' }, 'Waiting on you');
+}
+
+// "quiet 2h" when the agent on it hasn't been heard from for a while.
+function quietHint(issue) {
+  const quiet = quietAgent(issue);
+  if (!quiet) return null;
+  const title = quiet.since ? `${quiet.agent.name} hasn't called munin since then` : `${quiet.agent.name} has never connected`;
+  return quiet.since ? time(quiet.since, { prefix: 'quiet ', cls: 'quiet-hint' }) : h('span', { class: 'quiet-hint', title }, 'quiet');
+}
+
+// How long it has been in progress or in review; otherwise when it last changed.
+function when(issue) {
+  const active = issue.status === 'in_progress' || issue.status === 'in_review';
+  return time(active ? issue.status_changed_at : issue.updated_at, { cls: 'when' });
+}
+
 function row(issue, pile) {
   const href = `#/issues/${issue.id}`;
-  const asked = store.inbox.find((i) => i.issue.id === issue.id);
   const el = h('div', {
     class: ['row', (issue.status === 'done' || issue.status === 'cancelled') && 'closed', pile && 'pile-row'],
     onclick: (e) => {
@@ -158,15 +231,15 @@ function row(issue, pile) {
     h('span', { class: 'id' }, issue.id),
     statusIcon(issue.status, true),
     h('span', { class: 'row-title' }, h('a', { href, draggable: false }, issue.title)),
-    issue.waiting_on_human
-      ? h('a', { class: 'chip', href: asked ? `#/inbox/${asked.question.id}` : href, title: 'An agent asked you something on this issue' }, 'Waiting on you')
-      : null,
+    waitingChip(issue),
+    waitsChip(issue),
     h('span', { class: 'spacer' }),
     pile ? moveButtons(pile) : null,
+    quietHint(issue),
     h('span', { class: 'who', title: issue.assignee ? `Assigned to ${issue.assignee}` : 'Unassigned' },
-      issue.assignee ? (kindOf(issue.assignee) === 'agent' ? agentAvatar(issue.assignee) : avatar(issue.assignee)) : avatar(null),
+      personAvatar(issue.assignee),
       h('span', { class: 'who-name' }, issue.assignee || '')),
-    time(issue.updated_at, { cls: 'when' }));
+    when(issue));
   if (pile) makeDraggable(el, pile);
   return el;
 }
@@ -253,6 +326,104 @@ async function move(pile, from, to, ctx) {
     toast(err.message, { error: true });
   }
   ctx.reload();
+}
+
+// Board ----------------------------------------------------------------------------------
+// Columns by status. Dragging a card to another column changes its status; dragging it within
+// Todo reorders the pile.
+
+function board(project, groups, ctx) {
+  const done = groups.done.slice().sort((a, b) => parseTime(b.status_changed_at) - parseTime(a.status_changed_at));
+  const columns = [
+    ['todo', 'Todo', groups.todo],
+    ['in_progress', 'In progress', groups.in_progress],
+    ['in_review', 'In review', groups.in_review],
+    ['done', 'Done', done.slice(0, 10)],
+  ];
+  return h('div', { class: 'board', 'data-scroll': `board-${project.key}` },
+    columns.map(([status, label, issues]) => column(status, label, issues, status === 'done' ? done.length : issues.length, ctx)));
+}
+
+function column(status, label, issues, total, ctx) {
+  const cards = h('div', { class: 'cards' },
+    issues.length
+      ? issues.map((issue, i) => card(issue, status === 'todo' ? { pile: issues, index: i } : null))
+      : h('p', { class: 'cards-empty' }, status === 'todo' ? 'The pile is empty.' : 'Nothing here.'));
+  const col = h('section', { class: 'column', 'aria-label': label },
+    h('div', { class: 'column-head' },
+      statusIcon(status),
+      h('span', { class: 'group-label' }, label),
+      h('span', { class: 'mono muted' }, total),
+      status === 'done' && total > issues.length ? h('span', { class: 'hint' }, `· latest ${issues.length}`) : null),
+    cards);
+
+  // Where in this column a drop at y lands, counted without the card being dragged.
+  const slot = (y) => {
+    const others = [...cards.querySelectorAll('.card:not(.dragging)')];
+    const index = others.findIndex((c) => y < c.getBoundingClientRect().top + c.offsetHeight / 2);
+    return { others, index: index === -1 ? others.length : index };
+  };
+  const clear = () => {
+    col.classList.remove('drop');
+    for (const c of cards.querySelectorAll('.drop-before, .drop-after')) c.classList.remove('drop-before', 'drop-after');
+  };
+  const reordering = () => cardDrag && status === 'todo' && cardDrag.issue.status === 'todo';
+  col.addEventListener('dragover', (e) => {
+    if (!cardDrag || (cardDrag.issue.status === status && !reordering())) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    clear();
+    col.classList.add('drop');
+    if (reordering()) {
+      const { others, index } = slot(e.clientY);
+      if (others[index]) others[index].classList.add('drop-before');
+      else others[others.length - 1]?.classList.add('drop-after');
+    }
+  });
+  col.addEventListener('dragleave', (e) => {
+    if (!col.contains(e.relatedTarget)) clear();
+  });
+  col.addEventListener('drop', (e) => {
+    if (!cardDrag) return;
+    e.preventDefault();
+    clear();
+    const { issue, pile, from } = cardDrag;
+    if (reordering()) {
+      const { index } = slot(e.clientY);
+      move(pile, from, index, ctx);
+    } else if (issue.status !== status) {
+      changeIssue(issue, { status }, ctx.reload);
+    }
+  });
+  return col;
+}
+
+function card(issue, pile) {
+  const href = `#/issues/${issue.id}`;
+  const el = h('div', {
+    class: ['card', issue.status === 'done' && 'closed'],
+    draggable: true,
+    onclick: (e) => {
+      if (!e.target.closest('a, button')) location.hash = href;
+    },
+  },
+    h('div', { class: 'card-top' }, h('span', { class: 'id' }, issue.id), h('span', { class: 'spacer' }), quietHint(issue), when(issue)),
+    h('a', { class: 'card-title', href, draggable: false }, issue.title),
+    issue.waiting_on_human || issue.blocked_by.length ? h('div', { class: 'card-chips' }, waitingChip(issue), waitsChip(issue)) : null,
+    h('div', { class: 'card-foot' }, personAvatar(issue.assignee, { size: 14 }), h('span', { class: 'who-name' }, issue.assignee || 'Anyone')));
+  el.addEventListener('dragstart', (e) => {
+    cardDrag = { issue, pile: pile?.pile, from: pile?.index };
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', issue.id);
+    el.classList.add('dragging');
+    document.body.classList.add('dragging');
+  });
+  el.addEventListener('dragend', () => {
+    cardDrag = null;
+    el.classList.remove('dragging');
+    document.body.classList.remove('dragging');
+  });
+  return el;
 }
 
 // The list of projects ---------------------------------------------------------------
