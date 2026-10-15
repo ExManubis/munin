@@ -252,3 +252,31 @@ def test_wait_for_work_hears_answers(server):
         svc.add_comment(s, HUMAN, "MUN-1", "SQLite")
     ((_, text),) = run(url, tokens["claude-code"], ("wait_for_work", {"project": "MUN"}))
     assert text == "The human answered you on:\nMUN-1 [in_progress] First (assignee: claude-code)"
+
+
+def test_wait_for_work_waits_for_issues_queued_for_others(server):
+    url, tokens, settings = server
+    with connect(settings.db_path)() as s:
+        svc.update_issue(s, HUMAN, "MUN-1", assignee="codex")  # sent back to codex after a review
+        svc.update_issue(s, HUMAN, "MUN-2", blocked_by=["MUN-1"])
+    run(url, tokens["codex"], ("list_projects", {}))  # codex is around
+    ((_, text),) = run(url, tokens["claude-code"], ("wait_for_work", {"project": "MUN", "seconds": 1}))
+    assert text.startswith("Nothing for you yet. Still going on:\nMUN-1 [todo] First (assignee: codex)")
+
+
+def test_wait_for_work_stops_when_nobody_else_is_around(server):
+    url, tokens, settings = server
+    with connect(settings.db_path)() as s:
+        svc.update_issue(s, HUMAN, "MUN-2", blocked_by=["MUN-1"])
+    results = run(
+        url,
+        tokens["claude-code"],
+        ("update_issue", {"issue": "MUN-1", "status": "in_progress"}),
+        ("update_issue", {"issue": "MUN-1", "status": "in_review"}),
+        ("wait_for_work", {"project": "MUN"}),
+    )
+    assert results[-1][1] == (
+        "No other agent has been in touch for 5 minutes, so nobody is around to pick these up:\n"
+        "MUN-1 [in_review] First (assignee: claude-code)\n"
+        "Stop here. They'll wait for the next agent (your own work needs someone else to review it)."
+    )

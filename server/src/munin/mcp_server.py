@@ -14,6 +14,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 from sqlalchemy.orm import Session, sessionmaker
 
+from munin import agents
 from munin import issues as svc
 from munin.issues import Actor, MuninError
 from munin.models import Comment, Issue, utcnow
@@ -50,7 +51,9 @@ issue to take, work to review, an answer from the human), and tells you when the
 left worth waiting for.
 """
 # How long the project can sit still before wait_for_work stops suggesting more waiting.
-QUIET_FOR = timedelta(minutes=30)
+QUIET_FOR = timedelta(minutes=15)
+# Another agent seen this recently might still review your work or take what's queued for it.
+OTHERS_AROUND = timedelta(minutes=5)
 
 Status = Literal["todo", "in_progress", "in_review", "done", "cancelled"]
 IssueRef = Annotated[str, Field(description="Issue id, like MUN-12")]
@@ -226,15 +229,31 @@ def _actor(ctx: Context) -> Actor:
 
 
 def _look_for_work(sessions: sessionmaker[Session], agent: str, project: str) -> tuple[str | None, str]:
-    """An answer for wait_for_work if there's work or nothing to wait for, else what's still going on."""
+    """An answer for wait_for_work if there's work or nothing worth waiting for, else what's still going on."""
     key = project.strip().upper()
     with sessions() as s:
         available = svc.available_work(s, agent, key)
         if available:
             return _available_text(available), ""
-        going_on = [i for i in svc.list_issues(s, key) if i.status != "todo" or svc.waiting_on_human(i)]
+        issues = svc.list_issues(s, key)
+        others_working = [i for i in issues if i.status == "in_progress" and i.assignee not in (None, agent)]
+        questions = [i for i in issues if svc.waiting_on_human(i)]
+        my_reviews = [i for i in issues if i.status == "in_review" and i.assignee == agent]
+        queued = [i for i in issues if i.status == "todo" and i.assignee not in (None, agent)]
+        going_on = list(dict.fromkeys(others_working + questions + my_reviews + queued))
         if not going_on:
             return f"Nothing in {key} is in progress or waiting for review, so there's nothing to wait for.", ""
+        others_around = any(
+            a.name != agent and a.last_seen_at and utcnow() - a.last_seen_at < OTHERS_AROUND
+            for a in agents.list_agents(s)
+        )
+        if not (others_working or questions or others_around):
+            minutes = int(OTHERS_AROUND.total_seconds() // 60)
+            return (
+                f"No other agent has been in touch for {minutes} minutes, so nobody is around to pick these up:\n"
+                + "\n".join(_issue_line(issue) for issue in going_on)
+                + "\nStop here. They'll wait for the next agent (your own work needs someone else to review it)."
+            ), ""
         last = svc.last_activity(s, key)
         if last and utcnow() - last > QUIET_FOR:
             minutes = int((utcnow() - last).total_seconds() // 60)
