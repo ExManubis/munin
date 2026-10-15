@@ -43,7 +43,7 @@ class Issue(Base):
     position: Mapped[float] = mapped_column(Float, default=0.0)
     created_by: Mapped[str] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     project: Mapped[Project] = relationship(back_populates="issues")
     comments: Mapped[list["Comment"]] = relationship(

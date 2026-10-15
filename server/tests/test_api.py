@@ -64,7 +64,22 @@ def test_other_host_names_are_refused(client):
 
 
 def test_me(client):
-    assert client.get("/api/me").json() == {"name": "me", "mcp_url": "http://127.0.0.1:7777/mcp"}
+    assert client.get("/api/me").json() == {"name": "me", "mcp_url": "http://localhost/mcp"}
+    assert client.get("/api/me", headers={"Host": "127.0.0.1:7777"}).json()["mcp_url"] == "http://127.0.0.1:7777/mcp"
+
+
+def test_times_are_utc(client):
+    client.post("/api/projects", json={"key": "MUN", "name": "munin"})
+    issue = client.post("/api/issues", json={"project": "MUN", "title": "Work"}).json()
+    assert issue["created_at"].endswith("Z")
+
+
+def test_reordering_does_not_count_as_an_update(client):
+    client.post("/api/projects", json={"key": "MUN", "name": "munin"})
+    before = client.post("/api/issues", json={"project": "MUN", "title": "Work"}).json()
+    after = client.patch("/api/issues/MUN-1", json={"position": -5}).json()
+    assert after["position"] == -5
+    assert after["updated_at"] == before["updated_at"]
 
 
 def test_agent_names_that_mean_something_else_are_refused(client):

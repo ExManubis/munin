@@ -1,10 +1,10 @@
 """JSON API for the web UI. It acts as the human; there's no login, so munin only listens locally."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel
+from pydantic import AfterValidator, BaseModel
 from sqlalchemy.orm import Session
 
 from munin import agents as agent_svc
@@ -30,6 +30,9 @@ Human = Annotated[Actor, Depends(human)]
 
 # Response shapes
 
+# The database keeps UTC without a timezone; say so on the way out ("...Z").
+UTCDateTime = Annotated[datetime, AfterValidator(lambda moment: moment.replace(tzinfo=UTC))]
+
 
 class ProjectOut(BaseModel):
     key: str
@@ -44,7 +47,7 @@ class CommentOut(BaseModel):
     author_kind: str
     body: str
     asks_human: bool
-    created_at: datetime
+    created_at: UTCDateTime
 
 
 class IssueOut(BaseModel):
@@ -56,8 +59,8 @@ class IssueOut(BaseModel):
     assignee: str | None
     position: float
     created_by: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDateTime
+    updated_at: UTCDateTime
     waiting_on_human: bool
 
 
@@ -73,8 +76,8 @@ class InboxItemOut(BaseModel):
 class AgentOut(BaseModel):
     name: str
     token_hint: str
-    created_at: datetime
-    last_seen_at: datetime | None
+    created_at: UTCDateTime
+    last_seen_at: UTCDateTime | None
     revoked: bool
 
 
@@ -163,8 +166,8 @@ class AgentIn(BaseModel):
 
 @router.get("/me")
 def me(request: Request) -> dict:
-    settings = request.app.state.settings
-    return {"name": settings.user, "mcp_url": f"{settings.url}/mcp"}
+    # The address this page was opened on also reaches /mcp, even when munin listens on 0.0.0.0.
+    return {"name": request.app.state.settings.user, "mcp_url": f"{str(request.base_url).rstrip('/')}/mcp"}
 
 
 @router.get("/projects")

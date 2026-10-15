@@ -214,7 +214,9 @@ def update_issue(
         statement = statement.where(
             or_(Issue.status != "in_progress", Issue.assignee.is_(None), Issue.assignee == actor.name)
         )
-    result = s.execute(statement.values(**values, updated_at=utcnow()).execution_options(synchronize_session=False))
+    if set(values) != {"position"}:  # reordering the pile isn't an update to the issue
+        values["updated_at"] = utcnow()
+    result = s.execute(statement.values(**values).execution_options(synchronize_session=False))
     if result.rowcount == 0:
         s.rollback()
         s.refresh(issue)
