@@ -84,7 +84,7 @@ npm start                               # http://127.0.0.1:7779/runtime/api
 
 Reload munin and the Agents tab uses it instead of the mock: the frontend looks for the runtime on port 7779 of the same host, or at its own address behind the edge. Make an agent with N and talk to it.
 
-Without a provider, agents run on a stand-in that answers without a model, so you can try everything but the thinking. Give the runtime `OPENROUTER_API_KEY` in its environment for OpenRouter's models, or `MUNIN_OLLAMA_URL` (like `http://127.0.0.1:11434`) for an Ollama server's, then pick a model on the agent's profile.
+Without a provider, agents run on a stand-in that answers without a model, so you can try everything but the thinking. Paste an OpenRouter key in Settings (or give the runtime `OPENROUTER_API_KEY`) for OpenRouter's models, or `MUNIN_OLLAMA_URL` (like `http://127.0.0.1:11434`) for an Ollama server's, then pick a model on the agent's profile.
 
 Coders get a folder of their own under `~/.munin/agents/<name>`, with a shell and file tools. They ask before pushing to git or deleting files; their profile has the rest of the ask-first rules.
 

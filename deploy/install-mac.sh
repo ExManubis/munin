@@ -146,7 +146,8 @@ say "tailscale serve"
 say "munin is at https://$HOST"
 cat << EOF
   For: $(setting MUNIN_USERS)
-  Settings: $HERE/environment; keys like OPENROUTER_API_KEY in $HERE/secrets,
+  Models: paste an OpenRouter key in munin, under Settings
+  Settings: $HERE/environment; other keys, like GH_TOKEN, in $HERE/secrets,
             then: launchctl kickstart -k gui/$UID_NOW/munin.runtime
   A project: $HERE/bin/munin project add MUN munin --description "What it is, and how work gets delivered"
   Logs: tail -f $HERE/logs/*.log

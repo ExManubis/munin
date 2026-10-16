@@ -47,6 +47,8 @@ export function createRuntimeServer(runtime, settings) {
   route('DELETE', '/agents/([^/]+)/memory/([^/]+)', (m) => runtime.forget(enc(m[1]), enc(m[2])));
   route('GET', '/waiting', () => runtime.waiting());
   route('GET', '/providers', () => runtime.providers());
+  route('PUT', '/providers/([^/]+)/key', (m, body) => runtime.setKey(enc(m[1]), body.key));
+  route('DELETE', '/providers/([^/]+)/key', (m) => runtime.removeKey(enc(m[1])));
   route('GET', '/models', () => runtime.models());
   route('GET', '/repos', () => runtime.repos());
   route('PUT', '/repos/([^/]+)', (m, body) => runtime.setRepo(enc(m[1]), body));
