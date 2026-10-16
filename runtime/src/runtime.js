@@ -245,7 +245,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   registry.install(CodingTools);
   registry.install(Munin);
   registry.install(Workspace);
-  const tracker = createTracker({ registry, agents: () => agents.values(), agentFor, write, user: settings.user, onTake });
+  const tracker = createTracker({ registry, agents: () => agents.values(), agentFor, write, user: settings.user, onTake, mcpUrl: settings.trackerMcp || null });
   harness = await Harness.open(storage, {
     models: models.models,
     registry,

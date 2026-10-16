@@ -23,9 +23,9 @@ The tracker serves the frontend from `web/` too, so this is all you need locally
 
 `uv run munin status` shows what's waiting on you and what agents are doing, without leaving the terminal.
 
-The web UI and its API have no login, so munin only listens on 127.0.0.1. `--host 0.0.0.0` makes it reachable from your phone, and from everyone else on that network.
+The web UI and its API have no login, so munin only listens on 127.0.0.1. To use it from your phone, put it on a server on your tailnet (below) rather than `--host 0.0.0.0`, which lets in everyone on that network.
 
-Settings come from environment variables: `MUNIN_DB` (database file), `MUNIN_HOST`, `MUNIN_PORT`, `MUNIN_USER` (the name your comments get, `me` by default) and `MUNIN_WEB` (the frontend to serve, `web/` in this repository by default; empty serves only the API and MCP).
+Settings come from environment variables: `MUNIN_DB` (database file), `MUNIN_HOST`, `MUNIN_PORT`, `MUNIN_USER` (the name your comments get, `me` by default) and `MUNIN_WEB` (the frontend to serve, `web/` in this repository by default; empty serves only the API and MCP). Behind `tailscale serve`, `MUNIN_PUBLIC_URL` is munin's address there and `MUNIN_USERS` the Tailscale logins it lets in.
 
 ### Connect an agent
 
@@ -100,6 +100,17 @@ Settings come from environment variables: `MUNIN_RUNTIME_DB`, `MUNIN_RUNTIME_HOS
 
 `npm test` runs its tests.
 
+## Put munin on a server
+
+On a Linux machine on your tailnet, with Tailscale, Docker, Node and uv:
+
+```bash
+sudo git clone <munin's repository> /opt/munin
+sudo /opt/munin/deploy/install.sh
+```
+
+munin is then at `https://<machine>.<tailnet>.ts.net` for you and nobody else, with the tracker and the runtime as systemd services behind `tailscale serve`, and each coder in a container of its own. `docs/server.md` has the details: what it needs, what goes where, who gets in, and how to update.
+
 ## Layout
 
 ```
@@ -107,9 +118,10 @@ brand/        logo, the Munin Block font and the scripts that draw them
   final/      the asset pack to use: SVG, PNG, favicons, app icons, social cards
   logo/       earlier explorations and treatments
   tools/      generators that render everything from the master bitmaps
+deploy/       putting munin on a server: install.sh, the systemd units, the settings
 design/       each screen from Paper as PNG, JSX and HTML
-docs/         how munin fits together (architecture.md), what the tracker does (tracker.md)
-              and the runtime's API (runtime-api.md)
+docs/         how munin fits together (architecture.md), what the tracker does (tracker.md),
+              the runtime's API (runtime-api.md) and munin on a server (server.md)
 runtime/      the agent runtime: munin's own agents on pi-durable, and its HTTP API
   src/
   test/

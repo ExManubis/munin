@@ -2,6 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { request } from 'node:http';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -95,4 +96,45 @@ test('agents and their conversations survive a restart', async () => {
   assert.equal(body.agent.brief, "You're hugin.");
   assert.deepEqual(body.items.map((i) => i.text?.slice(0, 12)), ['Remember me?', "I'm on munin"]);
   await served.close();
+});
+
+// fetch won't set Host, and tailscale serve passes the browser's on, so ask with node:http.
+function ask(base, method, path, { host, headers = {}, body } = {}) {
+  const url = new URL(base + path);
+  return new Promise((resolve, reject) => {
+    const req = request({ hostname: url.hostname, port: url.port, path: url.pathname, method, headers: { ...(host ? { Host: host } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers } }, (res) => {
+      let text = '';
+      res.on('data', (chunk) => { text += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, body: text ? JSON.parse(text) : null }));
+    });
+    req.on('error', reject);
+    req.end(body ? JSON.stringify(body) : undefined);
+  });
+}
+
+test('behind the edge, the people in MUNIN_USERS get in, and nobody else', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'munin-server-'));
+  const settings = { ...await settingsIn(dir), publicUrl: 'https://munin.tail1234.ts.net', users: ['mikkel@example.com'] };
+  const { base, close } = await serve(settings);
+  const host = 'munin.tail1234.ts.net';
+  const me = { 'Tailscale-User-Login': 'Mikkel@Example.com' };
+
+  assert.equal((await ask(base, 'GET', '/me', { host, headers: me })).status, 200);
+  const stranger = await ask(base, 'GET', '/agents', { host, headers: { 'Tailscale-User-Login': 'someone@example.com' } });
+  assert.equal(stranger.status, 403);
+  assert.match(stranger.body.detail, /someone@example.com isn't one of munin's people/);
+  assert.match((await ask(base, 'GET', '/agents', { host })).body.detail, /Tailscale didn't say who you are/);
+
+  const made = await ask(base, 'POST', '/agents', { host, headers: { ...me, Origin: 'https://munin.tail1234.ts.net' }, body: { name: 'pip', role: 'companion' } });
+  assert.equal(made.status, 201, 'the frontend, at the same address');
+  assert.equal((await ask(base, 'POST', '/agents', { host, headers: { ...me, Origin: 'https://evil.example' }, body: { name: 'pod', role: 'companion' } })).status, 403);
+
+  assert.equal((await ask(base, 'GET', '/me', { host: '127.0.0.1' })).status, 200, 'this machine, as before');
+  assert.equal((await ask(base, 'GET', '/me', { host: 'evil.example' })).status, 400);
+  await close();
+
+  const models = await buildModels(settings, { env: {} });
+  const runtime = await openRuntime(settings, { models, timers: false });
+  assert.throws(() => createRuntimeServer(runtime, { ...settings, users: [] }), /MUNIN_USERS/);
+  await runtime.close();
 });

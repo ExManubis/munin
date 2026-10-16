@@ -5,6 +5,7 @@ import anyio.to_thread
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import Route
@@ -22,9 +23,12 @@ LOOPBACK = ("127.0.0.1", "localhost")
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
+    settings.check()
     sessions = connect(settings.db_path)
     mcp = build_mcp(sessions)
-    mcp_app = mcp.streamable_http_app(stateless_http=True, json_response=True, host=settings.host)
+    mcp_app = mcp.streamable_http_app(
+        stateless_http=True, json_response=True, host=settings.host, transport_security=_mcp_security(settings)
+    )
     mcp_endpoint = next(route.endpoint for route in mcp_app.routes if getattr(route, "path", None) == "/mcp")
 
     @contextlib.asynccontextmanager
@@ -38,7 +42,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.changes = Changes(sessions)
     if settings.host in LOOPBACK:
         # The API has no login, so refuse other Host names: that stops web pages using DNS rebinding to reach it.
-        app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(LOOPBACK))
+        # Behind the edge, its name is the one other name that reaches munin.
+        public = [settings.public_host] if settings.public_host else []
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=[*LOOPBACK, *public])
+    if settings.public_host:
+        app.add_middleware(OnlyListedPeople, public_host=settings.public_host, users=settings.users)
 
     @app.exception_handler(MuninError)
     async def munin_error(_request: Request, error: MuninError) -> JSONResponse:
@@ -50,6 +58,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings.web_dir and (settings.web_dir / "index.html").is_file():
         app.mount("/", StaticFiles(directory=settings.web_dir, html=True), name="web")
     return app
+
+
+def _mcp_security(settings: Settings) -> TransportSecuritySettings | None:
+    """MCP's own Host check, with munin's public name added; None keeps the SDK's default for loopback."""
+    if not settings.public_url:
+        return None
+    public = settings.public_host
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*", "127.0.0.1", "localhost", public, f"{public}:*"],
+        allowed_origins=["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*", settings.public_url],
+    )
+
+
+class OnlyListedPeople:
+    """Behind the edge, lets in only the people in MUNIN_USERS. tailscale serve says who's calling in
+    Tailscale-User-Login, after removing any the caller sent, so the header can be trusted on requests that
+    came through it, which are the ones addressed to munin's public name. /mcp is for agents, who have
+    tokens of their own wherever they run; requests from this machine itself are let through as before."""
+
+    def __init__(self, app: ASGIApp, public_host: str, users: tuple[str, ...]):
+        self.app = app
+        self.public_host = public_host
+        self.users = {user.lower() for user in users}
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and not (scope["path"] == "/mcp" or scope["path"].startswith("/mcp/")):
+            headers = dict(scope.get("headers", []))
+            host = headers.get(b"host", b"").decode().rsplit(":", 1)[0].strip("[]").lower()
+            login = headers.get(b"tailscale-user-login", b"").decode().strip().lower()
+            if host == self.public_host and login not in self.users:
+                who = f"{login} isn't" if login else "Tailscale didn't say who you are, so you aren't"
+                detail = f"{who} one of munin's people. Its owner adds people to MUNIN_USERS."
+                await _send_json(send, 403, {"detail": detail})
+                return
+        await self.app(scope, receive, send)
 
 
 class AgentAuth:

@@ -227,10 +227,13 @@ class AgentIn(BaseModel):
 
 @router.get("/me")
 def me(request: Request) -> dict:
-    # The address this page was opened on also reaches /mcp, even when munin listens on 0.0.0.0.
+    # Behind the edge, agents elsewhere reach /mcp at munin's public address. Otherwise the address
+    # this page was opened on also reaches it, even when munin listens on 0.0.0.0.
+    settings = request.app.state.settings
+    base = settings.public_url or str(request.base_url).rstrip("/")
     return {
-        "name": request.app.state.settings.user,
-        "mcp_url": f"{str(request.base_url).rstrip('/')}/mcp",
+        "name": settings.user,
+        "mcp_url": f"{base}/mcp",
         "version": version("munin"),
     }
 

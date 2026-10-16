@@ -173,6 +173,24 @@ test('an agent without a token is told how to get one, and tracker links are che
   await tracker.close();
 });
 
+test("on the server, agents' tracker calls go to the tracker on this machine", async () => {
+  const tracker = await fakeTracker();
+  const dir = await mkdtemp(join(tmpdir(), 'munin-tracker-'));
+  const settings = { db: ':memory:', agentsDir: join(dir, 'agents'), ollamaUrl: null, user: 'Mikkel', trackerMcp: tracker.url };
+  const faux = fauxProvider({ provider: 'scripted', models: [{ id: 'model' }] });
+  const models = await buildModels(settings, { extra: [faux.provider], env: {} });
+  const runtime = await openRuntime(settings, { models, timers: false });
+  // The frontend passes on the public address; the runtime uses the local one.
+  await runtime.createAgent({ name: 'forge', role: 'coder', provider: 'scripted', model: 'model', tracker: { url: 'https://munin.tail1234.ts.net/mcp', token: 'tok-forge' } });
+  assert.equal((await runtime.agent('forge')).tracker.reachable, true);
+  faux.setResponses([reply(fauxToolCall('list_projects', {})), reply(fauxText('Looked.'))]);
+  await runtime.send('forge', 'Look around.');
+  await runtime.waitForIdle();
+  assert.deepEqual(tracker.calls.map((c) => [c.token, c.name]), [['tok-forge', 'list_projects']]);
+  await runtime.close();
+  await tracker.close();
+});
+
 test('issue lines read back from the tracker', () => {
   assert.deepEqual(parseIssueLine('MUN-5 [in_review] Retry (and back off) (assignee: forge) (blocked by MUN-2)'),
     { id: 'MUN-5', status: 'in_review', title: 'Retry (and back off)', assignee: 'forge' });

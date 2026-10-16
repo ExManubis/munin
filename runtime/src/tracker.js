@@ -107,7 +107,8 @@ export function actionFor(agentName, args, resultText) {
 // for the agent. `connect()` lists the
 // tracker's tools with any connected agent's token and installs them in place of the empty
 // extension, retrying every half minute until the tracker answers.
-export function createTracker({ registry, agents, agentFor, write, user, onTake }) {
+export function createTracker({ registry, agents, agentFor, write, user, onTake, mcpUrl = null }) {
+  const urlOf = (agent) => mcpUrl || agent.tracker.url; // the agent's token works at either
   let listed = null; // the tracker's tools, once it has answered
   let instructions = '';
   let timer = null;
@@ -122,7 +123,7 @@ export function createTracker({ registry, agents, agentFor, write, user, onTake 
         const agent = agentFor(api.conversationId);
         const fail = (text) => ({ output: [{ type: 'text', text }], isError: true });
         if (!agent?.tracker?.token) return fail(`You aren't connected to munin's tracker. Ask ${user} to turn on the Tracker ability in your profile.`);
-        const client = mcpClient(agent.tracker.url, agent.tracker.token);
+        const client = mcpClient(urlOf(agent), agent.tracker.token);
         let result;
         try {
           result = await client.call(spec.name, args, context.abortSignal);
@@ -184,7 +185,7 @@ export function createTracker({ registry, agents, agentFor, write, user, onTake 
     const linked = [...agents()].filter((a) => a.abilities.tracker && a.tracker?.token);
     for (const agent of linked) {
       try {
-        const client = mcpClient(agent.tracker.url, agent.tracker.token);
+        const client = mcpClient(urlOf(agent), agent.tracker.token);
         const info = await client.initialize();
         const tools = await client.tools();
         if (closed) return false;
@@ -211,7 +212,7 @@ export function createTracker({ registry, agents, agentFor, write, user, onTake 
 
   // A tool call as the agent, outside a conversation: the routines read the event feed this way.
   async function call(agent, name, args) {
-    const result = await mcpClient(agent.tracker.url, agent.tracker.token).call(name, args);
+    const result = await mcpClient(urlOf(agent), agent.tracker.token).call(name, args);
     if (result?.isError) throw new TrackerError(textOf(result));
     return textOf(result);
   }

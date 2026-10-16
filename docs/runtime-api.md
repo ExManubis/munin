@@ -2,7 +2,7 @@
 
 What the frontend needs from the agent runtime, worked out by building the Agents screens on a mock first. The mock is `web/runtime/mock.js`; every function it exports is listed here with the HTTP endpoint the runtime serves for it. The runtime is in `runtime/`, and `web/runtime/client.js` calls it. `web/runtime/index.js` picks the runtime when it answers and the mock when it doesn't; both have the same functions, so the screens don't care which. It looks on port 7779 of the page's host and at the page's own address; `munin:runtime-url` in the browser's localStorage points it somewhere else.
 
-The runtime serves this under `/runtime/api`, behind the same edge as the tracker (see `architecture.md`). Times are ISO 8601 in UTC. Errors are `{"detail": "…"}` with 400, 404, 409 or 422, like the tracker's. [What this version does](#what-this-version-does) says which parts are real yet.
+The runtime serves this under `/runtime/api`, behind the same edge as the tracker (see `architecture.md`), which lets in only the people in `MUNIN_USERS` (`server.md`). Times are ISO 8601 in UTC. Errors are `{"detail": "…"}` with 400, 404, 409 or 422, like the tracker's. [What this version does](#what-this-version-does) says which parts are real yet.
 
 ## Agents
 

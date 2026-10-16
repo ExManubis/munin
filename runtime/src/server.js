@@ -1,6 +1,9 @@
 // The runtime's HTTP API under /runtime/api (docs/runtime-api.md), and a stream that says
 // "changed" whenever anything does. Like the tracker, it has no login: it listens on
 // 127.0.0.1, refuses other host names, and lets in browsers only from pages on this machine.
+// Behind the edge (tailscale serve), its public name gets in too, but only for the people in
+// MUNIN_USERS: Serve says who's calling in Tailscale-User-Login, having removed any the caller
+// sent.
 
 import { createServer } from 'node:http';
 import { RuntimeError } from './runtime.js';
@@ -16,6 +19,9 @@ const hostOf = (value) => {
 
 export function createRuntimeServer(runtime, settings) {
   const local = LOOPBACK.has(settings.host);
+  const edge = settings.publicUrl ? new URL(settings.publicUrl) : null;
+  const people = new Set((settings.users || []).map((u) => u.toLowerCase()));
+  if (edge && !people.size) throw new Error('MUNIN_PUBLIC_URL is set, so say who may use munin through it: MUNIN_USERS=you@example.com.');
   const routes = [];
   const route = (method, pattern, handler) => routes.push({ method, pattern: new RegExp(`^/runtime/api${pattern}$`), handler });
   const enc = (s) => decodeURIComponent(s);
@@ -54,12 +60,28 @@ export function createRuntimeServer(runtime, settings) {
   return createServer(async (req, res) => {
     const url = new URL(req.url, 'http://runtime');
     // Web pages elsewhere can't use DNS rebinding to reach this, and only local pages get CORS.
-    if (local && !LOOPBACK.has(hostOf(req.headers.host || ''))) return send(res, 400, { detail: 'Invalid host.' });
+    const host = hostOf(req.headers.host || '');
+    const viaEdge = Boolean(edge) && host === edge.hostname;
+    if (local && !LOOPBACK.has(host) && !viaEdge) return send(res, 400, { detail: 'Invalid host.' });
+    if (viaEdge) {
+      const login = String(req.headers['tailscale-user-login'] || '').trim().toLowerCase();
+      if (!people.has(login)) {
+        const who = login ? `${login} isn't` : "Tailscale didn't say who you are, so you aren't";
+        return send(res, 403, { detail: `${who} one of munin's people. Its owner adds people to MUNIN_USERS.` });
+      }
+    }
     const origin = req.headers.origin;
-    const cors = origin && LOOPBACK.has(new URL(origin).hostname)
+    let originHost = '';
+    try {
+      originHost = origin ? new URL(origin).hostname : '';
+    } catch {
+      // not a URL: refused below
+    }
+    const cors = origin && LOOPBACK.has(originHost)
       ? { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' }
       : {};
-    if (origin && !cors['Access-Control-Allow-Origin']) return send(res, 403, { detail: 'Not from this machine.' });
+    const sameEdge = viaEdge && origin === edge.origin; // the frontend, served at the same address
+    if (origin && !cors['Access-Control-Allow-Origin'] && !sameEdge) return send(res, 403, { detail: 'Not from this machine.' });
     if (req.method === 'OPTIONS') {
       res.writeHead(204, cors);
       return res.end();

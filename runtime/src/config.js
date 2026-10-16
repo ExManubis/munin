@@ -8,6 +8,9 @@ export function settingsFromEnv(env = process.env) {
   if (env.MUNIN_AGENT_SANDBOX && env.MUNIN_AGENT_SANDBOX !== 'docker') {
     throw new Error(`MUNIN_AGENT_SANDBOX is "docker" or unset, not "${env.MUNIN_AGENT_SANDBOX}".`);
   }
+  const publicUrl = (env.MUNIN_PUBLIC_URL || '').trim().replace(/\/+$/, '') || null;
+  const users = (env.MUNIN_USERS || '').split(',').map((u) => u.trim().toLowerCase()).filter(Boolean);
+  if (publicUrl && !users.length) throw new Error('MUNIN_PUBLIC_URL is set, so say who may use munin through it: MUNIN_USERS=you@example.com.');
   return {
     db: env.MUNIN_RUNTIME_DB || join(home, 'runtime.sqlite'),
     host: env.MUNIN_RUNTIME_HOST || '127.0.0.1',
@@ -20,6 +23,12 @@ export function settingsFromEnv(env = process.env) {
     ollamaUrl: env.MUNIN_OLLAMA_URL || null,
     // The name your messages get, as in the tracker.
     user: env.MUNIN_USER || 'me',
+    // Behind the edge: munin's address there, and the Tailscale logins allowed in through it.
+    publicUrl,
+    users,
+    // Where agents' tracker calls go, when the address the frontend passes on (the public one,
+    // behind the edge) is a detour: on the server, the tracker at http://127.0.0.1:7777/mcp.
+    trackerMcp: env.MUNIN_TRACKER_MCP || null,
     // Where coders' tools run: "docker" gives each a container of its own (sandbox.js); unset,
     // they run on this machine as the runtime's user.
     sandbox: env.MUNIN_AGENT_SANDBOX || null,
