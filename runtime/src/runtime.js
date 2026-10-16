@@ -6,11 +6,11 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { BACKGROUND_CONTEXT as ctx } from '@earendil-works/chord/context';
 import { Type } from '@earendil-works/pi-ai';
 import {
-  Harness, LiveDoc, MemoryStorage, ToolTask, createRegistry, defineDoc, defineExtension, defineTool, hook, section,
+  Harness, LiveDoc, MemoryStorage, ToolTask, configure, createRegistry, defineDoc, defineExtension, defineTool, hook, section,
 } from '@earendil-works/pi-durable';
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
@@ -19,6 +19,7 @@ import { ROLES, roleName, askFirstFor, ruleMatches } from './roles.js';
 import { toItems, summarize } from './items.js';
 import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
+import { createWorkspace, WorkspaceError } from './workspace.js';
 
 export class RuntimeError extends Error {
   constructor(status, message) {
@@ -31,8 +32,9 @@ const notFound = (name) => new RuntimeError(404, `There's no agent called ${name
 const invalid = (message) => new RuntimeError(422, message);
 const conflict = (message) => new RuntimeError(409, message);
 
-// Every agent's settings, in one session document next to the conversations.
-const AgentsDoc = defineDoc({ kind: 'munin.agents', version: 1, scope: 'session', initial: () => ({ agents: {} }) });
+// Every agent's settings, and where each project's code is, in one session document next
+// to the conversations.
+const AgentsDoc = defineDoc({ kind: 'munin.agents', version: 1, scope: 'session', initial: () => ({ agents: {}, repos: {} }) });
 
 const NAME = /^[a-z][a-z0-9-]{1,23}$/;
 const COLOURS = ['white', 'ember', 'coral', 'rose', 'iris', 'sky', 'teal', 'moss', 'straw'];
@@ -40,6 +42,8 @@ const THINKING = ['off', 'low', 'medium', 'high'];
 const UNDO_MS = 8000;
 const DAY = 24 * 60 * 60 * 1000;
 const PROJECT = /^[A-Z][A-Z0-9]{0,9}$/;
+// Nobody is at an agent's terminal, so git mustn't wait for a pager, an editor or a password.
+const SHELL_ENV = { ...process.env, GIT_PAGER: 'cat', PAGER: 'cat', GIT_EDITOR: 'true', GIT_TERMINAL_PROMPT: '0' };
 const HOME = homedir();
 const tilde = (path) => (path.startsWith(`${HOME}/`) ? `~${path.slice(HOME.length)}` : path);
 
@@ -145,18 +149,91 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     })],
   });
 
+  // Coders' worktrees: one per issue, on the issue's branch. Taking an issue opens one; this
+  // tool goes back to one, or opens someone else's branch to review it.
+  let workspace = null;
+  const repos = {};
+  const moveTo = (api, context) => (cwd) => api.commit((tx) => configure(tx, api.conversationId, { cwd }), context);
+  async function enter(agent, opened, move) {
+    agent.work = { issue: opened.issue, folder: opened.folder, branch: opened.branch, detached: Boolean(opened.detached) };
+    await saveAgents();
+    await move(opened.folder);
+  }
+  const openWorktree = defineTool({
+    name: 'open_worktree',
+    description: "Work in an issue's code. For an issue you took, this opens your own worktree on its branch again (taking an issue opens it for you). For anyone else's, it opens a detached copy of their branch, to review or try it without changing their branch. Leave out the issue to go back to your own folder. Your shell and file tools work wherever this leaves you.",
+    parameters: Type.Object({ issue: Type.Optional(Type.String({ description: 'Issue id, like MUN-12' })) }),
+    execute: async (args, api, context) => {
+      const agent = agentFor(api.conversationId);
+      const say = (text, isError = false) => ({ output: [{ type: 'text', text }], isError });
+      if (!args.issue) {
+        agent.work = null;
+        await saveAgents();
+        await moveTo(api, context)(agent.folder);
+        return say(`You're in your own folder again: ${agent.folder}.`);
+      }
+      const id = args.issue.trim().toUpperCase();
+      const issue = { id, title: agent.work?.issue?.id === id ? agent.work.issue.title : null };
+      try {
+        const opened = await workspace.ownsWorktree(agent, issue) ? await workspace.openOwn(agent, issue) : await workspace.openReview(agent, issue);
+        await enter(agent, opened, moveTo(api, context));
+        return say(opened.detached
+          ? `You're in a detached copy of ${opened.branch} to review ${id}: ${opened.folder}. Nothing you commit here lands on their branch.`
+          : `You're in your worktree for ${id}: ${opened.folder}, on ${opened.branch}.`);
+      } catch (err) {
+        if (!(err instanceof WorkspaceError)) throw err;
+        const take = /no branch yet/.test(err.message) ? ' To work on it, take it in the tracker and you get a worktree of your own.' : '';
+        return say(`${err.message}${take}`, true);
+      }
+    },
+  });
+  const Workspace = defineExtension({
+    name: 'workspace',
+    tools: [openWorktree],
+    sections: [section('workspace', (input) => {
+      const agent = agentFor(input.conversationId);
+      if (!agent?.abilities.code) return undefined;
+      const work = agent.work;
+      const keys = Object.keys(repos);
+      return [
+        `Your own folder is ${agent.folder}.`,
+        work ? `You're working in ${work.folder}, ${work.detached ? `a detached copy of ${work.branch}` : `on ${work.branch}`}${work.issue ? `, for ${work.issue.id}` : ''}.` : null,
+        keys.length ? `munin keeps the code of ${keys.join(', ')}. Taking one of their issues gives you a worktree on a branch of its own, and open_worktree opens someone else's branch to review it.` : null,
+      ].filter(Boolean).join(' ');
+    })],
+  });
+
+  // When a coder takes an issue, its worktree is ready before it reads the tracker's answer.
+  async function onTake(agent, issue, move) {
+    if (!agent.abilities.code) return null;
+    const key = issue.id.split('-')[0];
+    if (!workspace.has(key)) return `munin has no repository for ${key}, so you're working in your own folder, ${agent.folder}. The project's brief says where the code is.`;
+    try {
+      const opened = await workspace.openOwn(agent, issue);
+      await enter(agent, opened, move);
+      return `Your worktree for ${issue.id} is ready, and your shell and file tools work in it now: ${opened.folder}, on `
+        + `${opened.fresh ? `a new branch, ${opened.branch}, from ${opened.base}` : `${opened.branch}, as you left it`}. `
+        + "Commit your work there; the project's brief says how to deliver it.";
+    } catch (err) {
+      return `munin couldn't open a worktree for ${issue.id} (${err.message}), so you're still in ${agent.work?.folder || agent.folder}.`;
+    }
+  }
+
   const registry = createRegistry();
   registry.install(CodingTools);
   registry.install(Munin);
-  const tracker = createTracker({ registry, agents: () => agents.values(), agentFor, write, user: settings.user });
+  registry.install(Workspace);
+  const tracker = createTracker({ registry, agents: () => agents.values(), agentFor, write, user: settings.user, onTake });
   harness = await Harness.open(storage, {
     models: models.models,
     registry,
-    env: ({ cwd }) => (cwd ? new NodeExecutionEnv({ cwd }) : undefined),
+    env: ({ cwd }) => (cwd ? new NodeExecutionEnv({ cwd, shellEnv: SHELL_ENV }) : undefined),
   }, ctx);
 
   const saved = await harness.snapshot(AgentsDoc, ctx);
   for (const agent of Object.values(saved?.agents || {})) agents.set(agent.name, structuredClone(agent));
+  Object.assign(repos, structuredClone(saved?.repos || {}));
+  workspace = createWorkspace({ dir: settings.reposDir || join(dirname(settings.agentsDir), 'repos'), repos });
   tracker.connect(); // in the background: until the tracker answers, agents are told it's away
 
   async function saveAgents() {
@@ -164,6 +241,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       const doc = await tx.doc(AgentsDoc);
       for (const name of Object.keys(doc.agents)) if (!agents.has(name)) delete doc.agents[name];
       for (const [name, agent] of agents) doc.agents[name] = structuredClone(agent);
+      doc.repos = structuredClone(repos);
     }, ctx);
   }
 
@@ -173,8 +251,8 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       model: { provider, modelId: model },
       thinkingLevel: agent.thinking,
       instructions: agent.brief,
-      extensions: [Munin, ...(agent.abilities.code ? [CodingTools] : []), ...(agent.abilities.tracker ? [tracker.extension()] : [])],
-      cwd: agent.abilities.code ? agent.folder : null,
+      extensions: [Munin, ...(agent.abilities.code ? [CodingTools, Workspace] : []), ...(agent.abilities.tracker ? [tracker.extension()] : [])],
+      cwd: agent.abilities.code ? (agent.work?.folder || agent.folder) : null,
     };
   };
 
@@ -240,7 +318,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       routines: agent.routines.map((r) => routineOut(r, agent)),
       memory: agent.memory.map((n) => ({ ...n })), memoryCount: agent.memory.length,
       usage: usageOf(entries), budget: agent.budget,
-      worksIn: agent.abilities.code ? { folder: tilde(agent.folder), branch: null } : null,
+      worksIn: agent.abilities.code ? {
+        folder: tilde(agent.work?.folder || agent.folder), branch: agent.work?.branch || null,
+        issue: agent.work?.issue || null, detached: Boolean(agent.work?.detached),
+      } : null,
       tracker: agent.abilities.tracker ? {
         projects: [...(agent.tracker?.projects || [])], takes: agent.role === 'reviewer' ? 'reviews' : 'issues',
         connected: Boolean(agent.tracker?.token), reachable: tracker.reachable(),
@@ -462,6 +543,28 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
     async providers() {
       return models.providers();
+    },
+
+    // Where each project's code is: [{ project, source, base }].
+    async repos() {
+      return workspace.list();
+    },
+
+    // Clones it, the first time; worktrees for issues in the project come from the clone.
+    async setRepo(key, fields = {}) {
+      try {
+        const repo = await workspace.setRepo(String(key || '').toUpperCase(), fields);
+        await saveAgents();
+        return repo;
+      } catch (err) {
+        if (err instanceof WorkspaceError) throw invalid(err.message);
+        throw err;
+      }
+    },
+
+    async removeRepo(key) {
+      workspace.removeRepo(String(key || '').toUpperCase());
+      await saveAgents();
     },
 
     async models() {

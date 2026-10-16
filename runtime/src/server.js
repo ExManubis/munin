@@ -42,6 +42,9 @@ export function createRuntimeServer(runtime, settings) {
   route('GET', '/waiting', () => runtime.waiting());
   route('GET', '/providers', () => runtime.providers());
   route('GET', '/models', () => runtime.models());
+  route('GET', '/repos', () => runtime.repos());
+  route('PUT', '/repos/([^/]+)', (m, body) => runtime.setRepo(enc(m[1]), body));
+  route('DELETE', '/repos/([^/]+)', (m) => runtime.removeRepo(enc(m[1])));
 
   const send = (res, status, body, headers = {}) => {
     res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers });
@@ -54,7 +57,7 @@ export function createRuntimeServer(runtime, settings) {
     if (local && !LOOPBACK.has(hostOf(req.headers.host || ''))) return send(res, 400, { detail: 'Invalid host.' });
     const origin = req.headers.origin;
     const cors = origin && LOOPBACK.has(new URL(origin).hostname)
-      ? { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' }
+      ? { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' }
       : {};
     if (origin && !cors['Access-Control-Allow-Origin']) return send(res, 403, { detail: 'Not from this machine.' });
     if (req.method === 'OPTIONS') {
@@ -87,7 +90,7 @@ export function createRuntimeServer(runtime, settings) {
       if (!m || method !== req.method) continue;
       try {
         let body = {};
-        if (req.method === 'POST' || req.method === 'PATCH') {
+        if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
           const chunks = [];
           for await (const chunk of req) chunks.push(chunk);
           const raw = Buffer.concat(chunks).toString('utf8');

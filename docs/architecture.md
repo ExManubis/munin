@@ -40,6 +40,7 @@ agent runtime ──MCP──▶ tracker ◀──MCP── Claude Code, Codex, 
 | Agents' roles, briefs, models, abilities, ask-first rules | | ✓ |
 | Conversations: messages, runs, questions, approvals | | ✓ |
 | Routines and memory | | ✓ |
+| Where each project's code is, and agents' worktrees | | ✓ |
 | Provider keys, tokens used, cost | | ✓ |
 
 ## How the frontend joins services
@@ -107,7 +108,8 @@ pi-durable is experimental, and its API changes between releases. Pin exact vers
    - the runtime's first version runs agents on pi-durable with OpenRouter, Ollama or a stand-in model, with questions, ask-first approvals, coding tools and memory, and the frontend uses it when it's running;
    - coders and reviewers work in the tracker over MCP with their own tokens, and their questions about issues show in both places;
    - routines run on a schedule, or when the tracker's event feed shows a match, so agents start work by themselves;
-   - next: a branch per issue, apps and the web as tools, and a budget that pauses.
+   - each coder gets a git worktree per issue, on a branch named after it, from the runtime's clone of the project;
+   - next: apps and the web as tools, and a budget that pauses.
 5. **Then:** live agent output, cost per issue, approvals, push notifications, and maybe the Claudewitz iPhone app as a client.
 
 ## Open questions

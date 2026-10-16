@@ -42,7 +42,8 @@ A **summary**, for the sidebar and lists:
   "memory": [{ "id": "m1", "text": "Mikkel prefers small PRs." }], "memoryCount": 9,
   "usage": { "today": 1.92, "week": 9.4, "month": 31.2, "tokens": 640000 },  // dollars; tokens today
   "budget": 60,                                                   // pauses at this much a month, or null
-  "worksIn": { "folder": "~/agents/forge/munin", "branch": "mun-46-stream" },  // when it can code
+  "worksIn": { "folder": "~/.munin/agents/forge/MUN-46", "branch": "mun-46-stream-tool-output",  // when it can code
+               "issue": Issue, "detached": false },                       // detached: reviewing someone's branch
   "tracker": { "projects": ["MUN", "WEB"], "takes": "issues",                // when it uses the tracker
                "connected": true, "reachable": true },                     // has a token; the tracker answers
   "createdAt": "…",
@@ -96,6 +97,9 @@ An **item** is one of:
 | `forget(name, noteId)` | `DELETE /runtime/api/agents/{name}/memory/{id}` | |
 | `providers()` | `GET /runtime/api/providers` | `[{id, name, connected, detail}]`. The runtime takes them from its environment; setting one up from Settings is still to design |
 | `models()` | `GET /runtime/api/models` | The models to pick from: `[{id, name, models: [{id, name, day}]}]`, `day` being a rough cost in dollars for a day of steady use |
+| `repos()` | `GET /runtime/api/repos` | Where each project's code is: `[{project, source, base}]` |
+| `setRepo(key, fields)` | `PUT /runtime/api/repos/{KEY}` | `{source, base}`: a git URL or a folder with a repository, and the branch new branches start from (the repository's default when left out). Clones it the first time |
+| `removeRepo(key)` | `DELETE /runtime/api/repos/{KEY}` | Forgets it; the clone and agents' worktrees stay |
 
 A **routine** starts on a schedule or a trigger:
 
@@ -148,19 +152,20 @@ The runtime (`runtime/src/`) is a thin layer over pi-durable:
   - `add_comment(…, ask_human=true)` becomes a question card with `trackerQuestion` set, so the frontend lists it once and an answer in either place answers both;
   - `update_issue` to a new status becomes an action line (took, sent to review, moved to Done, sent back, put back, cancelled), and a run started while the agent has an issue in progress belongs to that issue;
   - `create_issue` becomes "filed".
+- **Worktrees** (`workspace.js`). The runtime keeps a clone of each project's repository (`MUNIN_REPOS_DIR`, `~/.munin/repos/<KEY>`). When a coder takes an issue, the runtime adds a worktree of it in the agent's folder (`~/.munin/agents/forge/MUN-46`) on a branch named after the issue (`mun-46-stream-tool-output`), from the fetched base, and moves the agent's shell and file tools there before the agent reads the tracker's answer. Taking an issue again picks its branch up as the agent left it. Commits in a worktree are the agent's (`user.name` is its name). An `open_worktree` tool goes back to one of the agent's own worktrees, or opens a detached copy of someone else's branch to review it, so a reviewer's commits never land on it. When an agent takes its next issue, its worktrees with nothing uncommitted whose branch is already in the base are removed. Agents' shells run with `GIT_PAGER=cat` and no prompts, since nobody is at their terminal. How work gets delivered (push, pull request, merge) is up to the project's brief.
 - **Usage** adds up the cost and tokens on each reply.
 - **Models:** OpenRouter with `OPENROUTER_API_KEY`, an Ollama server with `MUNIN_OLLAMA_URL`, and always the stand-in, which answers without a model. An agent on a model the runtime can't reach runs on the stand-in until it can.
 
 ## What this version does
 
-Real: agents and their settings, conversations with runs, questions with options, ask-first approvals with undo, coding tools in a folder, the tracker for coders and reviewers, routines on a schedule or a tracker trigger, memory, pause and resume, usage, models, the live stream, and everything surviving a restart.
+Real: agents and their settings, conversations with runs, questions with options, ask-first approvals with undo, coding tools, a worktree and a branch per issue, the tracker for coders and reviewers, routines on a schedule or a tracker trigger, memory, pause and resume, usage, models, the live stream, and everything surviving a restart.
 
 An agent in the tracker starts work when you tell it to, from its projects in the ABOUT panel, or when a routine says so: "Weekdays 09:00: continue the MUN project" keeps a coder on the pile, and "When an issue moves to In review" puts a reviewer on what lands. It keeps going until `wait_for_work` says there's nothing left.
 
 Stored but not acted on yet, next roughly in this order:
 
-1. **A branch per issue**, as a git worktree in the agent's folder (`worksIn.branch` is `null` until then).
-2. **Apps and the web** as tools, through MCP servers, with ask-first rules for apps like "send mail". Mail and calendar routines start then.
-3. **A budget that pauses** the agent at its limit.
-4. **Faster reads.** Each read goes through an agent's whole conversation; it should keep items and page them.
-5. **Numbered events** on the stream, and replay on reconnect.
+1. **Apps and the web** as tools, through MCP servers, with ask-first rules for apps like "send mail". Mail and calendar routines start then.
+2. **A budget that pauses** the agent at its limit.
+3. **Faster reads.** Each read goes through an agent's whole conversation; it should keep items and page them.
+4. **Numbered events** on the stream, and replay on reconnect.
+5. **Agents kept from acting as you** on a server (`architecture.md`), with worktrees in containers or as a separate user.

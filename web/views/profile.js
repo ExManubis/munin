@@ -154,7 +154,11 @@ function abilities(agent, set, ctx) {
         line = agent.apps.length ? `${list(agent.apps)} ${agent.apps.length === 1 ? 'is' : 'are'} connected. ` : 'Nothing connected yet. ';
         extra = h('button', { type: 'button', class: 'link', onclick: () => connectApps(agent, ctx) }, 'Connect an app');
       }
-      if (id === 'code' && on && agent.worksIn) line = `Works in ${agent.worksIn.folder}${agent.worksIn.branch ? ', on its own branch' : ''}.`;
+      if (id === 'code' && on && agent.worksIn) {
+        line = agent.worksIn.branch
+          ? `Works in ${agent.worksIn.folder}, ${agent.worksIn.detached ? 'reviewing' : 'on'} ${agent.worksIn.branch}.`
+          : `Works in ${agent.worksIn.folder}. An issue it takes gets a worktree on a branch of its own, for projects whose code is set up in Settings.`;
+      }
       if (id === 'tracker') return trackerRow(agent, on, title, set, ctx);
       return settingRow(title, line, on, title, () => set({ abilities: { [id]: !on } }), extra);
     }));

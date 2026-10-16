@@ -60,6 +60,9 @@ export function connect(base) {
     forget: (name, id) => call('DELETE', `${agent(name)}/memory/${enc(id)}`),
     providers: () => call('GET', '/providers'),
     models: () => call('GET', '/models'),
+    repos: () => call('GET', '/repos'),
+    setRepo: (key, fields) => call('PUT', `/repos/${enc(key)}`, fields),
+    removeRepo: (key) => call('DELETE', `/repos/${enc(key)}`),
     subscribe(fn) {
       listeners.add(fn);
       listen();

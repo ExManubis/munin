@@ -31,6 +31,7 @@ export function describeCall(name, args = {}) {
     case 'add_comment': return `Commented on ${args.issue}`;
     case 'events': return 'Read what changed in the tracker';
     case 'wait_for_work': return `Waited for work in ${args.project}`;
+    case 'open_worktree': return args.issue ? `Opened ${args.issue}` : 'Went back to its own folder';
     default: return `${name.replace(/_/g, ' ')}${Object.keys(args).length ? ` ${first(JSON.stringify(args), 80)}` : ''}`;
   }
 }

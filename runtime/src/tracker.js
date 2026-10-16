@@ -7,7 +7,7 @@
 // a question card tied to the tracker's copy (`trackerQuestion`), and taking, finishing or
 // filing an issue becomes an action line.
 
-import { defineExtension, defineTool, section } from '@earendil-works/pi-durable';
+import { configure, defineExtension, defineTool, section } from '@earendil-works/pi-durable';
 
 const PROTOCOL = '2025-06-18';
 const RETRY_MS = 30 * 1000;
@@ -102,10 +102,12 @@ export function actionFor(agentName, args, resultText) {
 }
 
 // `agents()` lists every agent, `agentFor(conversationId)` finds the calling one, and
-// `write(agent, kind, data)` adds an entry to its conversation. `connect()` lists the
+// `write(agent, kind, data)` adds an entry to its conversation. `onTake(agent, issue, move)`
+// hears that an agent took an issue, can `move(folder)` its tools there, and returns a line
+// for the agent. `connect()` lists the
 // tracker's tools with any connected agent's token and installs them in place of the empty
 // extension, retrying every half minute until the tracker answers.
-export function createTracker({ registry, agents, agentFor, write, user }) {
+export function createTracker({ registry, agents, agentFor, write, user, onTake }) {
   let listed = null; // the tracker's tools, once it has answered
   let instructions = '';
   let timer = null;
@@ -129,14 +131,16 @@ export function createTracker({ registry, agents, agentFor, write, user }) {
           return fail(err.message);
         }
         const text = textOf(result);
-        if (!result?.isError) await record(agent, client, spec.name, args, text).catch(() => {});
-        return { output: [{ type: 'text', text }], isError: Boolean(result?.isError) };
+        const move = (cwd) => api.commit((tx) => configure(tx, api.conversationId, { cwd }), context);
+        const more = result?.isError ? null : await record(agent, client, spec.name, args, text, move).catch(() => null);
+        return { output: [{ type: 'text', text: more ? `${text}\n\n${more}` : text }], isError: Boolean(result?.isError) };
       },
     });
   }
 
-  // What shows in the conversation for a call that went through.
-  async function record(agent, client, name, args, text) {
+  // What shows in the conversation for a call that went through, and anything the agent
+  // should hear besides the tracker's answer.
+  async function record(agent, client, name, args, text, move) {
     if (name === 'add_comment' && args.ask_human) {
       const m = /on (\S+) \(comment (\d+)\)/.exec(text);
       if (!m) return;
@@ -151,6 +155,7 @@ export function createTracker({ registry, agents, agentFor, write, user }) {
     } else if (name === 'update_issue') {
       const action = actionFor(agent.name, args, text);
       if (action) await write(agent, 'munin.action', action);
+      if (action?.status === 'in_progress' && onTake) return onTake(agent, action.issue, move);
     } else if (name === 'create_issue') {
       const m = /^Created (\S+): (.*)$/m.exec(text);
       if (m) await write(agent, 'munin.action', { verb: 'filed', object: m[2], issue: { id: m[1], title: m[2] } });

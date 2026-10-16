@@ -757,6 +757,23 @@ export const mock = {
     return MODELS;
   },
 
+  // Where each project's code is. The mock only keeps what you say.
+  async repos() {
+    return Object.entries(state.repos || {}).map(([project, repo]) => ({ project, ...repo }));
+  },
+
+  async setRepo(key, { source, base } = {}) {
+    if (!String(source || '').trim()) throw new Error('Say where the code is: a git URL, or a folder with a repository in it.');
+    (state.repos ||= {})[key] = { source: source.trim(), base: base || 'main' };
+    changed();
+    return { project: key, ...state.repos[key] };
+  },
+
+  async removeRepo(key) {
+    delete state.repos?.[key];
+    changed();
+  },
+
   subscribe(fn) {
     listeners.add(fn);
     return () => listeners.delete(fn);

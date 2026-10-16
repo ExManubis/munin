@@ -1,6 +1,6 @@
-// Settings, behind your square in the topbar: the models munin's own agents run on, the
-// outside agents that connect to the tracker over MCP (a token each), notifications, and,
-// on the mock runtime, a reset for its sample agents.
+// Settings, behind your square in the topbar: the models munin's own agents run on, where
+// each project's code lives, the outside agents that connect to the tracker over MCP (a token
+// each), notifications, and, on the mock runtime, a reset for its sample agents.
 
 import { api } from '../api.js';
 import { runtime } from '../runtime/index.js';
@@ -15,20 +15,21 @@ export const view = {
   title: () => 'Settings',
 
   async load() {
-    const [agents, providers] = await Promise.all([api.agents(), runtime.providers()]);
-    return { agents, providers, me: store.me };
+    const [agents, providers, repos] = await Promise.all([api.agents(), runtime.providers(), runtime.repos()]);
+    return { agents, providers, repos, me: store.me };
   },
 
   leave() {
     created = null; // the token is only ever shown on the screen that created it
   },
 
-  render({ agents, providers, me }, ctx) {
+  render({ agents, providers, repos, me }, ctx) {
     const live = agents.filter((a) => !a.revoked);
     return h('div', { class: 'page' },
       topbar([h('span', { class: 'title' }, 'Settings')]),
       h('div', { class: 'agents-page' },
         providerSection(providers),
+        codeSection(repos, ctx),
         h('section', { class: 'section', id: 'outside-agents' },
           h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Outside agents'), h('span', { class: 'mono muted' }, `${live.length} connected`)),
           h('p', { class: 'lead' },
@@ -58,6 +59,55 @@ function providerSection(providers) {
         h('span', { class: 'agent-action' }, runtime.kind === 'mock'
           ? h('button', { type: 'button', class: 'link', onclick: () => toast('The dummy has no real providers yet.') }, p.connected ? 'Change' : 'Set up')
           : null)))));
+}
+
+// Where each tracker project's code is. The runtime keeps a clone, and each coder gets a
+// worktree per issue, on a branch named after the issue.
+function codeSection(repos, ctx) {
+  if (!store.projects.length) return null;
+  return h('section', { class: 'section', id: 'code' },
+    h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Code')),
+    h('p', { class: 'lead' },
+      "Where each project's code lives. munin keeps a clone of it, and a coder that takes an issue gets a worktree of its own, ",
+      'on a branch named after the issue, so agents working side by side never share a checkout.'),
+    h('div', { class: 'repo-list' }, store.projects.map((project) => repoRow(project, repos.find((r) => r.project === project.key), ctx))));
+}
+
+function repoRow(project, repo, ctx) {
+  const key = `repo:${project.key}`;
+  const source = bindDraft(h('input', {
+    class: 'input',
+    placeholder: 'git@github.com:you/repo.git, or a folder with a clone',
+    autocomplete: 'off',
+    spellcheck: false,
+    'aria-label': `Where ${project.key}'s code is`,
+  }), `${key}:source`, repo?.source || '');
+  const base = bindDraft(h('input', { class: 'input', placeholder: 'main', autocomplete: 'off', spellcheck: false, 'aria-label': `${project.key}'s base branch` }), `${key}:base`, repo?.base || '');
+  const button = h('button', { type: 'submit', class: 'btn small' }, repo ? 'Save' : 'Set up');
+  const save = async (e) => {
+    e.preventDefault();
+    button.disabled = true;
+    button.textContent = repo ? 'Saving…' : 'Cloning…';
+    try {
+      const saved = await runtime.setRepo(project.key, { source: source.value.trim(), base: base.value.trim() || undefined });
+      drafts.delete(`${key}:source`);
+      drafts.delete(`${key}:base`);
+      toast(`${project.key}'s code is set up. New branches start from ${saved.base}.`);
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+    ctx.reload();
+  };
+  const remove = async () => {
+    if (!confirm(`Forget where ${project.key}'s code is? Worktrees agents already have stay.`)) return;
+    await runtime.removeRepo(project.key);
+    ctx.reload();
+  };
+  return h('form', { class: 'repo-row', onsubmit: save },
+    h('span', { class: 'repo-project' }, h('span', { class: 'mono' }, project.key), h('span', { class: 'hint' }, repo ? `branches from ${repo.base}` : project.name)),
+    source,
+    base,
+    h('span', { class: 'repo-actions' }, button, repo ? h('button', { type: 'button', class: 'link', onclick: remove }, 'Remove') : null));
 }
 
 function dummy(ctx) {

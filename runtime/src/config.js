@@ -11,6 +11,8 @@ export function settingsFromEnv(env = process.env) {
     port: Number(env.MUNIN_RUNTIME_PORT || 7779),
     // Each agent that can code gets a folder of its own under here.
     agentsDir: env.MUNIN_AGENTS_DIR || join(home, 'agents'),
+    // The runtime's clone of each project's repository; agents get worktrees of them.
+    reposDir: env.MUNIN_REPOS_DIR || join(home, 'repos'),
     // An Ollama (or any OpenAI-compatible) server, like http://127.0.0.1:11434
     ollamaUrl: env.MUNIN_OLLAMA_URL || null,
     // The name your messages get, as in the tracker.
