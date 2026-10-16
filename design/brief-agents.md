@@ -78,6 +78,7 @@ Every agent is a **Figbot**: the halftone sphere with two eyes from `figment-eng
 
 | Colour | Hex |
 |---|---|
+| white (default) | `#EDEDED` |
 | ember | `#F2A65A` |
 | coral | `#F07C6B` |
 | rose | `#E98BB8` |
@@ -87,7 +88,7 @@ Every agent is a **Figbot**: the halftone sphere with two eyes from `figment-eng
 | moss | `#9CCB6B` |
 | straw | `#E3CF6E` |
 
-Outside agents (claude-code, codex, figbot) are white Figbots in `#EDEDED`, the original Figbot. Only agents of your own have a colour.
+White is the default for a new agent and can be kept like any other colour. Outside agents (claude-code, codex, figbot) are always white: the original Figbot.
 
 **Expression shows state.** The expressions are Figbot's own poses (`POSES` in `figbot/src/model.ts`):
 
@@ -105,7 +106,7 @@ Outside agents (claude-code, codex, figbot) are white Figbots in `#EDEDED`, the 
 | Size | Grid | Where |
 |---|---|---|
 | 18 px | 18 cells, 1 px each | lists, rows, message rows |
-| 36 px | 18 cells, 2 px each | headers, the colour picker |
+| 36 px | 24 cells, 1.5 px each | headers, the colour picker |
 | 72 px | 36 cells, 2 px each | profile |
 
 18 px is the smallest size and should read like the site's 16 px Figbot icon (`public/icons/figbot.svg`). If the eyes don't read at 18, note it under "Changed while designing" rather than redrawing them.
@@ -137,6 +138,13 @@ The role in Plex Mono 11 caps at 0.12 em, `#7A7A7A`, after the name: `ASSISTANT`
   - Numbered dotted options with a line of detail each, then "Or answer in your own words…".
   - The primary `SEND TO HUGIN ⌘↵`.
   - Answered cards keep the chosen option with its filled check, drop the rest, and add `You · 07:44` in Plex Mono 11.
+- **Approval card.** When an agent wants to do something switched on under ASK ME FIRST (send mail, accept an invite, …), it asks with this instead of a question card:
+  - The label `HUGIN WANTS TO SEND MAIL`, then what it will do in Plex Mono 11 `#CFCFCF`: `Re: Offsite in Aarhus → Paul Eriksen`. The draft itself is quoted in the message above the card.
+  - Three dotted rows, each with a key and a line of detail. Picking one acts at once, so the card has no send button and no primary:
+    1. `Allow once`: "Send this one. Ask again next time."
+    2. `Always allow`: "Stop asking before hugin sends mail."
+    3. `Deny`: "Don't send. Tell hugin why below."
+  - Answered, it keeps the chosen row with its filled check and `You · 07:44`, like a question card. After `Always allow` it adds a grey line: "Sending mail no longer asks first. Turn it back on in hugin's profile." with `PROFILE` as a tertiary link.
 - **Work strip** (when an agent is working on an issue): a 40 px band under the conversation header, with a 1 px rule below it.
   - Left: the Working pixel, `MUN-46` in Plex Mono, the title in Red Hat 13, then `· 6 min · editing gateway/telegram.py` in grey.
   - Right: tertiary `VIEW RUN R` and `STOP S`.
@@ -185,7 +193,7 @@ Number them after Issues v3. Desktop is 1440 wide; the phone is 390 × 844.
 
 A sheet in the style of 00, with sections:
 
-- **FACES:** the eight colours as idle Figbots at 18, 36 and 72, with their names and hex values. Then a white outside-agent Figbot, captioned "Outside agents are white."
+- **FACES:** the nine colours as idle Figbots at 18, 36 and 72, with their names and hex values, white first and marked as the default. Caption: outside agents are always white.
 - **STATES:** one Figbot (hugin, sky) in each of working, idle, asks you, failed, paused and just finished, at 36, with a person square for comparison. Caption: "Colour says who. Expression says what it's doing."
 - **ROLES:** the six role tags.
 - **TOPBAR:** the bar on its own, with a caption.
@@ -193,7 +201,8 @@ A sheet in the style of 00, with sections:
   - message row, your message, action line, issue action, time rule;
   - run collapsed and expanded;
   - work strip and composer.
-- **YOUR MOVE IN A CONVERSATION:** a question card open and answered.
+- **YOUR MOVE IN A CONVERSATION:** a question card open and answered, then an approval card open and answered with `Always allow`.
+- **ROUTINES:** two routine rows, one on a schedule and one on a trigger, with a caption listing the triggers (see 11).
 
 ### 09 Agents · hugin (1440 × 900)
 
@@ -216,10 +225,10 @@ M Mikkel  07:42
   Tell Paul yes to the offsite. And move the dentist, please.
   · drafted reply · Re: Offsite in Aarhus
 hugin  07:43
-  Here's the reply to Paul. Send it as it is?
+  Here's the reply to Paul.
   │ Hi Paul, count me in for the offsite. I'll book the train once the
   │ agenda is out. Mikkel
-  [answered card: "Send it" ✓ · You · 07:44]
+  [answered approval card: HUGIN WANTS TO SEND MAIL · "Allow once" ✓ · You · 07:44]
   · sent mail · Re: Offsite in Aarhus → Paul Eriksen
 TODAY · 09:15
 hugin  09:15
@@ -241,6 +250,7 @@ hugin  09:15
   - `ROUTINES`:
     - Morning briefing · weekdays 07:30 · next tomorrow 07:30
     - Inbox sweep · every 2 h · next 11:15
+    - Paul first · when mail from Paul Eriksen arrives · last today 07:12
   - `APPS`: Calendar, Gmail and Web, each a plain row with the 4 × 4 pixel.
   - Then secondary `PROFILE P` and tertiary `PAUSE`.
 
@@ -284,7 +294,9 @@ forge  13:57
   - Today: $1.92 · 640k tokens
   - Works in: `~/agents/forge/munin` · branch `mun-46-stream`
   - Tracker: MUN, WEB · takes issues
-  - `ROUTINES`: Nightly tests · 02:00 · "Pull main, run the suite, file what fails"
+  - `ROUTINES`:
+    - Nightly tests · 02:00 · "Pull main, run the suite, file what fails"
+    - Fix what vera flags · when vera requests changes on forge's PR · last yesterday 16:40
 
 ### 11 Agent profile · hugin (1440 × 1100)
 
@@ -299,10 +311,16 @@ forge  13:57
   - **ABILITIES:** toggle rows like "What agents can do without asking" in 05.
     - On: Apps ("Calendar and Gmail are connected." plus tertiary `CONNECT AN APP`) and Web ("Search and read pages").
     - Off: Code ("A folder, a shell and git"), Tracker ("Take, review and file issues in munin") and Images ("Make pictures").
-  - **ASK ME FIRST:** toggle rows. Sending mail: on. Accepting or declining invites: on. Moving my own events: off. Caption: "Anything switched on becomes a question in your conversation."
-  - **ROUTINES:** rows with a name, schedule, one line of what it does, the next run and tertiary `EDIT`:
+  - **ASK ME FIRST:** toggle rows. Sending mail: on. Accepting or declining invites: on. Moving my own events: off. Caption: "Anything switched on becomes an approval in your conversation. Always allow on that card switches it off here."
+  - **ROUTINES:** rows with a name, what starts it, one line of what it does, the next run (or the last run, for triggers) and tertiary `EDIT`. A routine starts on a schedule or on a trigger:
+    - **Mail:** mail arrives, matched by sender or subject.
+    - **Calendar:** an event is added, moved or about to start.
+    - **Tracker:** an issue moves to a status, is assigned, gets a review request or changes requested, or a run fails.
+
+    Rows:
     - Morning briefing · Weekdays 07:30 · "Summarise the day: calendar, mail that needs me, the weather in Copenhagen." · next tomorrow 07:30
     - Inbox sweep · Every 2 hours, 08–18 · "Flag mail that needs a reply today." · next 11:15
+    - Paul first · When mail from Paul Eriksen arrives · "Tell me right away and draft a reply." · last today 07:12
 
     Then secondary `NEW ROUTINE`.
   - **MEMORY:** "What hugin remembers about you · 23 notes", three of them, and tertiary `VIEW ALL`:
@@ -325,7 +343,7 @@ forge  13:57
 
   6 is selected and shows the filled check.
 - **NAME:** a dotted input, `pip`.
-- **COLOUR:** the eight colours as idle Figbots at 36, each in a dotted box with its name under it in Plex Mono 11 caps grey. Straw is selected with the filled check. Colours already taken by other agents are still offered, with the agent's name in grey: "hugin". Two agents can share a colour, but it isn't suggested.
+- **COLOUR:** the nine colours as idle Figbots at 36, each in a dotted box with its name under it in Plex Mono 11 caps grey. White comes first and is preselected for a new agent; here pip has picked straw, which shows the filled check. Colours already taken by other agents are still offered, with the agent's name in grey: "hugin". Two agents can share a colour, but it isn't suggested.
 - **MODEL:** `OpenRouter ▾`, `haiku-5.5 ▾`. Hint: "A companion doesn't need a big model. About $0.02 a conversation."
 - **BRIEF,** filled in from the role and editable: "You're pip. You're curious and cheerful, and you like riddles, word games and odd facts. Keep replies short. When Mikkel seems busy, let him be."
 - **Primary:** `CREATE PIP ⌘↵`, with "Abilities, routines and a budget are in pip's profile." beside it.
@@ -375,3 +393,14 @@ forge  13:57
    - Point logo images at `../brand/logo/treatments/`, as the existing exports do.
 3. **Add the artboards to the table in `design/README.md`,** under a heading for page "Agents v1".
 4. **Note anything this brief got wrong** or that didn't work on the canvas at the end of this file, under "Changed while designing". Don't change other files.
+
+## Changed while designing
+
+- **36 px faces use a 24-dot grid (1.5 px a dot), not 18.** At 18 dots the expressions blur together; happy is hard to tell from idle. This is the one place a face isn't drawn at a whole-number scale.
+- **At 18 px, the colour reads but the expression barely does.** State still shows through the row's chip and line 2, so rows don't rely on the face for it.
+- **The `ASKS` chip sits at the end of line 2 in the agents sidebar,** not line 1. At 232 px, the name, the role tag and the chip don't fit on one line; line 1 always ends with the time.
+- **White is a colour you can pick, and the default** for a new agent (Mikkel, after reviewing 08 and 09).
+- **11 and 12 are taller than 1100 and 1000.** The sections don't fit, so both artboards fit their content (about 1770 and 1290).
+- **hugin's profile header reads "Asks you", not "Idle",** with the `curious` face, to match the open dentist question in 09.
+- **pip isn't in 12's sidebar,** because pip is the agent being created there. The other artboards show the sidebar after pip exists.
+- **The phone composer's key box shows `↑`,** not `⌘↵`.
