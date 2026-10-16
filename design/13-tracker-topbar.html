@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>munin · 13 — Tracker under the topbar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Red+Hat+Text:wght@400;500&amp;display=swap">
+<style>body { margin: 0; background: #0A0A0A; }</style>
+</head>
+<body>
+<div style="background: radial-gradient(75% 70%, rgb(10, 10, 10) 35%, rgba(10, 10, 10, 0) 100%) 0% 0% / 100% 100%, radial-gradient(circle at 7px 7px, rgb(30, 30, 30) 1px, transparent 1.4px) 0% 0% / 14px 14px, none 0% 0% rgb(10, 10, 10); box-sizing: border-box; display: flex; flex-direction: column; font-size: 12px; font-synthesis: none; height: 900px; line-height: 16px; -moz-osx-font-smoothing: grayscale; overflow: clip; overflow-wrap: anywhere; -webkit-font-smoothing: antialiased; width: 1440px">
+  <div style="align-items: center; border-bottom-color: #2A2A2A; border-bottom-style: solid; border-bottom-width: 1px; box-sizing: border-box; display: flex; flex-shrink: 0; height: 48px; padding-inline: 20px; width: 100%">
+    <div style="box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; height: 22px; overflow: clip; position: relative; width: 118px">
+      <div style="background-image: url(../brand/logo/treatments/munin-lockup-dither-on-dark.svg); background-position: 50%; background-repeat: no-repeat; background-size: 100% 100%; box-sizing: border-box; height: 26px; left: -2px; position: absolute; top: -2px; width: 122px"></div>
+    </div>
+    <div style="box-sizing: border-box; display: flex; gap: 24px; height: 48px; padding-left: 32px">
+      <div style="align-items: center; box-sizing: border-box; display: flex">
+        <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px">
+          AGENTS
+        </div>
+      </div>
+      <div style="align-items: center; border-bottom-color: #EDEDED; border-bottom-style: solid; border-bottom-width: 1px; box-sizing: border-box; display: flex">
+        <div style="box-sizing: border-box; color: #EDEDED; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px">
+          TRACKER
+        </div>
+      </div>
+    </div>
+    <div style="box-sizing: border-box; flex-grow: 1"></div>
+    <div style="align-items: center; box-sizing: border-box; display: flex; gap: 16px">
+      <div style="align-items: center; border-color: #2A2A2A; border-style: dotted; border-width: 1px; box-sizing: border-box; display: flex; flex-shrink: 0; gap: 10px; height: 32px; padding-inline: 10px; width: 240px">
+        <svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg" style="display: inline-block; flex-shrink: 0">
+          <rect x="1.5" y="1.5" width="6" height="6" fill="none" stroke="#7A7A7A" />
+          <rect x="8" y="8" width="3" height="3" fill="#7A7A7A" />
+        </svg>
+        <div style="box-sizing: border-box; color: #7A7A7A; flex-grow: 1; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 13px; line-height: 18px">
+          Search or jump to…
+        </div>
+        <div style="align-items: center; border-color: #2A2A2A; border-style: solid; border-width: 1px; box-sizing: border-box; display: flex; height: 18px; justify-content: center; min-width: 18px; padding-inline: 4px">
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            ⌘K
+          </div>
+        </div>
+      </div>
+      <div style="align-items: center; border-color: #7A7A7A; border-style: dotted; border-width: 1px; box-sizing: border-box; display: flex; height: 22px; padding-inline: 8px">
+        <div style="box-sizing: border-box; color: #EDEDED; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px">
+          4 WAITING ON YOU
+        </div>
+      </div>
+      <div style="align-items: center; background-color: #2A2A2A; box-sizing: border-box; display: flex; flex-shrink: 0; height: 18px; justify-content: center; width: 18px">
+        <div style="box-sizing: border-box; color: #EDEDED; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+          M
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="box-sizing: border-box; display: flex; flex-grow: 1; min-height: 0px; width: 100%">
+    <div style="align-self: stretch; border-right-color: #2A2A2A; border-right-style: solid; border-right-width: 1px; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; padding-bottom: 16px; padding-inline: 12px; padding-top: 18px; width: 232px">
+      <div style="box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; padding-top: 16px">
+        <div style="align-items: center; background-color: #EDEDED0F; box-sizing: border-box; display: flex; flex-shrink: 0; gap: 10px; height: 32px; padding-inline: 10px">
+          <svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg" style="display: inline-block; flex-shrink: 0">
+            <path d="M0.5 0.5 H11.5 V11.5 H0.5 Z" fill="none" stroke="#EDEDED" />
+            <path d="M0.5 7.5 H4 V9.5 H8 V7.5 H11.5" fill="none" stroke="#EDEDED" />
+          </svg>
+          <div style="box-sizing: border-box; color: #EDEDED; flex-basis: 0%; flex-grow: 1; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+            Inbox
+          </div>
+          <div style="box-sizing: border-box; color: #EDEDED; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            3
+          </div>
+        </div>
+        <div style="align-items: center; box-sizing: border-box; display: flex; flex-shrink: 0; gap: 10px; height: 32px; padding-inline: 10px">
+          <svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg" style="display: inline-block; flex-shrink: 0">
+            <rect x="0.5" y="0.5" width="11" height="11" fill="none" stroke="#7A7A7A" />
+            <rect x="4" y="4" width="4" height="4" fill="#7A7A7A" />
+          </svg>
+          <div style="box-sizing: border-box; color: #7A7A7A; flex-basis: 0%; flex-grow: 1; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+            My issues
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            5
+          </div>
+        </div>
+        <div style="align-items: center; box-sizing: border-box; display: flex; flex-shrink: 0; gap: 10px; height: 32px; padding-inline: 10px">
+          <svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg" style="display: inline-block; flex-shrink: 0">
+            <rect x="0" y="1" width="12" height="2" fill="#7A7A7A" />
+            <rect x="0" y="5" width="12" height="2" fill="#7A7A7A" />
+            <rect x="0" y="9" width="8" height="2" fill="#7A7A7A" />
+          </svg>
+          <div style="box-sizing: border-box; color: #7A7A7A; flex-basis: 0%; flex-grow: 1; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+            All issues
+          </div>
+        </div>
+        <div style="align-items: center; box-sizing: border-box; display: flex; flex-shrink: 0; gap: 10px; height: 32px; padding-inline: 10px">
+          <svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg" style="display: inline-block; flex-shrink: 0">
+            <rect x="0" y="0" width="3" height="12" fill="#7A7A7A" />
+            <rect x="4.5" y="0" width="3" height="8" fill="#7A7A7A" />
+            <rect x="9" y="0" width="3" height="10" fill="#7A7A7A" />
+          </svg>
+          <div style="box-sizing: border-box; color: #7A7A7A; flex-basis: 0%; flex-grow: 1; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+            Board
+          </div>
+        </div>
+      </div>
+      <div style="box-sizing: border-box; display: flex; flex-direction: column; flex-grow: 1; gap: 2px; padding-top: 28px">
+        <div style="box-sizing: border-box; padding-bottom: 8px; padding-inline: 10px">
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px; text-transform: uppercase">
+            Projects
+          </div>
+        </div>
+        <div style="align-items: center; box-sizing: border-box; display: flex; flex-shrink: 0; gap: 10px; height: 32px; padding-inline: 10px">
+          <div style="box-sizing: border-box; display: flex; flex-shrink: 0; justify-content: center; width: 12px">
+            <div style="background-color: #7A7A7A; box-sizing: border-box; flex-shrink: 0; height: 4px; width: 4px"></div>
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; flex-basis: 0%; flex-grow: 1; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+            core
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            12
+          </div>
+        </div>
+        <div style="align-items: center; box-sizing: border-box; display: flex; flex-shrink: 0; gap: 10px; height: 32px; padding-inline: 10px">
+          <div style="box-sizing: border-box; display: flex; flex-shrink: 0; justify-content: center; width: 12px">
+            <div style="background-color: #7A7A7A; box-sizing: border-box; flex-shrink: 0; height: 4px; width: 4px"></div>
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; flex-basis: 0%; flex-grow: 1; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+            gateway
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            6
+          </div>
+        </div>
+        <div style="align-items: center; box-sizing: border-box; display: flex; flex-shrink: 0; gap: 10px; height: 32px; padding-inline: 10px">
+          <div style="box-sizing: border-box; display: flex; flex-shrink: 0; justify-content: center; width: 12px">
+            <div style="background-color: #7A7A7A; box-sizing: border-box; flex-shrink: 0; height: 4px; width: 4px"></div>
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; flex-basis: 0%; flex-grow: 1; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+            skills
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            4
+          </div>
+        </div>
+        <div style="align-items: center; box-sizing: border-box; display: flex; flex-shrink: 0; gap: 10px; height: 32px; padding-inline: 10px">
+          <div style="box-sizing: border-box; display: flex; flex-shrink: 0; justify-content: center; width: 12px">
+            <div style="background-color: #7A7A7A; box-sizing: border-box; flex-shrink: 0; height: 4px; width: 4px"></div>
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; flex-basis: 0%; flex-grow: 1; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+            tracker
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            3
+          </div>
+        </div>
+      </div>
+      <div style="box-sizing: border-box; display: flex; flex-direction: column; gap: 14px; padding-inline: 10px">
+        <div style="box-sizing: border-box; display: flex; flex-direction: column; gap: 10px">
+          <div style="align-items: center; box-sizing: border-box; display: flex; gap: 6px">
+            <div style="background-image: url(figbot/ember-thinking-18.svg); background-position: 50%; background-repeat: no-repeat; background-size: 100% 100%; box-sizing: border-box; flex-shrink: 0; height: 18px; width: 18px"></div>
+            <div style="background-image: url(figbot/teal-thinking-18.svg); background-position: 50%; background-repeat: no-repeat; background-size: 100% 100%; box-sizing: border-box; flex-shrink: 0; height: 18px; width: 18px"></div>
+            <div style="background-image: url(figbot/white-thinking-18.svg); background-position: 50%; background-repeat: no-repeat; background-size: 100% 100%; box-sizing: border-box; flex-shrink: 0; height: 18px; width: 18px"></div>
+            <div style="background-image: url(figbot/iris-idle-18.svg); background-position: 50%; background-repeat: no-repeat; background-size: 100% 100%; box-sizing: border-box; flex-shrink: 0; height: 18px; width: 18px"></div>
+            <div style="background-image: url(figbot/white-idle-18.svg); background-position: 50%; background-repeat: no-repeat; background-size: 100% 100%; box-sizing: border-box; flex-shrink: 0; height: 18px; width: 18px"></div>
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 13px; line-height: 18px">
+            3 agents working, 2 idle
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="align-self: stretch; border-right-color: #2A2A2A; border-right-style: solid; border-right-width: 1px; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; width: 408px">
+      <div style="align-items: center; border-bottom-color: #2A2A2A; border-bottom-style: solid; border-bottom-width: 1px; box-sizing: border-box; display: flex; flex-shrink: 0; height: 56px; justify-content: space-between; padding-inline: 20px">
+        <div style="align-items: baseline; box-sizing: border-box; display: flex; gap: 10px">
+          <div style="box-sizing: border-box; color: #EDEDED; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; font-weight: 500; line-height: 20px">
+            Inbox
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            3 open
+          </div>
+        </div>
+        <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px; text-decoration: underline 1px dotted; text-underline-offset: 4px">
+          MARK ALL READ
+        </div>
+      </div>
+      <div style="box-sizing: border-box; display: flex; justify-content: space-between; padding-bottom: 8px; padding-inline: 20px; padding-top: 20px">
+        <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px">
+          WAITING ON YOU
+        </div>
+        <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px">
+          LONGEST FIRST
+        </div>
+      </div>
+      <div style="box-sizing: border-box; display: flex; gap: 12px; padding-bottom: 14px; padding-inline: 20px; padding-top: 12px">
+        <div style="background-image: url(figbot/white-worried-18.svg); background-position: 50%; background-repeat: no-repeat; background-size: 100% 100%; box-sizing: border-box; flex-shrink: 0; height: 18px; margin-top: 1px; width: 18px"></div>
+        <div style="box-sizing: border-box; display: flex; flex-basis: 0%; flex-direction: column; flex-grow: 1; gap: 4px">
+          <div style="align-items: baseline; box-sizing: border-box; display: flex; justify-content: space-between">
+            <div style="align-items: baseline; box-sizing: border-box; display: flex; gap: 8px">
+              <div style="box-sizing: border-box; color: #EDEDED; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; font-weight: 500; line-height: 20px">
+                figbot
+              </div>
+              <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px">
+                FAILED
+              </div>
+            </div>
+            <div style="box-sizing: border-box; color: #EDEDED; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+              1h
+            </div>
+          </div>
+          <div style="box-sizing: border-box; color: #CFCFCF; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+            Gave up after 3 attempts. The gateway test times out on CI only.
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            MUN-38 · Telegram gateway reconnect loop
+          </div>
+        </div>
+      </div>
+      <div style="box-sizing: border-box; display: flex; gap: 12px; padding-bottom: 14px; padding-inline: 20px; padding-top: 12px">
+        <div style="background-image: url(figbot/white-curious-18.svg); background-position: 50%; background-repeat: no-repeat; background-size: 100% 100%; box-sizing: border-box; flex-shrink: 0; height: 18px; margin-top: 1px; width: 18px"></div>
+        <div style="box-sizing: border-box; display: flex; flex-basis: 0%; flex-direction: column; flex-grow: 1; gap: 4px">
+          <div style="align-items: baseline; box-sizing: border-box; display: flex; justify-content: space-between">
+            <div style="align-items: baseline; box-sizing: border-box; display: flex; gap: 8px">
+              <div style="box-sizing: border-box; color: #EDEDED; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; font-weight: 500; line-height: 20px">
+                claude-code
+              </div>
+              <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px">
+                REVIEW
+              </div>
+            </div>
+            <div style="box-sizing: border-box; color: #EDEDED; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+              22m
+            </div>
+          </div>
+          <div style="box-sizing: border-box; color: #CFCFCF; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+            PR #212 is ready. Checks pass, +184 −22.
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            MUN-41 · Persist memory to SQLite
+          </div>
+        </div>
+      </div>
+      <div style="background-color: #EDEDED0F; box-sizing: border-box; display: flex; gap: 12px; padding-bottom: 14px; padding-inline: 20px; padding-top: 12px">
+        <div style="background-image: url(figbot/ember-curious-18.svg); background-position: 50%; background-repeat: no-repeat; background-size: 100% 100%; box-sizing: border-box; flex-shrink: 0; height: 18px; margin-top: 1px; width: 18px"></div>
+        <div style="box-sizing: border-box; display: flex; flex-basis: 0%; flex-direction: column; flex-grow: 1; gap: 4px">
+          <div style="align-items: baseline; box-sizing: border-box; display: flex; justify-content: space-between">
+            <div style="align-items: baseline; box-sizing: border-box; display: flex; gap: 8px">
+              <div style="box-sizing: border-box; color: #EDEDED; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; font-weight: 500; line-height: 20px">
+                forge
+              </div>
+              <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px">
+                ASKS
+              </div>
+            </div>
+            <div style="box-sizing: border-box; color: #EDEDED; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+              8m
+            </div>
+          </div>
+          <div style="box-sizing: border-box; color: #CFCFCF; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+            Telegram caps a message at 4,096 characters. New message or a file?
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            MUN-46 · Stream tool output to Telegram
+          </div>
+        </div>
+      </div>
+      <div style="box-sizing: border-box; display: flex; flex-direction: column">
+        <div style="box-sizing: border-box; padding-bottom: 8px; padding-inline: 20px; padding-top: 24px">
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px">
+            LATELY
+          </div>
+        </div>
+        <div style="align-items: center; box-sizing: border-box; display: flex; gap: 12px; padding-block: 10px; padding-inline: 20px">
+          <svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg" style="flex-shrink: 0; margin-right: 3px; margin-left: 3px; display: inline-block">
+            <rect width="12" height="12" fill="#7A7A7A" />
+            <path d="M3 6.5 L5 8.5 L9 3.5" fill="none" stroke="#0A0A0A" stroke-width="1.5" />
+          </svg>
+          <div style="box-sizing: border-box; color: #7A7A7A; flex-basis: 0%; flex-grow: 1; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+            vera moved MUN-45 to Done
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            13:56
+          </div>
+        </div>
+        <div style="align-items: center; box-sizing: border-box; display: flex; gap: 12px; padding-block: 10px; padding-inline: 20px">
+          <svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg" style="flex-shrink: 0; margin-right: 3px; margin-left: 3px; display: inline-block">
+            <rect x="0.5" y="0.5" width="11" height="11" fill="none" stroke="#7A7A7A" />
+            <rect x="3" y="3" width="3" height="6" fill="#7A7A7A" />
+          </svg>
+          <div style="box-sizing: border-box; color: #7A7A7A; flex-basis: 0%; flex-grow: 1; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+            forge took MUN-46
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            13:56
+          </div>
+        </div>
+        <div style="align-items: center; box-sizing: border-box; display: flex; gap: 12px; padding-block: 10px; padding-inline: 20px">
+          <svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg" style="flex-shrink: 0; margin-right: 3px; margin-left: 3px; display: inline-block">
+            <rect width="12" height="12" fill="#7A7A7A" />
+            <path d="M3 6.5 L5 8.5 L9 3.5" fill="none" stroke="#0A0A0A" stroke-width="1.5" />
+          </svg>
+          <div style="box-sizing: border-box; color: #7A7A7A; flex-basis: 0%; flex-grow: 1; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+            claude-code merged #209 into main
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            3h
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="align-self: stretch; box-sizing: border-box; display: flex; flex-basis: 0%; flex-direction: column; flex-grow: 1">
+      <div style="align-items: center; border-bottom-color: #2A2A2A; border-bottom-style: solid; border-bottom-width: 1px; box-sizing: border-box; display: flex; flex-shrink: 0; height: 56px; justify-content: space-between; padding-inline: 32px">
+        <div style="box-sizing: border-box; display: flex; gap: 8px">
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            gateway
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            /
+          </div>
+          <div style="box-sizing: border-box; color: #EDEDED; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            MUN-46
+          </div>
+        </div>
+        <div style="align-items: center; box-sizing: border-box; display: flex; gap: 20px">
+          <div style="align-items: center; box-sizing: border-box; display: flex; gap: 8px">
+            <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px">
+              SNOOZE
+            </div>
+            <div style="align-items: center; border-color: #2A2A2A; border-style: solid; border-width: 1px; box-sizing: border-box; display: flex; height: 18px; justify-content: center; min-width: 18px">
+              <div style="box-sizing: border-box; color: #7A7A7A; display: flex; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+                H
+              </div>
+            </div>
+          </div>
+          <div style="align-items: center; box-sizing: border-box; display: flex; gap: 8px">
+            <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px">
+              OPEN ISSUE
+            </div>
+            <div style="align-items: center; border-color: #2A2A2A; border-style: solid; border-width: 1px; box-sizing: border-box; display: flex; height: 18px; justify-content: center; min-width: 18px">
+              <div style="box-sizing: border-box; color: #7A7A7A; display: flex; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+                ↵
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="box-sizing: border-box; display: flex; flex-direction: column; padding-inline: 56px; padding-top: 40px; width: 752px">
+        <div style="align-items: center; box-sizing: border-box; display: flex; gap: 10px">
+          <svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg" style="flex-shrink: 0; display: inline-block">
+            <rect x="0.5" y="0.5" width="11" height="11" fill="none" stroke="#EDEDED" />
+            <rect x="3" y="3" width="3" height="6" fill="#EDEDED" />
+          </svg>
+          <div style="box-sizing: border-box; color: #CFCFCF; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 13px; line-height: 18px">
+            Working
+          </div>
+          <div style="background-color: #2A2A2A; box-sizing: border-box; flex-shrink: 0; height: 12px; width: 1px"></div>
+          <div style="background-image: url(figbot/ember-curious-18.svg); background-position: 50%; background-repeat: no-repeat; background-size: 100% 100%; box-sizing: border-box; flex-shrink: 0; height: 18px; width: 18px"></div>
+          <div style="box-sizing: border-box; color: #CFCFCF; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 13px; line-height: 18px">
+            forge is waiting for you
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+            8m
+          </div>
+        </div>
+        <div style="box-sizing: border-box; padding-top: 16px">
+          <div style="box-sizing: border-box; color: #EDEDED; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 22px; font-weight: 500; letter-spacing: -0.02em; line-height: 28px">
+            Stream tool output to Telegram
+          </div>
+        </div>
+        <div style="box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; padding-top: 40px">
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px">
+            FORGE ASKS
+          </div>
+          <div style="box-sizing: border-box; color: #EDEDED; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 16px; line-height: 26px">
+            Telegram caps a message at 4,096 characters. When output runs past that, start a new message or attach the rest as a file?
+          </div>
+        </div>
+        <div style="box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; padding-top: 32px">
+          <div style="align-items: center; border-color: #7A7A7A; border-style: dotted; border-width: 1px; box-sizing: border-box; display: flex; gap: 14px; padding-block: 13px; padding-inline: 16px">
+            <div style="align-items: center; border-color: #7A7A7A; border-style: solid; border-width: 1px; box-sizing: border-box; display: flex; flex-shrink: 0; height: 18px; justify-content: center; margin-top: 1px; min-width: 18px">
+              <div style="box-sizing: border-box; color: #EDEDED; display: flex; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+                1
+              </div>
+            </div>
+            <div style="box-sizing: border-box; display: flex; flex-direction: column; flex-grow: 1; gap: 2px">
+              <div style="box-sizing: border-box; color: #EDEDED; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+                Start a new message
+              </div>
+              <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 13px; line-height: 18px">
+                Easy to read on the phone.
+              </div>
+            </div>
+            <svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg" style="flex-shrink: 0; display: inline-block">
+              <rect width="12" height="12" fill="#EDEDED" />
+              <path d="M3 6.5 L5 8.5 L9 3.5" fill="none" stroke="#0A0A0A" stroke-width="1.5" />
+            </svg>
+          </div>
+          <div style="align-items: center; border-color: #7A7A7A; border-style: dotted; border-width: 1px; box-sizing: border-box; display: flex; gap: 14px; padding-block: 13px; padding-inline: 16px">
+            <div style="align-items: center; border-color: #2A2A2A; border-style: solid; border-width: 1px; box-sizing: border-box; display: flex; flex-shrink: 0; height: 18px; justify-content: center; margin-top: 1px; min-width: 18px">
+              <div style="box-sizing: border-box; color: #7A7A7A; display: flex; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+                2
+              </div>
+            </div>
+            <div style="box-sizing: border-box; display: flex; flex-direction: column; gap: 2px">
+              <div style="box-sizing: border-box; color: #CFCFCF; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+                Attach as a file
+              </div>
+              <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 13px; line-height: 18px">
+                One message, but you have to open it.
+              </div>
+            </div>
+          </div>
+          <div style="align-items: center; border-color: #7A7A7A; border-style: dotted; border-width: 1px; box-sizing: border-box; display: flex; flex-shrink: 0; height: 44px; padding-inline: 16px">
+            <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 14px; line-height: 20px">
+              Or answer in your own words…
+            </div>
+          </div>
+        </div>
+        <div style="align-items: center; box-sizing: border-box; display: flex; gap: 20px; padding-top: 24px">
+          <div style="align-items: center; background-color: #EDEDED; box-sizing: border-box; display: flex; gap: 12px; height: 40px; padding-left: 20px; padding-right: 16px">
+            <div style="box-sizing: border-box; color: #0A0A0A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px">
+              SEND TO FORGE
+            </div>
+            <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+              ⌘↵
+            </div>
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'Red Hat Text', system-ui, sans-serif; font-size: 13px; line-height: 18px">
+            Also in your conversation with forge.
+          </div>
+        </div>
+        <div style="align-items: center; box-sizing: border-box; display: flex; justify-content: space-between; padding-top: 56px">
+          <div style="box-sizing: border-box; display: flex; gap: 16px">
+            <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+              RUN 2
+            </div>
+            <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+              8 MIN
+            </div>
+            <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+              14 STEPS
+            </div>
+            <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; line-height: 16px">
+              mun-46-stream
+            </div>
+          </div>
+          <div style="box-sizing: border-box; color: #7A7A7A; font-family: 'IBM Plex Mono', system-ui, sans-serif; font-size: 11px; letter-spacing: 0.12em; line-height: 16px; text-decoration: underline 1px dotted; text-underline-offset: 4px">
+            VIEW RUN
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+  
+</body>
+</html>
