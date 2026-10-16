@@ -61,15 +61,21 @@ NODE=$(command -v node)
 docker info > /dev/null 2>&1 || fail "Docker isn't running. Open Docker Desktop (or OrbStack), and set it to start when you sign in."
 
 # This Mac on the tailnet: its name for munin's address, and its owner for MUNIN_USERS.
-read -r HOST OWNER < <("$TAILSCALE" status --json | node -e '
+read -r HOST OWNER HTTPS < <("$TAILSCALE" status --json | node -e '
   let text = "";
   process.stdin.on("data", (d) => { text += d; }).on("end", () => {
     const status = JSON.parse(text);
     const host = (status.Self?.DNSName || "").replace(/\.$/, "");
     const owner = status.User?.[status.Self?.UserID]?.LoginName || "";
-    console.log(host || "-", owner || "-");
+    // tailscale serve needs HTTPS certificates on for the tailnet: the "https" capability.
+    const https = "https" in (status.Self?.CapMap || {}) || (status.Self?.Capabilities || []).includes("https")
+      || (status.CertDomains || []).length > 0;
+    console.log(host || "-", owner || "-", https ? "yes" : "no");
   });') || true
 [ -n "${HOST:-}" ] && [ "$HOST" != - ] || fail "Tailscale isn't up on this Mac: open it and sign in."
+# Without HTTPS on, tailscale serve stops and waits for someone to turn it on.
+[ "${HTTPS:-}" = yes ] || fail "Tailscale's HTTPS certificates aren't on for your tailnet, and tailscale serve needs them.
+  Turn on MagicDNS and HTTPS Certificates at https://login.tailscale.com/admin/dns, then run this again."
 
 say "Dependencies"
 (cd "$MUNIN_DIR/tracker" && uv sync --frozen --no-dev --quiet)
@@ -125,9 +131,17 @@ for url in "http://127.0.0.1:${TRACKER:=7777}/api/me" "http://127.0.0.1:${RUNTIM
 done
 
 say "tailscale serve"
-"$TAILSCALE" serve --bg --set-path / "http://127.0.0.1:$TRACKER" > /dev/null
+"$TAILSCALE" serve --bg --set-path / "http://127.0.0.1:$TRACKER"
 # Only /runtime/api: the frontend's own files under /runtime/ come from the tracker, with the rest of it.
-"$TAILSCALE" serve --bg --set-path /runtime/api "http://127.0.0.1:$RUNTIME/runtime/api" > /dev/null
+"$TAILSCALE" serve --bg --set-path /runtime/api "http://127.0.0.1:$RUNTIME/runtime/api"
+# Serve can also stop without setting anything up, having said what's missing; check it took both paths.
+"$TAILSCALE" serve status --json | node -e '
+  let text = "";
+  process.stdin.on("data", (d) => { text += d; }).on("end", () => {
+    const config = JSON.parse(text || "{}");
+    const paths = Object.values(config.Web || {}).flatMap((site) => Object.keys(site.Handlers || {}));
+    process.exit(paths.includes("/") && paths.includes("/runtime/api") ? 0 : 1);
+  });' || fail "tailscale serve didn't take munin's paths. See: tailscale serve status"
 
 say "munin is at https://$HOST"
 cat << EOF

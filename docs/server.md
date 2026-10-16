@@ -16,7 +16,7 @@ Both services listen on 127.0.0.1 only, run as the `munin` user, and keep everyt
 
 On a Mac, see [On a Mac](#on-a-mac) at the end. Otherwise, a Linux machine with systemd (Debian or Ubuntu, say) that has:
 
-- **Tailscale**, up (`tailscale up`), with MagicDNS and HTTPS certificates turned on for the tailnet (in the admin console, under DNS). `tailscale serve` needs both.
+- **Tailscale**, up (`tailscale up`), with MagicDNS and HTTPS Certificates turned on for the tailnet, at [login.tailscale.com/admin/dns](https://login.tailscale.com/admin/dns). `tailscale serve` needs both: without HTTPS, it waits for someone to turn it on, so the installer checks first and stops if it's off.
 - **Docker**, running. Each coder works in a container of its own.
 - **Node 22.19 or later** and **uv**, installed system-wide (not under a home folder, which the services can't read), and **git** and **curl**.
 
@@ -27,7 +27,7 @@ sudo git clone <munin's repository> /opt/munin
 sudo /opt/munin/deploy/install.sh
 ```
 
-It makes the `munin` user (in the `docker` group), installs both services' dependencies, writes the settings, pulls the coders' image, starts `munin-tracker` and `munin-runtime`, and sets up `tailscale serve`. It ends with munin's address. If the machine is tagged in Tailscale, or munin is for someone other than the machine's owner, say who may use it: `sudo MUNIN_USERS=you@example.com /opt/munin/deploy/install.sh`.
+It makes the `munin` user (in the `docker` group), installs both services' dependencies, writes the settings, pulls the coders' image, starts `munin-tracker` and `munin-runtime`, and sets up `tailscale serve`. It ends with munin's address, once `tailscale serve status` shows munin's two paths. If the machine is tagged in Tailscale, or munin is for someone other than the machine's owner, say who may use it: `sudo MUNIN_USERS=you@example.com /opt/munin/deploy/install.sh`.
 
 Then:
 
@@ -67,13 +67,13 @@ To back up, copy `/var/lib/munin` with the services stopped, or the two database
 
 ## How this was tested
 
-Without a real server: `install.sh` ran as root in a Debian container with Docker, with stand-ins for `systemctl` (starting each unit's `ExecStart` as its `User`, with its environment files) and for `tailscale` (a made-up tailnet name and owner). A stand-in for `tailscale serve` that does what its source does (HTTPS in front, the mount path stripped and the rest joined to the target's path, the browser's Host kept, identity headers replaced) put munin at `https://munin-test.tail1234.ts.net` for Chromium:
+Without a real server: `install.sh` ran as root in a Debian container with Docker, with stand-ins for `systemctl` (starting each unit's `ExecStart` as its `User`, with its environment files) and for `tailscale` (a made-up tailnet name and owner; also with HTTPS off, and with a `serve` that sets nothing up, where the installer stopped and said why). A stand-in for `tailscale serve` that does what its source does (HTTPS in front, the mount path stripped and the rest joined to the target's path, the browser's Host kept, identity headers replaced) put munin at `https://munin-test.tail1234.ts.net` for Chromium:
 
 - you made a coder there, it got its tracker token through the edge, and it talked to you;
 - a stranger got a 403, even with your login forged in the header;
 - a coder's command ran in its container as the `munin` user, and couldn't see munin's databases or keys.
 
-The first real run will tell the rest: Tailscale's HTTPS certificates, systemd's sandboxing options, and your distribution's packages.
+The first real run found that `tailscale serve` sits waiting when the tailnet's HTTPS certificates are off, with its message hidden by the installer; the installer now checks for them first, and shows what Serve says. Real runs will tell the rest: systemd's sandboxing options, and your distribution's packages.
 
 ## Remove
 
@@ -95,7 +95,7 @@ git clone <munin's repository> ~/munin
 ~/munin/deploy/install-mac.sh
 ```
 
-It needs Tailscale (the app, signed in, with HTTPS certificates on for the tailnet), Docker Desktop or OrbStack (running, and set to start when you sign in), and Node 22.19 or later, uv and git (`brew install node uv git`). Run it as yourself, in a session where you're signed in to the Mac, not with sudo. How it differs from Linux:
+It needs Tailscale (the app, signed in, with MagicDNS and HTTPS Certificates on for the tailnet, as above), Docker Desktop or OrbStack (running, and set to start when you sign in), and Node 22.19 or later, uv and git (`brew install node uv git`). Run it as yourself, in a session where you're signed in to the Mac, not with sudo. How it differs from Linux:
 
 - **It runs as you.** Docker Desktop and OrbStack belong to the signed-in user, and coders need Docker, so the tracker and the runtime are launchd agents of yours (`~/Library/LaunchAgents/munin.tracker.plist` and `munin.runtime.plist`) rather than services of their own user. They restart when they stop, and start when you sign in: turn on automatic login for a Mac that runs on its own.
 - **Everything is in `~/.munin`:** settings in `environment`, keys in `secrets`, the databases, the agents' folders and clones, logs in `logs/`, and the command line as `~/.munin/bin/munin`. Restart a service with `launchctl kickstart -k gui/$(id -u)/munin.runtime`.
