@@ -878,6 +878,11 @@ button.option-card:hover { border-color: var(--text); }
 .waiting-row .q-text { font: 14px/20px var(--sans); }
 
 .provider-row .label.on { color: var(--text); }
+.key-form { display: flex; flex-direction: column; gap: 8px; padding: 14px 0 16px; border-bottom: 1px solid var(--line); }
+.key-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; }
+.key-fields .input { flex: 1 1 260px; max-width: 420px; height: 36px; padding: 0 12px; font: 13px/18px var(--mono); }
+.key-form .hint { max-width: 640px; }
+.key-form .hint a { color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; }
 .repo-list { display: flex; flex-direction: column; }
 .sandbox-note { margin: -8px 0 16px; max-width: 720px; }
 .repo-row { display: grid; grid-template-columns: 160px minmax(0, 1fr) 110px 150px; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }

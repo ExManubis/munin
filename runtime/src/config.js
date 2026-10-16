@@ -1,7 +1,7 @@
 // Settings come from the environment, like the tracker's.
 
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 export function settingsFromEnv(env = process.env) {
   const home = join(homedir(), '.munin');
@@ -11,8 +11,11 @@ export function settingsFromEnv(env = process.env) {
   const publicUrl = (env.MUNIN_PUBLIC_URL || '').trim().replace(/\/+$/, '') || null;
   const users = (env.MUNIN_USERS || '').split(',').map((u) => u.trim().toLowerCase()).filter(Boolean);
   if (publicUrl && !users.length) throw new Error('MUNIN_PUBLIC_URL is set, so say who may use munin through it: MUNIN_USERS=you@example.com.');
+  const db = env.MUNIN_RUNTIME_DB || join(home, 'runtime.sqlite');
   return {
-    db: env.MUNIN_RUNTIME_DB || join(home, 'runtime.sqlite'),
+    db,
+    // Model keys pasted in Settings (keys.js), next to the database.
+    keysFile: db === ':memory:' ? null : join(dirname(db), 'keys.json'),
     host: env.MUNIN_RUNTIME_HOST || '127.0.0.1',
     port: Number(env.MUNIN_RUNTIME_PORT || 7779),
     // Each agent that can code gets a folder of its own under here.

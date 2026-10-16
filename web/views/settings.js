@@ -10,6 +10,7 @@ import { notificationsSupported, notificationsOn, toggleNotifications } from '..
 
 let created = null; // { name, token } for the token just created; shown once
 let tab = 'claude';
+let keyFor = null; // the provider whose key is being pasted
 
 export const view = {
   title: () => 'Settings',
@@ -21,6 +22,8 @@ export const view = {
 
   leave() {
     created = null; // the token is only ever shown on the screen that created it
+    if (keyFor) drafts.delete(`key:${keyFor}`); // nor is a key left half-pasted
+    keyFor = null;
   },
 
   render({ agents, providers, repos, sandbox, me }, ctx) {
@@ -28,7 +31,7 @@ export const view = {
     return h('div', { class: 'page' },
       topbar([h('span', { class: 'title' }, 'Settings')]),
       h('div', { class: 'agents-page' },
-        providerSection(providers),
+        providerSection(providers, ctx),
         codeSection(repos, sandbox, ctx),
         h('section', { class: 'section', id: 'outside-agents' },
           h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Outside agents'), h('span', { class: 'mono muted' }, `${live.length} connected`)),
@@ -46,19 +49,87 @@ export const view = {
   },
 };
 
-function providerSection(providers) {
+function providerSection(providers, ctx) {
   return h('section', { class: 'section first', id: 'providers' },
     h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Models and providers')),
     h('p', { class: 'lead' }, "Where munin's own agents get their models. Each agent picks a provider and a model on its profile."),
     h('div', { class: 'provider-list' },
-      providers.map((p) => h('div', { class: 'agent-row provider-row' },
-        h('span', { class: 'agent-name' }, h('span', {}, p.name)),
-        h('span', { class: 'agent-seen' }, p.detail),
-        h('span', { class: ['label', p.connected && 'on'] }, p.connected ? 'Connected' : 'Off'),
-        // The real runtime takes its providers from its environment, as the detail says.
-        h('span', { class: 'agent-action' }, runtime.kind === 'mock'
-          ? h('button', { type: 'button', class: 'link', onclick: () => toast('The dummy has no real providers yet.') }, p.connected ? 'Change' : 'Set up')
-          : null)))));
+      providers.map((p) => [
+        h('div', { class: 'agent-row provider-row' },
+          h('span', { class: 'agent-name' }, h('span', {}, p.name)),
+          h('span', { class: 'agent-seen' }, p.detail),
+          h('span', { class: ['label', p.connected && 'on'] }, p.connected ? 'Connected' : 'Off'),
+          // A provider that takes a key gets it pasted here; the others come from the runtime's environment.
+          h('span', { class: 'agent-action' }, p.takesKey && keyFor !== p.id
+            ? h('button', { type: 'button', class: 'link', onclick: () => openKey(p.id, ctx) }, p.key?.from === 'settings' ? 'Change key' : 'Paste key')
+            : null)),
+        keyFor === p.id ? keyForm(p, ctx) : null,
+      ])));
+}
+
+function openKey(id, ctx) {
+  keyFor = id;
+  ctx.rerender();
+  document.querySelector(`[data-keep="key:${id}"]`)?.focus();
+}
+
+function closeKey(ctx) {
+  drafts.delete(`key:${keyFor}`);
+  keyFor = null;
+  ctx.rerender();
+}
+
+// The key goes to the runtime, which keeps it on its machine and only ever shows its last four
+// characters. The browser forgets it once it's saved.
+function keyForm(provider, ctx) {
+  const input = bindDraft(h('input', {
+    class: 'input',
+    type: 'password',
+    placeholder: 'sk-or-v1-…',
+    autocomplete: 'off',
+    spellcheck: false,
+    'aria-label': `${provider.name} key`,
+    onkeydown: (e) => e.key === 'Escape' && closeKey(ctx),
+  }), `key:${provider.id}`);
+  const button = h('button', { type: 'submit', class: 'btn small primary' }, 'Save');
+  const save = async (e) => {
+    e.preventDefault();
+    if (!input.value.trim()) return input.focus();
+    button.disabled = true;
+    button.textContent = 'Checking…';
+    try {
+      await runtime.setKey(provider.id, input.value);
+      closeKey(ctx);
+      toast(`${provider.name} is connected. Pick one of its models on an agent's profile.`);
+      ctx.reload();
+    } catch (err) {
+      button.disabled = false;
+      button.textContent = 'Save';
+      toast(err.message, { error: true });
+    }
+  };
+  const remove = async () => {
+    if (!confirm(`Remove the ${provider.name} key you pasted? Agents on its models fall back to the stand-in, unless the runtime has a key in its environment.`)) return;
+    try {
+      const after = await runtime.removeKey(provider.id);
+      closeKey(ctx);
+      toast(after?.connected ? `Removed. ${provider.name} uses the key in the runtime's environment again.` : `Removed. ${provider.name} is off.`);
+      ctx.reload();
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  };
+  return h('form', { class: 'key-form', onsubmit: save },
+    h('div', { class: 'key-fields' },
+      input,
+      button,
+      h('button', { type: 'button', class: 'link', onclick: () => closeKey(ctx) }, 'Cancel'),
+      provider.key?.from === 'settings' ? h('button', { type: 'button', class: 'link', onclick: remove }, 'Remove key') : null),
+    h('p', { class: 'hint' },
+      provider.id === 'openrouter'
+        ? ['Make one at ', h('a', { href: 'https://openrouter.ai/settings/keys', target: '_blank', rel: 'noopener noreferrer' }, 'openrouter.ai/settings/keys'), '. ']
+        : null,
+      "munin keeps it on the machine it runs on, uses it in place of any in the runtime's environment, and never shows it again. Agents don't get it."));
 }
 
 // Where each tracker project's code is. The runtime keeps a clone, and each coder gets a

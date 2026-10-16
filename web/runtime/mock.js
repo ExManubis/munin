@@ -745,12 +745,34 @@ export const mock = {
   },
 
   async providers() {
+    const key = state.openrouterKey === undefined ? '7f2a' : state.openrouterKey;
     return [
-      { id: 'openrouter', name: 'OpenRouter', connected: true, detail: 'Key mun…7f2a · 312 models' },
+      {
+        id: 'openrouter', name: 'OpenRouter', connected: Boolean(key), takesKey: true,
+        key: key ? { from: 'settings', hint: key } : null,
+        detail: key ? `312 models · key …${key}` : 'Paste a key from openrouter.ai to use its models',
+      },
       { id: 'ollama', name: 'Ollama, on the server', connected: true, detail: 'http://127.0.0.1:11434 · 2 models' },
       { id: 'vercel', name: 'Vercel AI Gateway', connected: false, detail: 'Not set up' },
       { id: 'cloudflare', name: 'Cloudflare AI Gateway', connected: false, detail: 'Not set up' },
     ];
+  },
+
+  // The mock keeps a key's last four characters, and nothing else of it.
+  async setKey(provider, text) {
+    const key = String(text || '').trim();
+    if (provider !== 'openrouter') throw new Error(`${provider} doesn't take a key here.`);
+    if (!key) throw new Error('Paste the key first.');
+    state.openrouterKey = key.slice(-4);
+    changed();
+    return (await this.providers())[0];
+  },
+
+  async removeKey(provider) {
+    if (provider !== 'openrouter') throw new Error(`${provider} doesn't take a key here.`);
+    state.openrouterKey = null;
+    changed();
+    return (await this.providers())[0];
   },
 
   async models() {

@@ -132,7 +132,8 @@ tailscale serve status --json | node -e '
 say "munin is at https://$HOST"
 cat << EOF
   For: $(setting MUNIN_USERS)
-  Settings: $CONF/environment; keys like OPENROUTER_API_KEY in $CONF/secrets,
+  Models: paste an OpenRouter key in munin, under Settings
+  Settings: $CONF/environment; other keys, like GH_TOKEN, in $CONF/secrets,
             then: sudo systemctl restart munin-runtime
   A project: sudo munin project add MUN munin --description "What it is, and how work gets delivered"
   Logs: journalctl -u munin-tracker -u munin-runtime -f

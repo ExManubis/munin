@@ -21,6 +21,7 @@ import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
 import { createWorkspace, WorkspaceError } from './workspace.js';
 import { QUIET_GIT, createDockerSandbox, localShellEnv, passedThrough } from './sandbox.js';
+import { KeyError } from './keys.js';
 
 export class RuntimeError extends Error {
   constructor(status, message) {
@@ -282,9 +283,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     };
   };
 
-  harness.subscribeCommits(() => {
+  const changed = () => {
     for (const fn of listeners) fn();
-  });
+  };
+  harness.subscribeCommits(changed);
   harness.resume(); // carry on with anything the last process left unfinished
 
   // Reading ------------------------------------------------------------------------------
@@ -571,6 +573,29 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
     async providers() {
       return models.providers();
+    },
+
+    // A provider's key, pasted in Settings. It's never shown again, only its last four characters.
+    async setKey(provider, key) {
+      try {
+        await models.setKey(provider, key);
+      } catch (err) {
+        if (err instanceof KeyError) throw invalid(err.message);
+        throw err;
+      }
+      changed();
+      return models.providers().find((p) => p.id === provider);
+    },
+
+    async removeKey(provider) {
+      try {
+        await models.removeKey(provider);
+      } catch (err) {
+        if (err instanceof KeyError) throw invalid(err.message);
+        throw err;
+      }
+      changed();
+      return models.providers().find((p) => p.id === provider);
     },
 
     // Where each project's code is: [{ project, source, base }].

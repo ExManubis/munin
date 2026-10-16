@@ -31,7 +31,7 @@ It makes the `munin` user (in the `docker` group), installs both services' depen
 
 Then:
 
-- **Models:** put `OPENROUTER_API_KEY=…` in `/etc/munin/secrets` (only the runtime reads it) and `sudo systemctl restart munin-runtime`.
+- **Models:** in munin, Settings → Models and providers → Paste key, with a key from [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys). The runtime asks OpenRouter whether it works, keeps it in `/var/lib/munin/keys.json` (only the `munin` user can read it), and uses it at once; it never shows it again, and coders' containers don't see that file. `OPENROUTER_API_KEY` in `/etc/munin/secrets` works too, and a pasted key wins over it.
 - **A project:** `sudo munin project add MUN munin --description "What it is, and how work gets delivered"`. `sudo munin …` is the tracker's command line, as the munin user with munin's settings.
 - **Its code:** in munin, Settings → Code. The source has to be reachable by the `munin` user: a public URL, a URL with credentials the munin user has (an SSH key in `/var/lib/munin/.ssh`), or a folder it can read.
 - **Agents that push:** put a token in `/etc/munin/secrets` (`GH_TOKEN=…`), add `MUNIN_AGENT_ENV=GH_TOKEN` to `/etc/munin/environment`, and say in the project's brief how to push with it.
@@ -51,7 +51,7 @@ It keeps `/etc/munin/environment` and `/etc/munin/secrets` as they are.
 | | |
 |---|---|
 | Settings | `/etc/munin/environment` (both services), `/etc/munin/secrets` (the runtime only, root-only file) |
-| Data | `/var/lib/munin`: `munin.db` (the tracker), `runtime.sqlite` (the agents), `agents/` (their folders and worktrees), `repos/` (munin's clones) |
+| Data | `/var/lib/munin`: `munin.db` (the tracker), `runtime.sqlite` (the agents), `keys.json` (model keys pasted in Settings), `agents/` (their folders and worktrees), `repos/` (munin's clones) |
 | Services | `systemctl status munin-tracker munin-runtime`; logs: `journalctl -u munin-tracker -u munin-runtime -f` |
 | Edge | `tailscale serve status` |
 | Coders' containers | `docker ps --filter label=munin.agent` |
@@ -98,7 +98,7 @@ git clone <munin's repository> ~/munin
 It needs Tailscale (the app, signed in, with MagicDNS and HTTPS Certificates on for the tailnet, as above), Docker Desktop or OrbStack (running, and set to start when you sign in), and Node 22.19 or later, uv and git (`brew install node uv git`). Run it as yourself, in a session where you're signed in to the Mac, not with sudo. How it differs from Linux:
 
 - **It runs as you.** Docker Desktop and OrbStack belong to the signed-in user, and coders need Docker, so the tracker and the runtime are launchd agents of yours (`~/Library/LaunchAgents/munin.tracker.plist` and `munin.runtime.plist`) rather than services of their own user. They restart when they stop, and start when you sign in: turn on automatic login for a Mac that runs on its own.
-- **Everything is in `~/.munin`:** settings in `environment`, keys in `secrets`, the databases, the agents' folders and clones, logs in `logs/`, and the command line as `~/.munin/bin/munin`. Restart a service with `launchctl kickstart -k gui/$(id -u)/munin.runtime`.
+- **Everything is in `~/.munin`:** settings in `environment`, keys in `secrets` (and model keys pasted in Settings in `keys.json`), the databases, the agents' folders and clones, logs in `logs/`, and the command line as `~/.munin/bin/munin`. Restart a service with `launchctl kickstart -k gui/$(id -u)/munin.runtime`.
 - **The Mac mustn't sleep.** The script says so if it would: System Settings > Energy, or `sudo pmset -a sleep 0`.
 - **Containers are a looser boundary.** Docker Desktop and OrbStack let containers reach the Mac's own 127.0.0.1 through `host.docker.internal` (not yet checked on a Mac), so a coder could reach munin's web API, which on Linux it can't. Files and keys stay out of its reach either way. `MUNIN_AGENT_NETWORK=none` in `~/.munin/environment` closes that, and the internet with it.
 

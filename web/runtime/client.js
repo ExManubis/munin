@@ -59,6 +59,8 @@ export function connect(base) {
     runRoutine: (name, id) => call('POST', `${agent(name)}/routines/${enc(id)}/run`, {}),
     forget: (name, id) => call('DELETE', `${agent(name)}/memory/${enc(id)}`),
     providers: () => call('GET', '/providers'),
+    setKey: (provider, key) => call('PUT', `/providers/${enc(provider)}/key`, { key }),
+    removeKey: (provider) => call('DELETE', `/providers/${enc(provider)}/key`),
     models: () => call('GET', '/models'),
     repos: () => call('GET', '/repos'),
     setRepo: (key, fields) => call('PUT', `/repos/${enc(key)}`, fields),
