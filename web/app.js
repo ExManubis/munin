@@ -1,43 +1,60 @@
-// munin web UI: routing, live updates, the sidebar and keyboard shortcuts.
+// munin web UI: the topbar, routing, live updates, each part's sidebar and keyboard shortcuts.
+// munin has two parts, each with its own sidebar: AGENTS (munin's own agents, from the agent
+// runtime) and TRACKER (issues, from the tracker). Settings sits behind your square.
+//
 // Each view exports { load(params), render(data, ctx), title(data) } and optionally
 // onKey(e, data, ctx), leave(), scope(params) and poll(data), which asks for polling
 // while it waits on something the event stream doesn't announce.
 
 import { api, ApiError } from './api.js';
-import { store, liveAgents, openCount, isWorking, isBusy } from './store.js';
-import { h, kbd, MOD, icon, avatar, agentAvatar, updateTimes, toast } from './ui.js';
+import { runtime } from './runtime/index.js';
+import { store, liveAgents, openCount, isWorking, isBusy, remember } from './store.js';
+import { h, kbd, MOD, icon, agentAvatar, updateTimes, toast } from './ui.js';
+import { figbot } from './figbot.js';
 import { openNewIssue, openNewProject, openShortcuts, onCreated, dialogOpen, closeDialog } from './dialogs.js';
 import { openPalette } from './palette.js';
+import { openWaiting, waitingItems, syncTrackerAnswers } from './waiting.js';
 import { setTitle, updateBadges, checkNotifications } from './notify.js';
 import { view as inboxView } from './views/inbox.js';
 import { view as projectView, indexView as projectsView } from './views/project.js';
 import { view as issueView } from './views/issue.js';
-import { view as agentsView } from './views/agents.js';
+import { view as settingsView } from './views/settings.js';
+import { indexView as agentsIndexView, agentsSidebar } from './views/agents.js';
+import { view as conversationView } from './views/conversation.js';
+import { view as profileView } from './views/profile.js';
+import { view as newAgentView } from './views/new-agent.js';
 
 const ROUTES = [
-  [/^\/inbox(?:\/(\d+))?$/, inboxView, (m) => ({ qid: m[1] })],
-  [/^\/projects$/, projectsView, () => ({})],
-  [/^\/projects\/([^/]+)$/, projectView, (m) => ({ key: decodeURIComponent(m[1]).toUpperCase() })],
-  [/^\/issues\/([^/]+)$/, issueView, (m) => ({ id: decodeURIComponent(m[1]).toUpperCase() })],
-  [/^\/agents$/, agentsView, () => ({})],
+  [/^\/agents$/, agentsIndexView, () => ({}), 'agents'],
+  [/^\/agents\/new$/, newAgentView, () => ({}), 'agents'],
+  [/^\/agents\/([^/]+)$/, conversationView, (m) => ({ name: decodeURIComponent(m[1]) }), 'agents'],
+  [/^\/agents\/([^/]+)\/profile$/, profileView, (m) => ({ name: decodeURIComponent(m[1]) }), 'agents'],
+  [/^\/inbox(?:\/(\d+))?$/, inboxView, (m) => ({ qid: m[1] }), 'tracker'],
+  [/^\/projects$/, projectsView, () => ({}), 'tracker'],
+  [/^\/projects\/([^/]+)$/, projectView, (m) => ({ key: decodeURIComponent(m[1]).toUpperCase() }), 'tracker'],
+  [/^\/issues\/([^/]+)$/, issueView, (m) => ({ id: decodeURIComponent(m[1]).toUpperCase() }), 'tracker'],
+  [/^\/settings$/, settingsView, () => ({}), 'settings'],
 ];
+const HOME = { agents: '#/agents', tracker: '#/inbox' };
 
+const app = document.getElementById('app');
+const appbar = document.getElementById('appbar');
 const main = document.getElementById('main');
 const sidebar = document.getElementById('sidebar');
 const tabbar = document.getElementById('tabbar');
 const offline = document.getElementById('offline');
 
-let current = { path: null, scope: null, view: null, params: null, data: null, key: null };
+let current = { path: null, scope: null, view: null, params: null, data: null, key: null, section: null };
 let seq = 0;
 let stale = false; // a live update arrived while the human was in the middle of something
 
 function parseRoute() {
-  const path = location.hash.replace(/^#/, '') || '/inbox';
-  for (const [pattern, view, params] of ROUTES) {
+  const path = location.hash.replace(/^#/, '') || remember('munin:section-path') || '/agents';
+  for (const [pattern, view, params, section] of ROUTES) {
     const m = path.match(pattern);
     if (m) {
       const p = params(m);
-      return { path, view, params: p, scope: view.scope ? view.scope(p) : path };
+      return { path, view, params: p, section, scope: view.scope ? view.scope(p) : path };
     }
   }
   return null;
@@ -48,21 +65,32 @@ const ctx = {
   reload: () => refresh(),
 };
 
-async function refreshShared() {
-  const [projects, inbox, agents] = await Promise.all([api.projects(), api.inbox(), api.agents()]);
-  Object.assign(store, { projects, inbox, agents });
+// The tracker's projects, inbox and agents, and the runtime's agents and what's waiting.
+// A change in the runtime alone doesn't need the tracker asked again.
+async function refreshShared({ tracker = true } = {}) {
+  const [runtimeAgents, waiting, ...rest] = await Promise.all([
+    runtime.agents(),
+    runtime.waiting(),
+    ...(tracker ? [api.projects(), api.inbox(), api.agents()] : []),
+  ]);
+  Object.assign(store, { runtimeAgents, waiting });
+  if (tracker) {
+    const [projects, inbox, agents] = rest;
+    Object.assign(store, { projects, inbox, agents });
+    checkNotifications();
+    syncTrackerAnswers();
+  }
   updateBadges();
-  checkNotifications();
 }
 
 // Load the current route and draw it. A live update (`live`) only redraws when the data
 // changed, and holds off while the human is in the middle of something.
-async function refresh({ live = false } = {}) {
+async function refresh({ live = false, tracker = true } = {}) {
   const mine = ++seq;
   const route = parseRoute();
-  if (!route) return location.replace('#/inbox');
+  if (!route) return location.replace(HOME.agents);
   try {
-    await refreshShared();
+    await refreshShared({ tracker });
     const data = await route.view.load(route.params);
     if (mine !== seq) return;
     setOnline(true);
@@ -91,13 +119,16 @@ async function refresh({ live = false } = {}) {
   }
 }
 
-// What of the shared data screens show besides their own: agents (connected, quiet, busy)
-// and projects. Raw last-seen times are left out so every agent call doesn't redraw.
+// What of the shared data screens show besides their own: agents (connected, quiet, busy),
+// projects, and the runtime's agents. Raw last-seen times are left out so every agent call
+// doesn't redraw.
 function sharedState() {
   return [
     store.agents.map((a) => [a.name, a.revoked, isBusy(a), a.working_on.map((w) => w.id + w.status),
       !a.last_seen_at ? 'never' : Date.now() - Date.parse(a.last_seen_at) < 30 * 60 * 1000 ? 'live' : 'quiet']),
     store.projects,
+    store.runtimeAgents,
+    store.inbox.map((item) => item.question.id),
   ];
 }
 
@@ -111,6 +142,7 @@ function holding() {
 }
 
 // Redraw the view, keeping focus, caret, and scroll positions (keyed by data-keep / data-scroll).
+// A [data-stick] element that was scrolled to the bottom stays at the bottom, like a chat.
 function paint(fresh) {
   const { view, data } = current;
   if (!view) return;
@@ -119,22 +151,23 @@ function paint(fresh) {
   if (fresh) {
     main.replaceChildren(view.render(data, ctx));
     main.scrollTop = 0;
+    for (const el of main.querySelectorAll('[data-stick]')) el.scrollTop = el.scrollHeight;
     return;
   }
   const active = document.activeElement;
   const keep = active && main.contains(active) ? active.dataset.keep : null;
   const caret = keep && typeof active.selectionStart === 'number'
     ? [active.selectionStart, active.selectionEnd, active.selectionDirection, active.scrollTop] : null;
-  const scrolls = [main, ...main.querySelectorAll('[data-scroll]')].map((el) => [el.dataset.scroll || '', el.scrollTop, el.scrollLeft]);
+  const scrolls = [main, ...main.querySelectorAll('[data-scroll]')].map((el) => [el.dataset.scroll || '', el.scrollTop, el.scrollLeft,
+    el.dataset.stick !== undefined && el.scrollHeight - el.scrollTop - el.clientHeight < 48]);
 
   main.replaceChildren(view.render(data, ctx));
 
-  for (const [name, top, left] of scrolls) {
+  for (const [name, top, left, bottom] of scrolls) {
     const el = name ? main.querySelector(`[data-scroll="${CSS.escape(name)}"]`) : main;
-    if (el) {
-      el.scrollTop = top;
-      el.scrollLeft = left;
-    }
+    if (!el) continue;
+    el.scrollTop = bottom ? el.scrollHeight : top;
+    el.scrollLeft = left;
   }
   if (keep) {
     const el = main.querySelector(`[data-keep="${CSS.escape(keep)}"]`);
@@ -153,37 +186,75 @@ function errorPage(err) {
     h('header', { class: 'topbar' }, h('div', { class: 'topbar-left' }, h('span', { class: 'title' }, err.status === 404 ? 'Not found' : 'Something went wrong'))),
     h('div', { class: 'empty-state small' },
       h('h2', {}, err.message),
-      h('p', {}, h('a', { class: 'link', href: '#/inbox' }, 'Back to the inbox'))));
+      h('p', {}, h('a', { class: 'link', href: HOME.agents }, 'Back to your agents'))));
 }
 
 function setOnline(ok) {
   offline.hidden = ok;
 }
 
-// Sidebar and phone tab bar ---------------------------------------------------------
+// Topbar, sidebars and the phone tab bar ---------------------------------------------------
 
 let chromeKey = null;
 
 function renderChrome(route, data) {
+  const waiting = waitingItems();
+  // Each part's tab goes back to where you were in it.
+  if (route.section !== 'settings') {
+    remember(`munin:last-${route.section}`, route.path);
+    remember('munin:section-path', route.path);
+  }
+  document.body.dataset.section = route.section;
+  document.body.classList.toggle('in-conversation', route.view === conversationView);
+  app.className = `app section-${route.section}`;
+
+  const key = JSON.stringify([route.path, route.section, data?.issue?.project, store.projects, store.inbox.length,
+    liveAgents().map((a) => [a.name, isWorking(a)]), store.runtimeAgents, waiting.length, store.me]);
+  if (key === chromeKey) return;
+  chromeKey = key;
+
+  renderAppbar(route, waiting);
+  if (route.section === 'agents') sidebar.replaceChildren(...agentsSidebar(route));
+  else if (route.section === 'settings') sidebar.replaceChildren(...settingsSidebar());
+  else sidebar.replaceChildren(...trackerSidebar(route, data));
+  renderTabbar(route);
+}
+
+function sectionHref(section) {
+  const last = remember(`munin:last-${section}`);
+  return last ? `#${last}` : HOME[section];
+}
+
+function renderAppbar(route, waiting) {
+  const tab = (section, label) => h('a', {
+    class: ['section-tab', route.section === section && 'active'],
+    href: sectionHref(section),
+    'aria-current': route.section === section ? 'page' : null,
+  }, label);
+  appbar.replaceChildren(
+    h('a', { class: 'logo', href: HOME.agents, 'aria-label': 'munin' },
+      h('img', { src: 'munin-lockup-dither-on-dark.svg', alt: 'munin', width: 122, height: 26 })),
+    h('nav', { class: 'section-tabs', 'aria-label': 'Parts of munin' }, tab('agents', 'Agents'), tab('tracker', 'Tracker')),
+    h('div', { class: 'grow' }),
+    h('button', { type: 'button', class: 'quick', onclick: openPalette }, icon('search'), h('span', {}, 'Search or jump to…'), kbd(`${MOD}K`)),
+    waiting.length
+      ? h('button', { type: 'button', class: 'chip waiting-chip', onclick: openWaiting, 'aria-haspopup': 'dialog' }, `${waiting.length} waiting on you`)
+      : null,
+    h('a', { class: ['me-square', route.section === 'settings' && 'active'], href: '#/settings', title: `${store.me.name} · Settings`, 'aria-label': 'Settings' },
+      (store.me.name.trim()[0] || 'M').toUpperCase()));
+}
+
+function trackerSidebar(route, data) {
   const activeProject = route.view === projectView ? route.params.key
     : route.view === issueView && data ? data.issue.project : null;
   const live = liveAgents();
   const working = live.filter(isWorking);
-  const key = JSON.stringify([route.view === inboxView, route.view === agentsView, route.view === projectsView, activeProject,
-    store.projects, store.inbox.length, live.map((a) => [a.name, isWorking(a)]), store.me]);
-  if (key === chromeKey) return;
-  chromeKey = key;
-
+  const onInbox = route.view === inboxView;
   const navItem = (href, lead, label, count, active) => h('a', { class: ['nav-item', active && 'active'], href, 'aria-current': active ? 'page' : null },
     lead, h('span', { class: 'nav-label' }, label), count ? h('span', { class: 'count' }, count) : null);
-  const onAgents = route.view === agentsView;
-  const onInbox = route.view === inboxView;
 
-  sidebar.replaceChildren(
-    h('a', { class: 'logo', href: '#/inbox', 'aria-label': 'munin inbox' },
-      h('img', { src: 'munin-lockup-dither-on-dark.svg', alt: 'munin', width: 122, height: 26 })),
-    h('button', { type: 'button', class: 'quick', onclick: openPalette }, icon('search'), h('span', {}, 'Search or jump to…'), kbd(`${MOD}K`)),
-    h('nav', { class: 'nav', 'aria-label': 'Main' },
+  return [
+    h('nav', { class: 'nav', 'aria-label': 'Tracker' },
       navItem('#/inbox', icon('inbox', { color: onInbox ? '#EDEDED' : '#7A7A7A' }), 'Inbox', store.inbox.length, onInbox),
       h('button', { type: 'button', class: 'nav-item', onclick: openNewIssue }, icon('plus'), h('span', { class: 'nav-label' }, 'New issue'), kbd('C'))),
     h('div', { class: 'label nav-heading' }, 'Projects'),
@@ -192,31 +263,48 @@ function renderChrome(route, data) {
       h('button', { type: 'button', class: 'nav-item new-project', onclick: openNewProject },
         icon('plus'), h('span', { class: 'nav-label' }, 'New project'))),
     h('div', { class: 'grow' }),
-    h('a', { class: ['agents-summary', onAgents && 'active'], href: '#/agents' },
+    h('a', { class: 'agents-summary', href: '#/settings', title: 'Agents connected to the tracker' },
       live.length ? h('span', { class: 'faces' }, live.slice(0, 8).map((a) => agentAvatar(a.name))) : null,
       h('span', { class: 'summary' },
         live.length
           ? `${working.length} agent${working.length === 1 ? '' : 's'} working, ${live.length - working.length} idle`
           : 'No agents connected yet')),
-    h('div', { class: 'me' },
-      avatar(store.me.name, { kind: 'human' }),
-      h('span', { class: 'me-name' }, store.me.name),
-      h('a', { class: ['label', 'me-link', onAgents && 'active'], href: '#/agents' }, 'Agents')));
+  ];
+}
 
-  const tab = (href, iconName, label, active, badge) => h('a', { class: ['tab', active && 'active'], href, 'aria-current': active ? 'page' : null },
-    iconName === 'agent' ? avatar('agent', { kind: 'agent', idle: !active, size: 16 }) : icon(iconName, { size: 16, color: active ? '#EDEDED' : '#7A7A7A' }),
-    h('span', {}, label),
-    badge ? h('span', { class: 'badge' }, badge) : null);
+function settingsSidebar() {
+  const jump = (id, label) => h('button', {
+    type: 'button',
+    class: 'nav-item',
+    onclick: () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+  }, h('span', { class: 'nav-label' }, label));
+  return [
+    h('div', { class: 'label nav-heading first' }, 'Settings'),
+    h('nav', { class: 'nav', 'aria-label': 'Settings' },
+      jump('providers', 'Models and providers'),
+      jump('outside-agents', 'Outside agents'),
+      jump('notifications', 'Notifications'),
+      jump('dummy', 'Dummy data')),
+  ];
+}
+
+function renderTabbar(route) {
+  const onAgents = route.section === 'agents';
+  const onTracker = route.section === 'tracker';
+  const tab = (href, lead, label, active, badge) => h('a', { class: ['tab', active && 'active'], href, 'aria-current': active ? 'page' : null },
+    lead, h('span', {}, label), badge ? h('span', { class: 'badge' }, badge) : null);
   const action = (iconName, label, onclick) => h('button', { type: 'button', class: 'tab', onclick }, icon(iconName, { size: 16 }), h('span', {}, label));
+  const agentsWaiting = store.waiting.length;
   tabbar.replaceChildren(
-    tab('#/inbox', 'inbox', 'Inbox', onInbox, store.inbox.length),
-    tab('#/projects', 'list', 'Projects', route.view === projectsView || route.view === projectView || route.view === issueView),
-    action('plus', 'New', openNewIssue),
-    action('search', 'Search', openPalette),
-    tab('#/agents', 'agent', 'Agents', onAgents));
+    tab(sectionHref('agents'), figbot({ size: 18, state: 'idle', animate: false, cls: onAgents ? null : 'dim' }), 'Agents', onAgents, agentsWaiting),
+    tab(sectionHref('tracker'), icon('inbox', { size: 16, color: onTracker ? '#EDEDED' : '#7A7A7A' }), 'Tracker', onTracker, store.inbox.length),
+    action('plus', 'New', () => (onAgents ? (location.hash = '#/agents/new') : openNewIssue())),
+    action('search', 'Search', openPalette));
 }
 
 // Keyboard ---------------------------------------------------------------------
+
+let pendingG = 0;
 
 document.addEventListener('keydown', (e) => {
   if (e.defaultPrevented) return;
@@ -226,39 +314,59 @@ document.addEventListener('keydown', (e) => {
     else if (!dialogOpen()) openPalette();
     return;
   }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !dialogOpen()
+    && !(e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]'))) {
+    if (current.view?.onSubmit?.(e, current.data, ctx)) e.preventDefault();
+    return;
+  }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (dialogOpen()) return;
   if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]')) return;
-  if (e.key === 'c' || e.key === 'C') {
+  // G then A or T: go to Agents or the Tracker.
+  if (Date.now() - pendingG < 1200 && /^[at]$/i.test(e.key)) {
+    e.preventDefault();
+    pendingG = 0;
+    location.hash = sectionHref(e.key.toLowerCase() === 'a' ? 'agents' : 'tracker');
+    return;
+  }
+  if (e.key === 'g' || e.key === 'G') {
+    pendingG = Date.now();
+    return;
+  }
+  if (current.view?.onKey?.(e, current.data, ctx)) {
+    e.preventDefault();
+  } else if ((e.key === 'c' || e.key === 'C') && current.section === 'tracker') {
     e.preventDefault();
     openNewIssue();
+  } else if ((e.key === 'n' || e.key === 'N') && current.section === 'agents') {
+    e.preventDefault();
+    location.hash = '#/agents/new';
   } else if (e.key === '?') {
     e.preventDefault();
     openShortcuts();
-  } else if (current.view?.onKey?.(e, current.data, ctx)) {
-    e.preventDefault();
   }
 });
 
 // Live updates -----------------------------------------------------------------------
-// The server says "changed" over /api/stream; we refresh shortly after. Polling only
-// runs while the stream is down.
+// The tracker says "changed" over /api/stream and the runtime calls back; we refresh shortly
+// after. Polling only runs while the tracker's stream is down.
 
 let running = false;
-let again = false;
-async function liveRefresh() {
+let again = null;
+async function liveRefresh(options = {}) {
   if (running) {
-    again = true;
+    again = { tracker: Boolean(again?.tracker || options.tracker !== false) };
     return;
   }
   running = true;
   try {
-    await refresh({ live: true });
+    await refresh({ live: true, ...options });
   } finally {
     running = false;
     if (again) {
-      again = false;
-      liveRefresh();
+      const next = again;
+      again = null;
+      liveRefresh(next);
     }
   }
 }
@@ -279,6 +387,12 @@ function connect() {
     streamUp = false; // EventSource reconnects by itself
   });
 }
+
+let runtimeDebounce;
+runtime.subscribe(() => {
+  clearTimeout(runtimeDebounce);
+  runtimeDebounce = setTimeout(() => liveRefresh({ tracker: false }), 60);
+});
 
 setInterval(() => {
   if (!streamUp && !document.hidden) liveRefresh();
@@ -309,6 +423,12 @@ window.addEventListener('hashchange', () => {
   } catch (err) {
     toast(err.message, { error: true });
   }
+  if (!location.hash) location.replace(`#${parseRoute()?.path || '/agents'}`);
   await refresh();
   connect();
+  // The dummy's cast talks about issues by title; find them, and its questions, in this tracker.
+  runtime.linkTracker?.({
+    findIssue: async (title) => (await api.issues({ q: title, status: 'all', limit: 1 }))[0] || null,
+    findQuestion: (agent, issueId) => store.inbox.find((q) => q.question.author === agent && q.issue.id === issueId)?.question.id || null,
+  });
 })();

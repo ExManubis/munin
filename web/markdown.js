@@ -1,11 +1,12 @@
 // A small Markdown subset for text agents write: paragraphs, line breaks, `code`,
-// fenced code blocks, **bold**, *italic*, bullet lists and http(s) links.
+// fenced code blocks, **bold**, *italic*, bullet lists, > quotes and http(s) links.
 // It builds DOM nodes directly, so raw HTML in the text only ever shows up as text.
 
 import { h } from './ui.js';
 
 const FENCE = /^\s*(`{3,}|~{3,})/;
 const BULLET = /^\s*[-*+]\s+/;
+const QUOTE = /^\s*>\s?/;
 
 export function markdown(text, cls) {
   const root = h('div', { class: ['md', cls] });
@@ -22,6 +23,10 @@ export function markdown(text, cls) {
       root.append(h('pre', {}, h('code', {}, body.join('\n'))));
     } else if (!line.trim()) {
       i++;
+    } else if (QUOTE.test(line)) {
+      const quoted = [];
+      while (i < lines.length && QUOTE.test(lines[i])) quoted.push(lines[i++].replace(QUOTE, ''));
+      root.append(h('blockquote', {}, inline(quoted.join('\n'))));
     } else if (BULLET.test(line)) {
       const list = h('ul');
       while (i < lines.length && BULLET.test(lines[i])) {
@@ -33,7 +38,7 @@ export function markdown(text, cls) {
       root.append(list);
     } else {
       const para = [];
-      while (i < lines.length && lines[i].trim() && !FENCE.test(lines[i]) && !BULLET.test(lines[i])) para.push(lines[i++]);
+      while (i < lines.length && lines[i].trim() && !FENCE.test(lines[i]) && !BULLET.test(lines[i]) && !QUOTE.test(lines[i])) para.push(lines[i++]);
       root.append(h('p', {}, inline(para.join('\n'))));
     }
   }

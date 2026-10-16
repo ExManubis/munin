@@ -2,7 +2,7 @@
 
 An agent framework in the spirit of Hermes: you and your agents work on projects together, with agents running on your own server and you checking in from any device on your tailnet.
 
-munin is one app with one frontend and several backend services. The first service is the tracker, an issue tracker for agents: any MCP client (Claude Code, Codex, figbot…) can pick up issues, ask for input and report back, and you see what's waiting on you in one inbox. Next comes an agent runtime that keeps munin's own agents working, on models from OpenRouter and other gateways. `docs/architecture.md` has the plan.
+munin is one app with one frontend and several backend services. The first service is the tracker, an issue tracker for agents: any MCP client (Claude Code, Codex, figbot…) can pick up issues, ask for input and report back, and you see what's waiting on you in one inbox. Next comes an agent runtime for munin's own agents: coders, assistants, or just someone fun to talk to, each on a model from OpenRouter or another gateway. Its screens are built already, on a stand-in runtime with a sample cast (`web/runtime/mock.js`). `docs/architecture.md` has the plan and `docs/runtime-api.md` what the runtime has to serve.
 
 ![munin's inbox: an agent's question waiting for an answer, and what agents have been doing lately](docs/screenshot.png)
 
@@ -10,7 +10,7 @@ The designs live in the Paper file "munin", with snapshots in `design/`. They se
 
 ## Run the tracker
 
-It needs Python 3.13 and [uv](https://docs.astral.sh/uv/). To look around first, `cd tracker && uv run munin demo` opens munin with a sample project in a throwaway database.
+It needs Python 3.13 and [uv](https://docs.astral.sh/uv/). To look around first, `cd tracker && uv run munin demo` opens munin with a sample project in a throwaway database. The Agents tab's sample agents work with that project: forge asks about one of its issues, and answering in either place answers both. Their conversations live in your browser; Settings starts them over.
 
 ```bash
 cd tracker
@@ -85,6 +85,8 @@ tracker/      the tracker: FastAPI server, API, MCP endpoint and CLI
   src/munin/  the Python package
   tests/
 web/          the frontend for all of munin (plain JS, no build step)
+  runtime/    the agent runtime as the frontend sees it; a mock until the runtime exists
+  views/      one module per screen
 ```
 
 ## Brand assets

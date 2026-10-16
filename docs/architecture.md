@@ -1,6 +1,6 @@
 # How munin fits together
 
-munin is one app for you and your agents: one frontend and several backend services. Agents work on projects with you. They can be any MCP client (Claude Code, Codex, a local model) or munin's own agents. The goal is for munin to live on a server on your tailnet, with the agents working there too, and for you to check in from your laptop or phone.
+munin is one app for you and your agents: one frontend and several backend services. munin's own agents each have a role: some are coders, some assistants, some just fun to talk to. Coders work on projects in the tracker alongside any MCP client (Claude Code, Codex, a local model). The goal is for munin to live on a server on your tailnet, with the agents working there too, and for you to check in from your laptop or phone.
 
 ## The pieces
 
@@ -17,9 +17,9 @@ agent runtime ──MCP──▶ tracker ◀──MCP── Claude Code, Codex, 
 
 | Piece | What it does | Built with | Status |
 |---|---|---|---|
-| **web** | The one frontend for all of munin | Plain JS modules, no build step | The tracker's screens exist |
+| **web** | The one frontend for all of munin: a topbar with AGENTS and TRACKER, each with its own sidebar | Plain JS modules, no build step | Built; the Agents part runs on a mock runtime |
 | **tracker** | Projects, issues, comments, history, questions for you, agent tokens. An API for the frontend, MCP for agents | Python, FastAPI, SQLAlchemy, SQLite | Built; see `tracker.md` |
-| **agent runtime** | Keeps munin's own agents working: a model and provider per agent, a folder or container per agent, and work that survives restarts | Node, pi-durable and pi-ai, its own SQLite | Planned |
+| **agent runtime** | munin's own agents: their conversations, roles, models, routines and memory; keeps them working and survives restarts | Node, pi-durable and pi-ai, its own SQLite | Planned; its API is in `runtime-api.md` |
 | **edge** | One HTTPS address on the tailnet; says who you are; sends each path to its service | `tailscale serve` | Planned; today everything is on 127.0.0.1 |
 
 ## Rules
@@ -35,15 +35,18 @@ agent runtime ──MCP──▶ tracker ◀──MCP── Claude Code, Codex, 
 | | Tracker | Agent runtime |
 |---|---|---|
 | Projects, issues, comments, history | ✓ | |
-| Questions for you, and your answers | ✓ | |
+| Questions about issues, and your answers | ✓ | links its own to them |
 | Agent names and tokens | ✓ issues them | keeps its own agents' tokens |
-| Agent setups: model, provider, project, folder | | ✓ |
-| Conversations and live output | | ✓ |
+| Agents' roles, briefs, models, abilities, ask-first rules | | ✓ |
+| Conversations: messages, runs, questions, approvals | | ✓ |
+| Routines and memory | | ✓ |
 | Provider keys, tokens used, cost | | ✓ |
 
 ## How the frontend joins services
 
-- **An agent's name links the two.** An agent in the runtime is the agent of the same name in the tracker. An issue's page shows the issue from the tracker and, when the runtime runs whoever has the issue, that agent's live output and cost.
+- **The topbar's parts are the services.** AGENTS is the runtime's part and TRACKER the tracker's; each part has its own sidebar. Settings, behind your square, holds both services' settings.
+- **An agent's name links the two.** An agent in the runtime is the agent of the same name in the tracker. Its face is drawn in its colour everywhere, the tracker's screens included.
+- **A question about an issue lives in the tracker.** The runtime ties its agent's question to the tracker's copy (`trackerQuestion`), so the question shows in both the conversation and the tracker inbox, and answering it in either answers both. The waiting count lists it once.
 - **Adding an agent:** the frontend creates the agent in the tracker and gets its token, then creates it in the runtime with that token. The tracker only ever hears from the runtime's agents over MCP.
 - **Finding services:** each service answers on a known path: `/api/me` for the tracker, and `/runtime/api/me` for the runtime. When one doesn't answer, the frontend hides its parts. Without the runtime, munin is the tracker plus outside agents, as it is today.
 - **Live updates:** each service has its own event stream, and the frontend listens to every one that's present.
@@ -66,6 +69,8 @@ agent runtime ──MCP──▶ tracker ◀──MCP── Claude Code, Codex, 
   - **Tailscale ACLs** limit what the server can reach on the tailnet, because agents run shell commands.
 
 ## The agent runtime (planned)
+
+The frontend's Agents part runs on a mock of it today (`web/runtime/mock.js`), which plays a sample cast in the browser. `runtime-api.md` lists what the real one has to serve, and what the tracker needs to add for it.
 
 The runtime is built on [pi-durable](https://github.com/earendil-works/pi) and pi-ai:
 
@@ -92,17 +97,17 @@ pi-durable is experimental, and its API changes between releases. Pin exact vers
 ## Order of work
 
 1. **Restructure into `tracker/` and `web/`.** Done.
-2. **Design the whole frontend, and build a dummy version on fake data.** It includes the parts for services that don't exist yet.
+2. **Design the whole frontend, and build a dummy version on fake data.** Done: the design is page "Agents v1" (`design/`), and the dummy is in `web/`, on the mock runtime. It includes the parts for services that don't exist yet.
    - The frontend reaches each service through one module.
    - The dummy swaps those modules for mocks that keep fake data in the browser and simulate agents at work.
    - Every mock function is something a backend has to provide. Once a screen is settled, its mock functions are the spec for the real endpoints.
 3. **Put munin on a server:** systemd units, `tailscale serve`, Tailscale identity, and agents kept from acting as you. Live updates get replay on reconnect.
-4. **Build the agent runtime** against the API the dummy frontend settled.
+4. **Build the agent runtime** against the API the dummy frontend settled (`runtime-api.md`), with the tracker's three additions: questions with options, a question's id back from `add_comment`, and an event feed over MCP.
 5. **Then:** live agent output, cost per issue, approvals, push notifications, and maybe the Claudewitz iPhone app as a client.
 
 ## Open questions
 
 - **Routing at the edge:** whether `tailscale serve` passes path prefixes through unchanged, or a small proxy such as Caddy sits behind it.
-- **Your answers and running agents:** how the runtime hears about them. Today agents poll with `wait_for_work`. A general event feed over MCP would help every agent, not just munin's.
+- **Your answers and running agents:** today agents poll with `wait_for_work`. The event feed over MCP in `runtime-api.md` would let the runtime hear answers at once, and help every agent, not just munin's.
 - **Costs:** budgets per project or per agent, and what happens at the limit.
 - **The command line:** one `munin` command for every service, or one per service. Today `munin` is the tracker's.
