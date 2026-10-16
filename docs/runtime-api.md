@@ -8,7 +8,7 @@ The runtime serves this under `/runtime/api`, behind the same edge as the tracke
 
 | Mock | HTTP | Does |
 |---|---|---|
-| `me()` | `GET /runtime/api/me` | The runtime's version and its providers. The frontend shows the Agents tab only when this answers |
+| `me()` | `GET /runtime/api/me` | The runtime's version, its providers, and where coders run (`sandbox`: `{kind: "docker", image}`, or `null` for this machine). The frontend shows the Agents tab only when this answers |
 | `agents()` | `GET /runtime/api/agents` | Every agent, as a summary |
 | `agent(name)` | `GET /runtime/api/agents/{name}` | One agent in full |
 | `createAgent(fields)` | `POST /runtime/api/agents` | `{name, role, colour, provider, model, brief, tracker}` |
@@ -43,7 +43,8 @@ A **summary**, for the sidebar and lists:
   "usage": { "today": 1.92, "week": 9.4, "month": 31.2, "tokens": 640000 },  // dollars; tokens today
   "budget": 60,                                                   // pauses at this much a month, or null
   "worksIn": { "folder": "~/.munin/agents/forge/MUN-46", "branch": "mun-46-stream-tool-output",  // when it can code
-               "issue": Issue, "detached": false },                       // detached: reviewing someone's branch
+               "issue": Issue, "detached": false,                         // detached: reviewing someone's branch
+               "sandbox": "docker" },                                     // or null: on the runtime's machine
   "tracker": { "projects": ["MUN", "WEB"], "takes": "issues",                // when it uses the tracker
                "connected": true, "reachable": true },                     // has a token; the tracker answers
   "createdAt": "…",
@@ -153,6 +154,7 @@ The runtime (`runtime/src/`) is a thin layer over pi-durable:
   - `update_issue` to a new status becomes an action line (took, sent to review, moved to Done, sent back, put back, cancelled), and a run started while the agent has an issue in progress belongs to that issue;
   - `create_issue` becomes "filed".
 - **Worktrees** (`workspace.js`). The runtime keeps a clone of each project's repository (`MUNIN_REPOS_DIR`, `~/.munin/repos/<KEY>`). When a coder takes an issue, the runtime adds a worktree of it in the agent's folder (`~/.munin/agents/forge/MUN-46`) on a branch named after the issue (`mun-46-stream-tool-output`), from the fetched base, and moves the agent's shell and file tools there before the agent reads the tracker's answer. Taking an issue again picks its branch up as the agent left it. Commits in a worktree are the agent's (`user.name` is its name). An `open_worktree` tool goes back to one of the agent's own worktrees, or opens a detached copy of someone else's branch to review it, so a reviewer's commits never land on it. When an agent takes its next issue, its worktrees with nothing uncommitted whose branch is already in the base are removed. Agents' shells run with `GIT_PAGER=cat` and no prompts, since nobody is at their terminal. How work gets delivered (push, pull request, merge) is up to the project's brief.
+- **Where coders' tools run** (`sandbox.js`). pi-durable asks the runtime for each tool call's environment. Without a sandbox it's `NodeExecutionEnv` on this machine, and munin's own `coding-tools` extension (pi-durable's, with the shell's environment chosen by a `prepare` hook) gives the shell harmless variables, `LC_*` and those named in `MUNIN_AGENT_ENV`, never the runtime's own. With `MUNIN_AGENT_SANDBOX=docker`, each coder gets a container (`MUNIN_AGENT_IMAGE`, `buildpack-deps:bookworm-scm` by default; `MUNIN_AGENT_NETWORK` to pick its network), started at its first tool call, running as your user id, with its folder and munin's clones mounted at their own paths and pi-env's daemon inside. pi-env's `RemoteExecutionEnv` reaches the daemon through `docker exec`, so reads, writes, edits and commands all happen in the container. Deleting the agent removes its container.
 - **Usage** adds up the cost and tokens on each reply.
 - **Models:** OpenRouter with `OPENROUTER_API_KEY`, an Ollama server with `MUNIN_OLLAMA_URL`, and always the stand-in, which answers without a model. An agent on a model the runtime can't reach runs on the stand-in until it can.
 
@@ -168,4 +170,4 @@ Stored but not acted on yet, next roughly in this order:
 2. **A budget that pauses** the agent at its limit.
 3. **Faster reads.** Each read goes through an agent's whole conversation; it should keep items and page them.
 4. **Numbered events** on the stream, and replay on reconnect.
-5. **Agents kept from acting as you** on a server (`architecture.md`), with worktrees in containers or as a separate user.
+5. **Tighter containers.** A container sees all of munin's clones, so a coder could change another coder's branch there; one clone per agent, or a mount of only its own worktrees' git data, would stop that.

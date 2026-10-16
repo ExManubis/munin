@@ -58,15 +58,15 @@ agent runtime ──MCP──▶ tracker ◀──MCP── Claude Code, Codex, 
   - **HTTPS with a real certificate on the ts.net name.** Browsers only allow notifications and installing the app over HTTPS, and a tailnet IP over plain HTTP doesn't count.
   - **Who you are,** in headers such as `Tailscale-User-Login`.
 - **Agents** each have their own token from the tracker. Revoking one stops just that agent.
-- **Agents must not be able to act as you.** Today the tracker treats every request that reaches its API as you. That's fine on a laptop. On a server, agents run shell commands on the same machine and could reach 127.0.0.1 too. There are two ways out, to settle before agents run on the server:
-  - run agents in containers, so the server's 127.0.0.1 isn't theirs, and give them only the MCP address;
-  - or have the API check who's calling.
+- **Agents must not be able to act as you.** The tracker and the runtime treat every request that reaches their web API as you, and an agent's shell on the same machine, as the same user, could reach that API, read munin's databases (the runtime's holds every agent's tracker token) and read the runtime's keys. No check inside munin's code can stop a program running as munin's own user, so the boundary is the operating system, as Hermes Agent's security policy says too. Two layers:
+  - **Always:** agents' shells don't inherit the runtime's environment. They get a short list of harmless variables and the ones you name (`MUNIN_AGENT_ENV`), so keys stay out of casual reach. That isn't containment: the runtime's files are still readable.
+  - **On a server:** `MUNIN_AGENT_SANDBOX=docker` gives each coder a container, and pi-env's `RemoteExecutionEnv` runs all its tools there, files and shell alike. It sees its own folder and munin's clones, not the databases, the keys, or the server's 127.0.0.1. Its tracker calls still go out from the runtime with its own token, so it never needs the tracker's address.
 
 ## Where it runs
 
 - **On your laptop:** `munin serve` in `tracker/` serves the API, MCP and the frontend, so one command runs munin.
 - **On the server:** each service is its own systemd unit or container, restarted when it fails, with `tailscale serve` in front.
-  - **Agents** run on the same server, each in its own folder (a git worktree) or container, as a separate user.
+  - **Agents** run on the same server, each in a container of its own (`MUNIN_AGENT_SANDBOX=docker`), with a git worktree per issue.
   - **Tailscale ACLs** limit what the server can reach on the tailnet, because agents run shell commands.
 
 ## The agent runtime

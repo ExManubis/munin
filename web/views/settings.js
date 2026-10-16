@@ -15,21 +15,21 @@ export const view = {
   title: () => 'Settings',
 
   async load() {
-    const [agents, providers, repos] = await Promise.all([api.agents(), runtime.providers(), runtime.repos()]);
-    return { agents, providers, repos, me: store.me };
+    const [agents, providers, repos, about] = await Promise.all([api.agents(), runtime.providers(), runtime.repos(), runtime.me()]);
+    return { agents, providers, repos, sandbox: about.sandbox, me: store.me };
   },
 
   leave() {
     created = null; // the token is only ever shown on the screen that created it
   },
 
-  render({ agents, providers, repos, me }, ctx) {
+  render({ agents, providers, repos, sandbox, me }, ctx) {
     const live = agents.filter((a) => !a.revoked);
     return h('div', { class: 'page' },
       topbar([h('span', { class: 'title' }, 'Settings')]),
       h('div', { class: 'agents-page' },
         providerSection(providers),
-        codeSection(repos, ctx),
+        codeSection(repos, sandbox, ctx),
         h('section', { class: 'section', id: 'outside-agents' },
           h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Outside agents'), h('span', { class: 'mono muted' }, `${live.length} connected`)),
           h('p', { class: 'lead' },
@@ -63,13 +63,17 @@ function providerSection(providers) {
 
 // Where each tracker project's code is. The runtime keeps a clone, and each coder gets a
 // worktree per issue, on a branch named after the issue.
-function codeSection(repos, ctx) {
+function codeSection(repos, sandbox, ctx) {
   if (!store.projects.length) return null;
   return h('section', { class: 'section', id: 'code' },
     h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Code')),
     h('p', { class: 'lead' },
       "Where each project's code lives. munin keeps a clone of it, and a coder that takes an issue gets a worktree of its own, ",
       'on a branch named after the issue, so agents working side by side never share a checkout.'),
+    runtime.kind === 'runtime' ? h('p', { class: 'hint sandbox-note' }, sandbox
+      ? `Coders run in a container each, from ${sandbox.image}: they see their own folder and munin's clones, and nothing else of this machine.`
+      : "Coders run on this machine, as the runtime's own user. Their shells don't get the runtime's keys, but they can read its files. "
+        + 'Start the runtime with MUNIN_AGENT_SANDBOX=docker to give each a container of its own.') : null,
     h('div', { class: 'repo-list' }, store.projects.map((project) => repoRow(project, repos.find((r) => r.project === project.key), ctx))));
 }
 

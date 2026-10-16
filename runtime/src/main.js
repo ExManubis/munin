@@ -15,6 +15,7 @@ server.listen(settings.port, settings.host, () => {
   console.log(`munin runtime · http://${settings.host}:${settings.port}/runtime/api`);
   console.log(`  agents in ${settings.db}`);
   console.log(`  models: ${connected.length ? connected.join(', ') : 'only the stand-in (set OPENROUTER_API_KEY or MUNIN_OLLAMA_URL)'}`);
+  console.log(`  coders: ${settings.sandbox === 'docker' ? `a container each, from ${settings.agentImage}` : "on this machine, as this user (MUNIN_AGENT_SANDBOX=docker gives each a container)"}`);
 });
 
 const stop = async () => {

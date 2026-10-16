@@ -12,7 +12,7 @@ import { Type } from '@earendil-works/pi-ai';
 import {
   Harness, LiveDoc, MemoryStorage, ToolTask, configure, createRegistry, defineDoc, defineExtension, defineTool, hook, section,
 } from '@earendil-works/pi-durable';
-import { CodingTools } from '@earendil-works/pi-durable/tools';
+import { createBashTool, createCodingTools } from '@earendil-works/pi-durable/tools';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { ROLES, roleName, askFirstFor, ruleMatches } from './roles.js';
@@ -20,6 +20,7 @@ import { toItems, summarize } from './items.js';
 import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
 import { createWorkspace, WorkspaceError } from './workspace.js';
+import { QUIET_GIT, createDockerSandbox, localShellEnv, passedThrough } from './sandbox.js';
 
 export class RuntimeError extends Error {
   constructor(status, message) {
@@ -42,8 +43,6 @@ const THINKING = ['off', 'low', 'medium', 'high'];
 const UNDO_MS = 8000;
 const DAY = 24 * 60 * 60 * 1000;
 const PROJECT = /^[A-Z][A-Z0-9]{0,9}$/;
-// Nobody is at an agent's terminal, so git mustn't wait for a pager, an editor or a password.
-const SHELL_ENV = { ...process.env, GIT_PAGER: 'cat', PAGER: 'cat', GIT_EDITOR: 'true', GIT_TERMINAL_PROMPT: '0' };
 const HOME = homedir();
 const tilde = (path) => (path.startsWith(`${HOME}/`) ? `~${path.slice(HOME.length)}` : path);
 
@@ -219,6 +218,29 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     }
   }
 
+  // Where coders' tools run (sandbox.js): in a container of their own, or on this machine with
+  // a shell that doesn't inherit the runtime's environment and its keys.
+  const reposDir = settings.reposDir || join(dirname(settings.agentsDir), 'repos');
+  const sandbox = settings.sandbox === 'docker'
+    ? createDockerSandbox({ image: settings.agentImage, network: settings.agentNetwork, agentsDir: settings.agentsDir, reposDir })
+    : null;
+  const passthrough = settings.agentEnv || [];
+  // pi-durable's coding tools, under their own name so conversations keep selecting them, with
+  // the shell's environment chosen here rather than inherited.
+  const base = createCodingTools();
+  const bash = createBashTool({
+    prepare: (execution) => {
+      if (sandbox) {
+        execution.inheritEnv = true; // the container's own environment, which never had the keys
+        execution.env = { ...QUIET_GIT, ...passedThrough(process.env, passthrough), ...execution.env };
+      } else {
+        execution.inheritEnv = false;
+        execution.env = { ...localShellEnv(process.env, passthrough), ...execution.env };
+      }
+    },
+  });
+  const CodingTools = defineExtension({ name: base.name, tools: base.tools.map((tool) => (tool.name === 'bash' ? bash : tool)) });
+
   const registry = createRegistry();
   registry.install(CodingTools);
   registry.install(Munin);
@@ -227,13 +249,17 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   harness = await Harness.open(storage, {
     models: models.models,
     registry,
-    env: ({ cwd }) => (cwd ? new NodeExecutionEnv({ cwd, shellEnv: SHELL_ENV }) : undefined),
+    env: ({ conversationId, cwd }) => {
+      if (!cwd) return undefined;
+      const agent = agentFor(conversationId);
+      return sandbox && agent ? sandbox.envFor(agent, cwd) : new NodeExecutionEnv({ cwd });
+    },
   }, ctx);
 
   const saved = await harness.snapshot(AgentsDoc, ctx);
   for (const agent of Object.values(saved?.agents || {})) agents.set(agent.name, structuredClone(agent));
   Object.assign(repos, structuredClone(saved?.repos || {}));
-  workspace = createWorkspace({ dir: settings.reposDir || join(dirname(settings.agentsDir), 'repos'), repos });
+  workspace = createWorkspace({ dir: reposDir, repos });
   tracker.connect(); // in the background: until the tracker answers, agents are told it's away
 
   async function saveAgents() {
@@ -321,6 +347,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       worksIn: agent.abilities.code ? {
         folder: tilde(agent.work?.folder || agent.folder), branch: agent.work?.branch || null,
         issue: agent.work?.issue || null, detached: Boolean(agent.work?.detached),
+        sandbox: sandbox ? sandbox.kind : null,
       } : null,
       tracker: agent.abilities.tracker ? {
         projects: [...(agent.tracker?.projects || [])], takes: agent.role === 'reviewer' ? 'reviews' : 'issues',
@@ -350,7 +377,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
   const api = {
     async me() {
-      return { kind: 'runtime', version: '0.1.0', providers: models.providers() };
+      return { kind: 'runtime', version: '0.1.0', providers: models.providers(), sandbox: sandbox ? { kind: sandbox.kind, image: sandbox.image } : null };
     },
 
     async agents() {
@@ -478,6 +505,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     async deleteAgent(name) {
       const agent = need(name);
       await (await conversationOf(agent)).abort(ctx);
+      await sandbox?.remove(agent);
       agents.delete(name);
       await saveAgents();
     },
@@ -582,6 +610,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
     async close() {
       closed = true;
+      sandbox?.close();
       clearTimeout(timer);
       listeners.clear();
       tracker.close();
