@@ -1,29 +1,31 @@
 # munin
 
-An agent framework in the spirit of Hermes. The first piece is an issue tracker for agents: any MCP client (Claude Code, Codex, figbot…) can pick up issues, ask for input and report back, and you see what's waiting on you in one inbox.
+An agent framework in the spirit of Hermes: you and your agents work on projects together, with agents running on your own server and you checking in from any device on your tailnet.
+
+munin is one app with one frontend and several backend services. The first service is the tracker, an issue tracker for agents: any MCP client (Claude Code, Codex, figbot…) can pick up issues, ask for input and report back, and you see what's waiting on you in one inbox. Next comes an agent runtime that keeps munin's own agents working, on models from OpenRouter and other gateways. `docs/architecture.md` has the plan.
 
 ![munin's inbox: an agent's question waiting for an answer, and what agents have been doing lately](docs/screenshot.png)
 
-The designs for the tracker live in the Paper file "munin", with snapshots in `design/`. They set the look; `docs/how-it-works.md` describes what the tracker does.
+The designs live in the Paper file "munin", with snapshots in `design/`. They set the look; `docs/tracker.md` describes what the tracker does.
 
 ## Run the tracker
 
-It needs Python 3.13 and [uv](https://docs.astral.sh/uv/). To look around first, `cd server && uv run munin demo` opens munin with a sample project in a throwaway database.
+It needs Python 3.13 and [uv](https://docs.astral.sh/uv/). To look around first, `cd tracker && uv run munin demo` opens munin with a sample project in a throwaway database.
 
 ```bash
-cd server
+cd tracker
 uv run munin project add MUN munin --description "What the project is, for agents and you"
 uv run munin agent add claude-code      # prints the agent's token, shown once
 uv run munin serve --open               # http://127.0.0.1:7777
 ```
 
-The web UI has your inbox, the projects and their issues, and agent tokens; you can also create projects and tokens there, and it walks you through connecting your first agent. It updates live as agents work. The data lives in `~/.munin/munin.db`.
+The tracker serves the frontend from `web/` too, so this is all you need locally. The web UI has your inbox, the projects and their issues, and agent tokens; you can also create projects and tokens there, and it walks you through connecting your first agent. It updates live as agents work. The data lives in `~/.munin/munin.db`.
 
 `uv run munin status` shows what's waiting on you and what agents are doing, without leaving the terminal.
 
 The web UI and its API have no login, so munin only listens on 127.0.0.1. `--host 0.0.0.0` makes it reachable from your phone, and from everyone else on that network.
 
-Settings come from environment variables: `MUNIN_DB` (database file), `MUNIN_HOST`, `MUNIN_PORT`, and `MUNIN_USER` (the name your comments get, `me` by default).
+Settings come from environment variables: `MUNIN_DB` (database file), `MUNIN_HOST`, `MUNIN_PORT`, `MUNIN_USER` (the name your comments get, `me` by default) and `MUNIN_WEB` (the frontend to serve, `web/` in this repository by default; empty serves only the API and MCP).
 
 ### Connect an agent
 
@@ -58,7 +60,7 @@ Any other agent: "You have access to munin, an issue tracker. Continue the MUN p
 
 ```bash
 cd your-repo
-uv run --project path/to/munin/server munin run MUN --agents 2 -- --model sonnet
+uv run --project path/to/munin/tracker munin run MUN --agents 2 -- --model sonnet
 ```
 
 `munin run` gives each agent its own token (`claude-1`, `claude-2`, …), starts them on the project with Claude Code, and prints what they do as they do it: who took what, what they said, what they sent back from review. Arguments after `--` go to every agent; use them for the model and for what the agents may do. Headless Claude Code only uses tools it's allowed: munin's own are allowed already, and you add the rest, for example `-- --allowedTools Read Edit Write "Bash(git:*)" "Bash(npm test:*)"` or `--permission-mode acceptEdits`. For another agent CLI, pass a template with `--cmd`, using `{prompt}`, `{project}`, `{mcp_config}`, `{url}`, `{token}` and `{name}`; `MUNIN_TOKEN` and `MUNIN_URL` are set too, so Codex works with the config above: `--cmd 'codex exec {prompt}'`. munin has to be running (`munin serve`).
@@ -66,7 +68,7 @@ uv run --project path/to/munin/server munin run MUN --agents 2 -- --model sonnet
 ### Tests
 
 ```bash
-cd server
+cd tracker
 uv run pytest
 ```
 
@@ -77,11 +79,12 @@ brand/        logo, the Munin Block font and the scripts that draw them
   final/      the asset pack to use: SVG, PNG, favicons, app icons, social cards
   logo/       earlier explorations and treatments
   tools/      generators that render everything from the master bitmaps
-design/       each tracker screen from Paper as PNG, JSX and HTML
-docs/         what the tracker does and why
-server/       the tracker: FastAPI server, MCP endpoint, web UI and CLI
-  src/munin/  the Python package; web/ holds the UI (plain JS, no build step)
+design/       each screen from Paper as PNG, JSX and HTML
+docs/         how munin fits together (architecture.md) and what the tracker does (tracker.md)
+tracker/      the tracker: FastAPI server, API, MCP endpoint and CLI
+  src/munin/  the Python package
   tests/
+web/          the frontend for all of munin (plain JS, no build step)
 ```
 
 ## Brand assets

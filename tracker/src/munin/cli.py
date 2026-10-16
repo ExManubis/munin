@@ -4,6 +4,7 @@ import sys
 import tempfile
 import threading
 import webbrowser
+from dataclasses import replace
 from datetime import datetime
 from importlib.metadata import version
 from pathlib import Path
@@ -16,7 +17,8 @@ from munin.issues import MuninError
 from munin.models import utcnow
 from munin.run import CLAUDE, run_agents
 
-MARK = Path(__file__).parent / "web" / "munin-mark-dither-on-dark.svg"
+# The brand kit's dithered mark, kept here so the CLI draws it without the frontend.
+MARK = Path(__file__).parent / "raven.svg"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"munin {version('munin')}")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    serve = commands.add_parser("serve", help="run the server (web UI, API and MCP)")
+    serve = commands.add_parser("serve", help="run the tracker (API and MCP, and the web UI)")
     serve.add_argument("--host", help="address to listen on (default 127.0.0.1)")
     serve.add_argument("--port", type=int, help="port to listen on (default 7777)")
     serve.add_argument("--open", action="store_true", help="open the web UI in your browser")
@@ -89,12 +91,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _serve(settings: Settings, args: argparse.Namespace) -> int:
-    settings = Settings(
-        db_path=settings.db_path,
-        host=args.host or settings.host,
-        port=args.port or settings.port,
-        user=settings.user,
-    )
+    settings = replace(settings, host=args.host or settings.host, port=args.port or settings.port)
     return _run(settings, f"database {settings.db_path}", open_browser=args.open)
 
 
@@ -104,7 +101,7 @@ def _demo(settings: Settings, args: argparse.Namespace) -> int:
     db_path = Path(tempfile.mkdtemp(prefix="munin-demo-")) / "demo.db"
     with connect(db_path)() as s:
         seed(s, settings.user)
-    settings = Settings(db_path=db_path, host="127.0.0.1", port=args.port, user=settings.user)
+    settings = replace(settings, db_path=db_path, host="127.0.0.1", port=args.port)
     note = "a sample project in a throwaway database; your own data isn't touched"
     return _run(settings, note, open_browser=not args.no_open)
 

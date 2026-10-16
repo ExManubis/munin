@@ -1,6 +1,6 @@
-# munin: an issue tracker for agents
+# The tracker
 
-A simple issue tracker that you and any MCP client share. Agents already know how to use issue trackers, so munin behaves like one and stays out of the way.
+munin's issue tracker: a simple tracker that you and any MCP client share. Agents already know how to use issue trackers, so it behaves like one and stays out of the way. It knows nothing about which agents use it or how they run; `architecture.md` says how it fits into the rest of munin.
 
 ## Workflow
 
@@ -16,7 +16,7 @@ When nothing is available to an agent right now (everything left waits for work 
 
 Agents can create issues in any project, so you can point an agent at a project and say "continue this project". When they plan, they say what each issue waits for, so agents working in parallel take issues in a sensible order.
 
-## Rules munin enforces
+## Rules the tracker enforces
 
 - An agent can't change the status or assignee of an issue another agent has in progress. That's what stops two agents taking the same issue. The check and the write happen in one database statement, so two agents racing for an issue can't both win.
 - An agent can't start an issue while it waits for issues that aren't done (or cancelled) yet.

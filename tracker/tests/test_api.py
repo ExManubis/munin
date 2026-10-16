@@ -1,4 +1,9 @@
+from dataclasses import replace
+
+from fastapi.testclient import TestClient
+
 from munin import issues as svc
+from munin.app import create_app
 from munin.db import connect
 
 from conftest import CLAUDE
@@ -117,3 +122,13 @@ def test_agents_show_what_they_are_working_on(client, settings):
         svc.update_issue(s, CLAUDE, "MUN-1", status="in_progress")
     agents = {a["name"]: [i["id"] for i in a["working_on"]] for a in client.get("/api/agents").json()}
     assert agents == {"claude-code": ["MUN-1"], "codex": []}
+
+
+def test_the_frontend_is_served_from_the_checkout_unless_turned_off(client, settings):
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "<title>munin</title>" in page.text
+
+    with TestClient(create_app(replace(settings, web_dir=None)), base_url="http://localhost") as api_only:
+        assert api_only.get("/").status_code == 404
+        assert api_only.get("/api/me").status_code == 200

@@ -1,6 +1,5 @@
 import contextlib
 import json
-from pathlib import Path
 
 import anyio.to_thread
 from fastapi import FastAPI, Request
@@ -18,7 +17,6 @@ from munin.db import Changes, connect
 from munin.issues import Conflict, Invalid, MuninError, NotFound
 from munin.mcp_server import build_mcp
 
-WEB_DIR = Path(__file__).parent / "web"
 LOOPBACK = ("127.0.0.1", "localhost")
 
 
@@ -49,8 +47,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(router)
     app.router.routes.append(Route("/mcp", endpoint=AgentAuth(mcp_endpoint, sessions)))
-    if WEB_DIR.is_dir():
-        app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+    if settings.web_dir and (settings.web_dir / "index.html").is_file():
+        app.mount("/", StaticFiles(directory=settings.web_dir, html=True), name="web")
     return app
 
 
