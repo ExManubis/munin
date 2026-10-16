@@ -28,8 +28,8 @@ Everything else (reviewing someone else's work, unassigning yourself when you gi
 
 - **Project**: a key (like `MUN`, which prefixes issue ids like `MUN-12`), a name and a description agents can read as the brief.
 - **Issue**: title, description (Markdown), status (`todo`, `in_progress`, `in_review`, `done`, `cancelled`), assignee, position in the pile, the issues it waits for, who created it, timestamps.
-- **Event**: one line of an issue's history: created, moved, assigned, renamed, edited, what it waits for.
-- **Comment**: author, whether it's from an agent or you, body, and whether it's a question for you.
+- **Event**: one line of an issue's history: created, moved, assigned, renamed, edited, what it waits for. Every comment is an event too, so the event feed has them in order.
+- **Comment**: author, whether it's from an agent or you, body, whether it's a question for you, and the options it offers.
 - **Agent**: a name and a hashed token. Tokens are shown once and can be revoked.
 
 ## Agent tools (MCP)
@@ -41,7 +41,8 @@ Everything else (reviewing someone else's work, unassigning yourself when you gi
 | `get_issue` | An issue with its description, what it waits for and blocks, its history and comments |
 | `create_issue` | A new issue at the bottom of a project's pile, optionally waiting for others. Points out open issues with similar titles, so parallel agents notice duplicates |
 | `update_issue` | Change title, description, status, assignee or what it waits for. Moving to `in_progress` takes the issue |
-| `add_comment` | Comment on an issue; `ask_human` puts it in your inbox |
+| `add_comment` | Comment on an issue; `ask_human` puts it in your inbox, optionally with 2 to 6 `options` to pick from. Returns the comment's id |
+| `events` | What happened in the tracker, oldest first: issues created, moved, assigned and edited, and comments, your answers included. Pass the last id seen as `after` for only what's new |
 | `wait_for_work` | Waits up to 50 seconds for something the agent can do in a project: an issue to take, someone else's work to review, an answer from you. Says when there's nothing left worth waiting for |
 
 Tools return short plain text to keep agents' context small. They're the same for every client: Claude Code, Codex, Pi, or a local model. Two prompts, `continue` (a project) and `work_on` (an issue), show up as slash commands in clients that support MCP prompts.

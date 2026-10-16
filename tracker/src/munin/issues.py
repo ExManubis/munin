@@ -426,11 +426,26 @@ def last_activity(s: Session, project: str) -> datetime | None:
 
 
 def recent_events(s: Session, limit: int = 50, project: str | None = None) -> list[Event]:
-    """What happened lately, newest first."""
-    statement = select(Event).join(Issue).order_by(Event.id.desc()).limit(limit)
+    """What happened lately, newest first. Comments have their own list, so they're left out."""
+    statement = select(Event).join(Issue).where(Event.kind != "comment").order_by(Event.id.desc()).limit(limit)
     if project:
         statement = statement.where(Issue.project_id == get_project(s, project).id)
     return list(s.scalars(statement))
+
+
+def events_after(s: Session, after: int | None, limit: int = 50, project: str | None = None) -> list[Event]:
+    """The event feed, oldest first: events after the id `after`, or the latest `limit` without one.
+    Comments are in it too, as events of kind "comment" whose `new` is the comment's id."""
+    statement = select(Event).join(Issue)
+    if project:
+        statement = statement.where(Issue.project_id == get_project(s, project).id)
+    if after is None:
+        return list(reversed(s.scalars(statement.order_by(Event.id.desc()).limit(limit)).all()))
+    return list(s.scalars(statement.where(Event.id > after).order_by(Event.id).limit(limit)))
+
+
+def comment_of(s: Session, event: Event) -> Comment | None:
+    return s.get(Comment, int(event.new)) if event.kind == "comment" and event.new else None
 
 
 def history(events: list[Event]) -> list[tuple[Event, str]]:
@@ -438,6 +453,8 @@ def history(events: list[Event]) -> list[tuple[Event, str]]:
     yourself at once) is one line: "claude-code took it"."""
     lines: list[tuple[Event, str]] = []
     for event in events:
+        if event.kind == "comment":
+            continue  # comments are shown as comments
         before = lines[-1][0] if lines else None
         took = (
             before is not None
@@ -476,21 +493,56 @@ def describe_event(event: Event) -> str:
 # Comments and the inbox
 
 
-def add_comment(s: Session, actor: Actor, ref: str, body: str, asks_human: bool = False) -> Comment:
+def add_comment(
+    s: Session, actor: Actor, ref: str, body: str, asks_human: bool = False, options: list[dict] | None = None
+) -> Comment:
+    """A comment, or (from an agent, with `asks_human`) a question for the human, optionally with a few
+    answers to pick from. It's also an event, so the event feed has it."""
     issue = get_issue(s, ref)
     if not body.strip():
         raise Invalid("A comment needs a body.")
+    asks_human = asks_human and actor.is_agent
+    options = _clean_options(options)
+    if options and not asks_human:
+        raise Invalid("Options go with a question for the human: set ask_human too.")
+    now = utcnow()
     comment = Comment(
         issue=issue,
         author=actor.name,
         author_kind=actor.kind,
         body=body.strip(),
-        asks_human=asks_human and actor.is_agent,
+        asks_human=asks_human,
+        options=options,
+        created_at=now,
     )
-    issue.updated_at = utcnow()
+    issue.updated_at = now
     s.add(comment)
+    s.flush()
+    _record(issue, actor, now, "comment", None, str(comment.id))
     s.commit()
     return comment
+
+
+MAX_OPTIONS = 6
+
+
+def _clean_options(options: list[dict] | None) -> list[dict] | None:
+    if not options:
+        return None
+    cleaned = []
+    for option in options:
+        label = str(option.get("label") or "").strip()
+        detail = str(option.get("detail") or "").strip()
+        if not label:
+            raise Invalid("Each option needs a label.")
+        if len(label) > 80 or len(detail) > 200:
+            raise Invalid("Keep an option's label under 80 characters and its detail under 200.")
+        cleaned.append({"label": label, "detail": detail})
+    if len(cleaned) < 2 or len(cleaned) > MAX_OPTIONS:
+        raise Invalid(f"Offer 2 to {MAX_OPTIONS} options, or none.")
+    if len({o["label"].lower() for o in cleaned}) < len(cleaned):
+        raise Invalid("Options need different labels.")
+    return cleaned
 
 
 def _unanswered():

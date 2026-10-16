@@ -132,3 +132,24 @@ def test_the_frontend_is_served_from_the_checkout_unless_turned_off(client, sett
     with TestClient(create_app(replace(settings, web_dir=None)), base_url="http://localhost") as api_only:
         assert api_only.get("/").status_code == 404
         assert api_only.get("/api/me").status_code == 200
+
+
+def test_questions_carry_options_and_comments_stay_out_of_history(client, settings):
+    client.post("/api/projects", json={"key": "MUN", "name": "munin"})
+    client.post("/api/issues", json={"project": "MUN", "title": "Work"})
+    with connect(settings.db_path)() as s:
+        svc.add_comment(
+            s,
+            CLAUDE,
+            "MUN-1",
+            "Which one?",
+            asks_human=True,
+            options=[{"label": "A"}, {"label": "B", "detail": "The other"}],
+        )
+    question = client.get("/api/inbox").json()[0]["question"]
+    assert question["options"] == [{"label": "A", "detail": ""}, {"label": "B", "detail": "The other"}]
+    issue = client.post("/api/issues/MUN-1/comments", json={"body": "B"}).json()
+    assert [c["body"] for c in issue["comments"]] == ["Which one?", "B"]
+    assert [e["kind"] for e in issue["events"]] == ["created"]
+    assert [a["kind"] for a in client.get("/api/activity").json()] == ["created"]
+    assert client.get("/api/inbox").json() == []

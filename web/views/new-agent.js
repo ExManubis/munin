@@ -4,7 +4,8 @@
 import { runtime } from '../runtime/index.js';
 import { ROLES, PROVIDERS, roleOf, costHint } from '../runtime/roles.js';
 import { store } from '../store.js';
-import { h, MOD, svg, toast, topbar } from '../ui.js';
+import { h, MOD, toast, topbar } from '../ui.js';
+import { check } from '../cards.js';
 import { figbot, COLOURS } from '../figbot.js';
 
 let form = blank();
@@ -105,9 +106,6 @@ function pickRole(id, ctx) {
   if (!form.briefEdited) form.brief = role.brief(form.name.trim() || 'it');
   ctx.rerender();
 }
-
-const check = () => svg(14, '0 0 14 14', [['rect', { x: 0, y: 0, width: 14, height: 14, fill: '#EDEDED' }],
-  ['path', { d: 'M3.5 7.5 L6 10 L10.5 4.5', fill: 'none', stroke: '#0A0A0A', 'stroke-width': 1.6 }]], { cls: 'check' });
 
 function roleCard(role, index, ctx) {
   const selected = form.role === role.id;

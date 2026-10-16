@@ -102,12 +102,12 @@ pi-durable is experimental, and its API changes between releases. Pin exact vers
    - The dummy swaps those modules for mocks that keep fake data in the browser and simulate agents at work.
    - Every mock function is something a backend has to provide. Once a screen is settled, its mock functions are the spec for the real endpoints.
 3. **Put munin on a server:** systemd units, `tailscale serve`, Tailscale identity, and agents kept from acting as you. Live updates get replay on reconnect.
-4. **Build the agent runtime** against the API the dummy frontend settled (`runtime-api.md`), with the tracker's three additions: questions with options, a question's id back from `add_comment`, and an event feed over MCP.
+4. **Build the agent runtime** against the API the dummy frontend settled (`runtime-api.md`). The tracker's three additions for it are done: questions with options, a question's id back from `add_comment`, and an event feed over MCP.
 5. **Then:** live agent output, cost per issue, approvals, push notifications, and maybe the Claudewitz iPhone app as a client.
 
 ## Open questions
 
 - **Routing at the edge:** whether `tailscale serve` passes path prefixes through unchanged, or a small proxy such as Caddy sits behind it.
-- **Your answers and running agents:** today agents poll with `wait_for_work`. The event feed over MCP in `runtime-api.md` would let the runtime hear answers at once, and help every agent, not just munin's.
+- **Your answers and running agents:** the runtime can read the tracker's `events` feed to hear answers at once instead of polling `wait_for_work`; how often, and whether the tracker should push instead, is still open.
 - **Costs:** budgets per project or per agent, and what happens at the limit.
 - **The command line:** one `munin` command for every service, or one per service. Today `munin` is the tracker's.

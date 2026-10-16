@@ -106,13 +106,13 @@ Roles, abilities, apps, providers and models are fixed lists in `web/runtime/rol
 
 `GET /runtime/api/stream` is a server-sent event stream that says `changed`, like the tracker's `/api/stream`; the mock calls `subscribe(fn)` instead. It should number its events so a reconnecting client can ask for what it missed (`Last-Event-ID`). The Claudewitz daemon does this, and it matters on a phone that keeps dropping off.
 
-## What the tracker needs for this
+## What the tracker added for this
 
-The screens need a few things from the tracker. Every agent can use all of them, so it stays agent-agnostic:
+The screens needed three things from the tracker. Every agent can use them, so it stays agent-agnostic:
 
-1. **Questions with options.** `add_comment(…, ask_human=true)` takes optional `options` (label and detail), and the tracker inbox shows them as option cards, like the conversation does. Today the inbox only takes free text.
-2. **The question's id back.** `add_comment` returns the comment's id, so an agent (or the runtime) can tie its question to the tracker's copy. That's `trackerQuestion` above; the mock fakes it.
-3. **An event feed over MCP.** Routines that start "when an issue moves", and agents hearing your answer without polling `wait_for_work`, both need one. It would be a tool or a resource that returns events after a given id.
+1. **Questions with options.** `add_comment(…, ask_human=true, options=[{label, detail}])` offers 2 to 6 answers, and the tracker's inbox shows them as option cards, like the conversation does. Picking one answers with its label; you can still write your own.
+2. **The question's id back.** `add_comment` returns the comment's id, so the runtime ties its agent's question to the tracker's copy. That's `trackerQuestion` above; the mock still finds it by agent and issue.
+3. **An event feed over MCP.** The `events` tool lists what happened after an event id, comments included. Routines that start "when an issue moves" read it, and so can an agent that wants your answer without `wait_for_work`.
 
 ## Building it on pi-durable
 

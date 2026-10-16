@@ -44,12 +44,19 @@ class ProjectOut(BaseModel):
     counts: dict[str, int]
 
 
+class OptionOut(BaseModel):
+    label: str
+    detail: str = ""
+
+
 class CommentOut(BaseModel):
     id: int
     author: str
     author_kind: str
     body: str
     asks_human: bool
+    # Answers a question offers; the human can pick one or write their own.
+    options: list[OptionOut] | None = None
     created_at: UTCDateTime
 
 
@@ -160,7 +167,7 @@ def _issue_detail_out(issue: Issue) -> IssueDetailOut:
         waits_for=[_brief_out(blocker) for blocker in issue.blocked_by],
         blocks=[_brief_out(blocked) for blocked in issue.blocks],
         comments=[_comment_out(c) for c in issue.comments],
-        events=[_event_out(e) for e in issue.events],
+        events=[_event_out(e) for e in issue.events if e.kind != "comment"],
     )
 
 

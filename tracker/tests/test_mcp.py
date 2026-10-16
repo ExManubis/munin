@@ -52,6 +52,7 @@ def test_tools_and_instructions(server):
         "create_issue",
         "update_issue",
         "add_comment",
+        "events",
         "wait_for_work",
     ]
 
@@ -254,3 +255,58 @@ def test_wait_for_work_stops_when_nobody_else_is_around(server):
         "MUN-1 [in_review] First (assignee: claude-code)\n"
         "Stop here. They'll wait for the next agent (your own work needs someone else to review it)."
     )
+
+
+def test_questions_with_options_and_comment_ids(server):
+    url, tokens, settings = server
+    options = [{"label": "New message", "detail": "Easy to read on a phone"}, {"label": "Attach a file"}]
+    results = run(
+        url,
+        tokens["claude-code"],
+        ("add_comment", {"issue": "MUN-1", "body": "Split long output how?", "ask_human": True, "options": options}),
+        ("add_comment", {"issue": "MUN-1", "body": "Plain note", "options": options}),
+        ("add_comment", {"issue": "MUN-1", "body": "One way?", "ask_human": True, "options": options[:1]}),
+        ("add_comment", {"issue": "MUN-1", "body": "Noted."}),
+        ("get_issue", {"issue": "MUN-1"}),
+    )
+    (asked_err, asked), (plain_err, plain), (one_err, one), (note_err, note), (_, issue) = results
+    with connect(settings.db_path)() as s:
+        question, note_comment = svc.get_issue(s, "MUN-1").comments
+    assert not asked_err and asked.startswith(f"Asked the human on MUN-1 (comment {question.id}).")
+    assert plain_err and "Options go with a question for the human" in plain
+    assert one_err and "Offer 2 to 6 options" in one
+    assert not note_err and note == f"Commented on MUN-1 (comment {note_comment.id})."
+    assert question.options == [
+        {"label": "New message", "detail": "Easy to read on a phone"},
+        {"label": "Attach a file", "detail": ""},
+    ]
+    assert "Options: 1. New message (Easy to read on a phone); 2. Attach a file" in issue
+
+
+def test_the_event_feed_has_changes_and_comments_in_order(server):
+    url, tokens, settings = server
+    run(
+        url,
+        tokens["claude-code"],
+        ("update_issue", {"issue": "MUN-1", "status": "in_progress"}),
+        ("add_comment", {"issue": "MUN-1", "body": "Which database?", "ask_human": True}),
+    )
+    with connect(settings.db_path)() as s:
+        svc.add_comment(s, HUMAN, "MUN-1", "SQLite, please.\nIt's enough.")
+    is_error, latest = run(url, tokens["codex"], ("events", {"limit": 4}))[0]
+    assert not is_error
+    lines = latest.splitlines()
+    assert [line.split("  ", 2)[2] for line in lines[:-1]] == [
+        "claude-code took it",
+        "claude-code asked the human: Which database?",
+        "me commented: SQLite, please.",
+    ]
+    cursor = int(lines[-1].split("after=")[1].rstrip(")"))
+
+    is_error, nothing = run(url, tokens["codex"], ("events", {"after": cursor}))[0]
+    assert nothing == f"Nothing new after event {cursor}."
+    with connect(settings.db_path)() as s:
+        svc.update_issue(s, HUMAN, "MUN-2", title="Second, renamed")
+    _, new = run(url, tokens["codex"], ("events", {"after": cursor, "project": "MUN"}))[0]
+    assert new.splitlines()[0].endswith("MUN-2  me renamed it from 'Second'")
+    assert new.splitlines()[-1] == f"Next time: events(after={cursor + 1})"
