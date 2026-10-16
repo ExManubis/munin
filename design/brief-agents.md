@@ -20,7 +20,7 @@ The look borrows ideas from Grok Bot, not its style:
 - what the agent did, as quiet lines between messages;
 - questions as cards with options.
 
-Everything is drawn in munin's design language: no colour, no bubbles, no rounded corners.
+Everything is drawn in munin's design language: no bubbles, no rounded corners, and no colour except in the agents' faces.
 
 ## Before you start
 
@@ -39,7 +39,8 @@ Everything is drawn in munin's design language: no colour, no bubbles, no rounde
   - Ink `#0A0A0A` with the 14 px grid of `#1E1E1E` dots fading toward the edges.
   - Text: `#EDEDED` for what matters, `#CFCFCF` for reading text, `#7A7A7A` for secondary.
   - `#2A2A2A` for lines and fills only.
-  - `#4E4E4E` only for viewfinder corners. Nothing else, not even for the fun agents.
+  - `#4E4E4E` only for viewfinder corners.
+  - **The one exception (new on this page):** each agent's Figbot is drawn in that agent's colour (see Faces). Nothing else gets colour, not even for the fun agents.
 - **Type.**
   - IBM Plex Mono for chrome and data: 11/16, caps at 0.12 em for labels and buttons; 22/28 for titles.
   - Red Hat Text for reading: 13/18, 14/20, 14/22 for long text, 15–17 on the phone.
@@ -49,10 +50,10 @@ Everything is drawn in munin's design language: no colour, no bubbles, no rounde
   - Secondary buttons are dotted and grey, and turn white on hover. Tertiary is a dotted underline.
   - Every button shows its key.
 - **Identity.**
-  - Agents are outlined squares with eyes.
+  - Agents are Figbots, each in its own colour (new on this page; it replaces the outlined square with eyes).
   - People are solid squares with an initial (Mikkel: `M`).
 - **Status** uses the pixel squares from Foundations, unchanged.
-- **No** bubbles, rounded corners, emoji, brand logos of other apps, or avatars with colour.
+- **No** bubbles, rounded corners, emoji, brand logos of other apps, or colour outside the agents' faces.
 - **The logo** comes from the brand kit at whole-number scales. Never retype "munin" in another font.
 
 ## New pieces
@@ -69,32 +70,47 @@ Everything is drawn in munin's design language: no colour, no bubbles, no rounde
   - The search field from the tracker sidebar ("Search or jump to…", `⌘K`), 240 px wide. It searches agents, issues and projects.
   - A dotted chip `4 WAITING ON YOU`: questions from conversations plus the tracker inbox. It opens a list of them and is hidden at zero.
   - The person square `M`, which opens settings.
-- **What moves out of the tracker sidebar:** the lockup and search (into the topbar) and the bottom row with your name and SETTINGS (the `M` square). The rest of the tracker sidebar stays as it is, including the agent squares and "3 agents working, 2 idle".
+- **What moves out of the tracker sidebar:** the lockup and search (into the topbar) and the bottom row with your name and SETTINGS (the `M` square). The rest of the tracker sidebar stays as it is, except that the agent squares become Figbots (see 13).
 
 ### Faces
 
-The 18 × 18 outlined square (1 px `#7A7A7A`) stays the sign for an agent. What changes is the eyes: each agent picks a pattern when it's created, so you can tell agents apart without colour. Coordinates are pixels inside the 18 × 18 square, as `x,y w×h`.
+Every agent is a **Figbot**: the halftone sphere with two eyes from `figment-engineering/figbot` (see `figbot/out/sheet.png` there). The outlined square with eyes is retired. Every agent has the same face. **Colour is what tells agents apart.** Each agent picks one when it's created, and the halftone dots are drawn in it. The black ground and the eye holes stay `#0A0A0A`.
 
-| Pattern | Eyes |
+| Colour | Hex |
 |---|---|
-| plain | `5,7 2×4` and `11,7 2×4` (today's face) |
-| round | `4,7 3×3` and `11,7 3×3` |
-| wide | `3,8 4×2` and `11,8 4×2` |
-| sleepy | `3,9 4×1` and `11,9 4×1` |
-| wink | `5,7 2×4` and `10,9 4×1` |
-| happy | `3,9 1×1`, `4,8 2×1`, `6,9 1×1`; `11,9 1×1`, `12,8 2×1`, `14,9 1×1` |
-| glasses | outlined `3,6 5×5` and `10,6 5×5`, joined by `8,8 2×1` |
-| cyclops | `7,7 4×4` |
+| ember | `#F2A65A` |
+| coral | `#F07C6B` |
+| rose | `#E98BB8` |
+| iris | `#A99BF5` |
+| sky | `#6FB3F2` |
+| teal | `#4FC7B8` |
+| moss | `#9CCB6B` |
+| straw | `#E3CF6E` |
 
-**State,** the same for every pattern:
+Outside agents (claude-code, codex, figbot) are white Figbots in `#EDEDED`, the original Figbot. Only agents of your own have a colour.
 
-- **working:** eyes `#EDEDED`. In the product they blink every few seconds.
-- **idle:** eyes `#7A7A7A`.
-- **paused:** the outline turns dotted and the eyes become `#2A2A2A`.
+**Expression shows state.** The expressions are Figbot's own poses (`POSES` in `figbot/src/model.ts`):
 
-**Sizes:** 18 in lists and rows, 36 (×2) in headers, 72 (×4) on the profile and the face picker. Always draw at whole-number pixel scales.
+- **working:** `thinking`. In the product it moves through Figbot's loop and blinks.
+- **idle:** `idle`.
+- **asks you:** `curious`.
+- **failed or blocked:** `worried`.
+- **paused:** `sleepy`, with the dots at 50 % opacity.
+- **just finished something:** `happy` for a few seconds, then back to `idle`. It only shows in the product. On the artboards, use it only in 08.
 
-Outside agents (claude-code, codex, figbot) keep the plain face.
+`excited` is spare. Companions may use it in conversation.
+
+**Sizes and grids.** Render the face from Figbot's model; don't redraw it by hand. Use `cells(pose, n, n)`, and draw the dots with `svgBody` from `figbot/src/svg.ts`, with the agent's colour in place of `FG_COLOR` and no background.
+
+| Size | Grid | Where |
+|---|---|---|
+| 18 px | 18 cells, 1 px each | lists, rows, message rows |
+| 36 px | 18 cells, 2 px each | headers, the colour picker |
+| 72 px | 36 cells, 2 px each | profile |
+
+18 px is the smallest size and should read like the site's 16 px Figbot icon (`public/icons/figbot.svg`). If the eyes don't read at 18, note it under "Changed while designing" rather than redrawing them.
+
+**The colour appears only in the face.** Names, role tags, rows and selection stay in the five greys.
 
 ### Role tag
 
@@ -143,15 +159,15 @@ The role in Plex Mono 11 caps at 0.12 em, `#7A7A7A`, after the name: `ASSISTANT`
 
 Use these everywhere so the artboards tell one story. Times are 24-hour, Copenhagen.
 
-| Agent | Role | Face | Model | State | Sidebar line 2 |
+| Agent | Role | Colour | Model | State | Sidebar line 2 |
 |---|---|---|---|---|---|
-| hugin | ASSISTANT | round | haiku-5.5 · OpenRouter | idle, asks you | Move the dentist to which slot? |
-| forge | CODER | plain | opus-5.5 · OpenRouter | working on MUN-46, asks you | Telegram caps a message at 4,096… |
-| vera | REVIEWER | glasses | sonnet-5.5 · OpenRouter | idle | MUN-45 is merged. Nothing else to review yet. |
-| quill | WRITER | wink | sonnet-5.5 · OpenRouter | idle | Draft 2 of "Why munin" is ready. |
-| atlas | RESEARCHER | wide | sonnet-5.5 · OpenRouter | working | Reading: "Durable execution in practice" |
-| pip | COMPANION | happy | haiku-5.5 · OpenRouter | idle | Ready for round two of the riddle? |
-| moss | COMPANION | sleepy | llama · Ollama, on the server | paused | Paused by you yesterday |
+| hugin | ASSISTANT | sky | haiku-5.5 · OpenRouter | idle, asks you | Move the dentist to which slot? |
+| forge | CODER | ember | opus-5.5 · OpenRouter | working on MUN-46, asks you | Telegram caps a message at 4,096… |
+| vera | REVIEWER | iris | sonnet-5.5 · OpenRouter | idle | MUN-45 is merged. Nothing else to review yet. |
+| quill | WRITER | rose | sonnet-5.5 · OpenRouter | idle | Draft 2 of "Why munin" is ready. |
+| atlas | RESEARCHER | teal | sonnet-5.5 · OpenRouter | working | Reading: "Durable execution in practice" |
+| pip | COMPANION | straw | haiku-5.5 · OpenRouter | idle | Ready for round two of the riddle? |
+| moss | COMPANION | moss | llama · Ollama, on the server | paused | Paused by you yesterday |
 
 Waiting on you: four items.
 
@@ -169,8 +185,8 @@ Number them after Issues v3. Desktop is 1440 wide; the phone is 390 × 844.
 
 A sheet in the style of 00, with sections:
 
-- **FACES:** the eight patterns at 18, 36 and 72, with their names.
-- **STATES:** working, idle and paused, with a person square for comparison. Caption: "Eyes blink while an agent works. Grey eyes: idle. Dotted outline: paused."
+- **FACES:** the eight colours as idle Figbots at 18, 36 and 72, with their names and hex values. Then a white outside-agent Figbot, captioned "Outside agents are white."
+- **STATES:** one Figbot (hugin, sky) in each of working, idle, asks you, failed, paused and just finished, at 36, with a person square for comparison. Caption: "Colour says who. Expression says what it's doing."
 - **ROLES:** the six role tags.
 - **TOPBAR:** the bar on its own, with a caption.
 - **CONVERSATION:** each piece on its own, with a short caption:
@@ -274,7 +290,7 @@ forge  13:57
 
 - **Layout:** topbar / agents sidebar (hugin selected) / a content column 720 wide, like 05's.
 - **Header:**
-  - Face at 72, `hugin` in Plex Mono 22/28, `ASSISTANT`.
+  - Figbot at 72 in sky, `idle`, then `hugin` in Plex Mono 22/28, `ASSISTANT`.
   - "Idle · last active 09:15 · since 24 September".
   - Tertiary `CHAT C`, `PAUSE` and `DELETE`.
 - **Sections** (section labels like 05):
@@ -309,20 +325,20 @@ forge  13:57
 
   6 is selected and shows the filled check.
 - **NAME:** a dotted input, `pip`.
-- **FACE:** the eight patterns at 36, each in a dotted box; happy is selected with the filled check.
+- **COLOUR:** the eight colours as idle Figbots at 36, each in a dotted box with its name under it in Plex Mono 11 caps grey. Straw is selected with the filled check. Colours already taken by other agents are still offered, with the agent's name in grey: "hugin". Two agents can share a colour, but it isn't suggested.
 - **MODEL:** `OpenRouter ▾`, `haiku-5.5 ▾`. Hint: "A companion doesn't need a big model. About $0.02 a conversation."
 - **BRIEF,** filled in from the role and editable: "You're pip. You're curious and cheerful, and you like riddles, word games and odd facts. Keep replies short. When Mikkel seems busy, let him be."
 - **Primary:** `CREATE PIP ⌘↵`, with "Abilities, routines and a budget are in pip's profile." beside it.
 
 ### 13 Tracker under the topbar (1440 × 900)
 
-01 Inbox with the topbar (TRACKER current) and the slimmer sidebar. The nav, projects and agent squares stay as they are; the squares read "3 agents working, 2 idle".
+01 Inbox with the topbar (TRACKER current) and the slimmer sidebar. The nav and projects stay as they are. The agent squares become Figbots at 18: your own agents in their colours, outside agents in white, each with the expression for its state. They still read "3 agents working, 2 idle".
 
 - **Inbox list:**
   - `Inbox 3 open`
   - WAITING ON YOU:
-    - figbot FAILED (as in 01)
-    - claude-code REVIEW (as in 01)
+    - figbot FAILED (as in 01), its white Figbot `worried`
+    - claude-code REVIEW (as in 01), its white Figbot `curious`
     - forge ASKS · MUN-46 · "Telegram caps a message at 4,096 characters. New message or a file?"
   - LATELY, which replaces "To triage" (munin has no triage):
     - vera moved MUN-45 to Done · 13:56
@@ -334,7 +350,7 @@ forge  13:57
 
 - **Header,** like 06: "Agents" in Red Hat 17, then `4 waiting` in Plex Mono 11 grey, and the raven mark on the right.
 - **Rows:** the sidebar rows at phone size (face 18, name Red Hat 15, role tag, line 2 in Red Hat 14 grey, `ASKS` chips).
-- **Bottom bar,** like 06's, with the items Agents (the face glyph, current), Tracker (06's inbox glyph), New and Search. New is a new agent here and a new issue in Tracker.
+- **Bottom bar,** like 06's, with the items Agents (a white idle Figbot at 18, current), Tracker (06's inbox glyph), New and Search. New is a new agent here and a new issue in Tracker.
 
 ### 15 Phone · hugin (390 × 844)
 
@@ -349,10 +365,11 @@ forge  13:57
 1. **Check each artboard against the rules above:**
    - one primary;
    - dotted only on things you can act on;
-   - only the five colours;
+   - only the five greys, plus agent colours inside Figbots and nowhere else;
    - no rounded corners or bubbles;
    - keys on buttons;
-   - faces at whole-number scales.
+   - Figbots rendered from the model on the grids in Faces, at whole-number scales;
+   - each agent always in its colour from the cast, with the expression for its state.
 2. **Export each artboard into `design/`** like the existing ones: a 2× PNG, the JSX, and a standalone HTML.
    - Names: `08-agent-foundations`, `09-agents-hugin`, `10-agents-forge`, `11-agent-profile`, `12-new-agent`, `13-tracker-topbar`, `14-mobile-agents`, `15-mobile-conversation`.
    - Point logo images at `../brand/logo/treatments/`, as the existing exports do.
