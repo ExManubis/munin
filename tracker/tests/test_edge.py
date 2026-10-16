@@ -32,6 +32,19 @@ def test_people_in_munin_users_get_in_through_the_edge(edge):
     assert edge.get("/", headers=as_person("mikkel@example.com")).status_code == 200
 
 
+def test_the_square_shows_who_is_looking(edge, settings):
+    named = {**as_person("mikkel@example.com"), "Tailscale-User-Name": "=?utf-8?q?Mikkel_N=C3=B8rgaard?="}
+    you = edge.get("/api/me", headers=named)
+    assert you.json()["you"] == {"name": "Mikkel Nørgaard", "login": "mikkel@example.com"}
+    assert you.json()["name"] == settings.user, "comments still go out under MUNIN_USER"
+    nameless = edge.get("/api/me", headers=as_person("mikkel@example.com")).json()["you"]
+    assert nameless == {"name": "mikkel", "login": "mikkel@example.com"}
+    behind = replace(settings, public_url=PUBLIC, users=("mikkel@example.com",))
+    with TestClient(create_app(behind), base_url="http://127.0.0.1") as local:
+        said = local.get("/api/me", headers=as_person("mikkel@example.com"))
+        assert said.json()["you"] is None, "only Serve says who"
+
+
 def test_anyone_else_through_the_edge_is_turned_away(edge):
     stranger = edge.get("/api/projects", headers=as_person("someone@example.com"))
     assert stranger.status_code == 403

@@ -60,7 +60,7 @@ To back up, copy `/var/lib/munin` with the services stopped, or the two database
 
 ## Who gets in
 
-- **People:** `tailscale serve` removes any `Tailscale-User-Login` header the caller sent and sets it from who's actually calling, so the tracker and the runtime trust it on requests that came through it. Requests to munin's public name are let in only for the logins in `MUNIN_USERS`; everyone else gets a 403, and so do tagged devices, which carry no identity. Tailscale's ACLs decide who can reach the machine at all.
+- **People:** `tailscale serve` removes any `Tailscale-User-Login` header the caller sent and sets it from who's actually calling, so the tracker and the runtime trust it on requests that came through it. Requests to munin's public name are let in only for the logins in `MUNIN_USERS`; everyone else gets a 403, and so do tagged devices, which carry no identity. Tailscale's ACLs decide who can reach the machine at all. The square at the top right shows who's looking, by the name Tailscale has for them; comments still go out under `MUNIN_USER`.
 - **Agents:** `/mcp` takes an agent token instead, from wherever the agent runs. munin's own coders call it from the runtime, on this machine (`MUNIN_TRACKER_MCP`).
 - **Coders' containers** see their own folder and munin's clones, run as the `munin` user's id, and can't reach this machine's 127.0.0.1, so they can't reach munin's web API, its databases or its keys.
 - **This machine:** anything running on it outside the containers, as root or as `munin`, can still do anything munin can.

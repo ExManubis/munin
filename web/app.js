@@ -240,8 +240,20 @@ function renderAppbar(route, waiting) {
     waiting.length
       ? h('button', { type: 'button', class: 'chip waiting-chip', onclick: openWaiting, 'aria-haspopup': 'dialog' }, `${waiting.length} waiting on you`)
       : null,
-    h('a', { class: ['me-square', route.section === 'settings' && 'active'], href: '#/settings', title: `${store.me.name} · Settings`, 'aria-label': 'Settings' },
-      (store.me.name.trim()[0] || 'M').toUpperCase()));
+    meSquare(route));
+}
+
+// Your square: who's looking, when Tailscale says (behind the edge), or else the name your
+// comments get (MUNIN_USER).
+function meSquare(route) {
+  const { you } = store.me;
+  const name = (you?.name || store.me.name).trim();
+  return h('a', {
+    class: ['me-square', route.section === 'settings' && 'active'],
+    href: '#/settings',
+    title: `${you ? `${you.name} (${you.login})` : name} · Settings`,
+    'aria-label': 'Settings',
+  }, (name[0] || '?').toUpperCase());
 }
 
 function trackerSidebar(route, data) {
