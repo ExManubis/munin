@@ -21,6 +21,13 @@ dialog.addEventListener('close', () => !dialog.open && dialog.replaceChildren())
 dialog.addEventListener('mousedown', (e) => {
   if (e.target === dialog) dialog.close();
 });
+// One Esc closes it, wherever focus is: some browsers spend the first press on leaving a text
+// field. A picker inside that cancels on Esc stops it first; typing with an IME keeps it.
+dialog.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return;
+  e.preventDefault();
+  dialog.close();
+});
 
 export function openDialog(content, focus, kind = '') {
   if (dialog.open) dialog.close();
