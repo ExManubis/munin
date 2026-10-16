@@ -110,9 +110,10 @@ function sample(p, u, v) {
   if (hit !== null) return hit;
 
   const z = Math.sqrt(1 - d2);
-  const ndl = Math.max(0, x * LIGHT[0] + y * LIGHT[1] + z * LIGHT[2]);
+  // The light wraps round the side a little, so the shaded corner keeps its dots.
+  const ndl = Math.max(0, (x * LIGHT[0] + y * LIGHT[1] + z * LIGHT[2] + 0.5) / 1.5);
   const ndh = Math.max(0, x * HALF[0] + y * HALF[1] + z * HALF[2]);
-  const lum = 0.06 + 0.78 * ndl + 0.5 * ndh ** 40 + 0.12 * (1 - z) ** 3;
+  const lum = 0.18 + 0.66 * ndl + 0.5 * ndh ** 40 + 0.12 * (1 - z) ** 3;
   return Math.min(1, Math.max(Number.MIN_VALUE, p.exposure * lum));
 }
 
@@ -125,9 +126,11 @@ function dotRadius(lum) {
 
 // Drawing ---------------------------------------------------------------------------
 
-// Cells across: one per pixel up to 20 px; 36 px uses 24 (1.5 px a dot), 72 px uses 36.
+// Cells across: one per pixel up to 20 px; 36 px uses 24 (1.5 px a dot), 72 px uses 36, and a
+// big face (100 px and up) a finer 48.
 function gridFor(size) {
   if (size <= 20) return size;
+  if (size >= 100) return 48;
   return size <= 40 ? 24 : 36;
 }
 
@@ -180,7 +183,7 @@ export function figbot({ colour = 'white', state = 'idle', size = 18, label, see
   }
   canvas.getContext('2d').drawImage(drawn, 0, 0);
 
-  if (animate && !calm.matches && expression !== 'sleepy') {
+  if (animate && !calm.matches) {
     moving.add({ canvas, hex, expression, size, hash: hashOf(seed || `${hex}${expression}`) });
     if (!frame) frame = requestAnimationFrame(tick);
   }
@@ -217,6 +220,12 @@ function poseAt(entry, t) {
     const phase = (entry.hash % 628) / 100;
     p.gx = base.gx + 0.05 * Math.sin(t * 1.6 + phase);
     p.gy = base.gy + 0.015 * Math.sin(t * 0.9 + phase);
+  }
+  if (entry.expression === 'idle' || entry.expression === 'sleepy' || entry.expression === 'happy') {
+    // now and then it glances about, and comes back
+    const phase = (entry.hash % 628) / 100;
+    p.gx = base.gx + 0.035 * Math.sin(t * 0.55 + phase) ** 3;
+    p.gy = base.gy + 0.012 * Math.sin(t * 0.4 + phase);
   }
   return p;
 }

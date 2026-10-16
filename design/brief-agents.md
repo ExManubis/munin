@@ -108,6 +108,7 @@ White is the default for a new agent and can be kept like any other colour. Outs
 | 18 px | 18 cells, 1 px each | lists, rows, message rows |
 | 36 px | 24 cells, 1.5 px each | headers, the colour picker |
 | 72 px | 36 cells, 2 px each | profile |
+| 100 px and up | 48 cells | setup's portraits and its last screen |
 
 18 px is the smallest size and should read like the site's 16 px Figbot icon (`public/icons/figbot.svg`). If the eyes don't read at 18, note it under "Changed while designing" rather than redrawing them.
 
@@ -414,3 +415,9 @@ forge  13:57
 - **Settings sits behind the `M` square:** models and providers, outside agents (the old Agents & MCP page, with munin's own agents marked `OWN`), notifications, and a reset for the dummy's sample agents. The tracker sidebar's row of faces opens it.
 - **The `WAITING ON YOU` chip opens a list** of everything waiting, from conversations and the tracker inbox. A question about an issue is listed once. On the phone, the count in the Agents header opens the same list.
 
+
+## Changed while building setup
+
+- **Big faces (100 px and up) use a 48-dot grid,** finer than the profile's 36, for setup's portraits and its last screen (Mikkel, from the setup preview).
+- **The light wraps round the face a little,** so its shaded corner keeps small dots instead of going black (Mikkel: the shadow was too harsh).
+- **Idle, paused and happy faces glance about now and then,** and paused ones move too. Before, only working faces moved.

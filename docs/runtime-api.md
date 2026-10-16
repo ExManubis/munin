@@ -8,7 +8,8 @@ The runtime serves this under `/runtime/api`, behind the same edge as the tracke
 
 | Mock | HTTP | Does |
 |---|---|---|
-| `me()` | `GET /runtime/api/me` | The runtime's version, its providers, and where coders run (`sandbox`: `{kind: "docker", image}`, or `null` for this machine). The frontend shows the Agents tab only when this answers |
+| `me()` | `GET /runtime/api/me` | The runtime's version, its providers, where coders run (`sandbox`: `{kind: "docker", image}`, or `null` for this machine), what agents call you (`name`: from setup, or else `MUNIN_USER`), and where setup is (`setup`: `null` when it hasn't asked yet, `"started"`, or `"done"`; a runtime with agents and no answer counts as `"done"`). The frontend shows the Agents tab only when this answers, and setup until `setup` is `"done"` |
+| `updateMe(patch)` | `PATCH /runtime/api/me` | `{name}` (empty to go back to `MUNIN_USER`) and/or `{setup: "started" \| "done"}`. Returns `me()`. Agents' prompts use the name from their next turn |
 | `agents()` | `GET /runtime/api/agents` | Every agent, as a summary |
 | `agent(name)` | `GET /runtime/api/agents/{name}` | One agent in full |
 | `createAgent(fields)` | `POST /runtime/api/agents` | `{name, role, colour, provider, model, brief, tracker}` |
@@ -99,7 +100,10 @@ An **item** is one of:
 | `providers()` | `GET /runtime/api/providers` | `[{id, name, connected, detail, takesKey, key}]`. `takesKey` when a key can be pasted in Settings (OpenRouter); `key` says where the one in use came from, never the key itself: `{from: "settings", hint: "a1b2"}` (its last four characters), `{from: "environment"}`, or `null`. Ollama comes from `MUNIN_OLLAMA_URL` |
 | `setKey(provider, key)` | `PUT /runtime/api/providers/{id}/key` | `{key}`. Asks the provider whether it takes it (422 when it says no; kept when it can't be reached), keeps it in `keys.json` next to the runtime's database, and uses it from the next turn, in place of the environment's. Returns the provider |
 | `removeKey(provider)` | `DELETE /runtime/api/providers/{id}/key` | Back to the environment's key, or off. Returns the provider |
-| `models()` | `GET /runtime/api/models` | The models to pick from: `[{id, name, models: [{id, name, day}]}]`, `day` being a rough cost in dollars for a day of steady use |
+| `models()` | `GET /runtime/api/models` | The models to pick from: `[{id, name, models: [{id, name, maker, input, output, day, favourite}]}]`, with `input` and `output` in dollars per million tokens and `day` a rough cost for a day of steady use. OpenRouter's are your favourites, then any other an agent is on (`favourite: false`) |
+| `recommendedModels()` | `GET /runtime/api/models/recommended` | What setup recommends from OpenRouter, key or not: `{cheap: [model], frontier: [model]}` |
+| `searchModels(q)` | `GET /runtime/api/models/search?q=` | OpenRouter's models with every word of `q` in their id or name, from its whole catalog, leaving out batch-only ones: `{total, models}`, twenty at most |
+| `setFavourites(models)` | `PUT /runtime/api/favourites` | `{models: [id]}`: the OpenRouter models agents pick from, in your order (Claude Haiku 5.5 and Claude Opus 5.5 until you choose). A model OpenRouter doesn't have is a 422. Returns `models()` |
 | `repos()` | `GET /runtime/api/repos` | Where each project's code is: `[{project, source, base}]` |
 | `setRepo(key, fields)` | `PUT /runtime/api/repos/{KEY}` | `{source, base}`: a git URL or a folder with a repository, and the branch new branches start from (the repository's default when left out). Clones it the first time |
 | `removeRepo(key)` | `DELETE /runtime/api/repos/{KEY}` | Forgets it; the clone and agents' worktrees stay |

@@ -22,6 +22,7 @@ import { createScheduler, prepareRoutine, routineNote, RoutineError } from './ro
 import { createWorkspace, WorkspaceError } from './workspace.js';
 import { QUIET_GIT, createDockerSandbox, localShellEnv, passedThrough } from './sandbox.js';
 import { KeyError } from './keys.js';
+import { FAVOURITES } from './models.js';
 
 export class RuntimeError extends Error {
   constructor(status, message) {
@@ -34,9 +35,9 @@ const notFound = (name) => new RuntimeError(404, `There's no agent called ${name
 const invalid = (message) => new RuntimeError(422, message);
 const conflict = (message) => new RuntimeError(409, message);
 
-// Every agent's settings, and where each project's code is, in one session document next
-// to the conversations.
-const AgentsDoc = defineDoc({ kind: 'munin.agents', version: 1, scope: 'session', initial: () => ({ agents: {}, repos: {} }) });
+// Every agent's settings, where each project's code is, and what setup asked (your name, your
+// favourite models, whether it's done), in one session document next to the conversations.
+const AgentsDoc = defineDoc({ kind: 'munin.agents', version: 1, scope: 'session', initial: () => ({ agents: {}, repos: {}, prefs: {} }) });
 
 const NAME = /^[a-z][a-z0-9-]{1,23}$/;
 const COLOURS = ['white', 'ember', 'coral', 'rose', 'iris', 'sky', 'teal', 'moss', 'straw'];
@@ -82,6 +83,11 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   const agents = new Map(); // name → settings
   const listeners = new Set();
   let harness = null;
+  // From setup: what agents call you, your favourite OpenRouter models, and where setup is:
+  // 'started', 'done', or null when it hasn't asked.
+  const prefs = { name: null, favourites: null, setup: null };
+  const who = () => prefs.name || settings.user;
+  const favourites = () => prefs.favourites || FAVOURITES;
 
   const agentFor = (conversationId) => [...agents.values()].find((a) => a.conversationId === conversationId) || null;
   const conversationOf = async (agent) => harness.conversation(agent.conversationId, ctx);
@@ -91,7 +97,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   // things, and asking first before what its rules say.
   const askHuman = defineTool({
     name: 'ask_human',
-    description: `Ask ${settings.user} something you can't decide yourself. With a few clear answers, offer them as options. Their answer comes back as a message, so carry on with something else meanwhile.`,
+    description: `Ask the person you work for something you can't decide yourself. With a few clear answers, offer them as options. Their answer comes back as a message, so carry on with something else meanwhile.`,
     parameters: Type.Object({
       question: Type.String({ description: 'The question, in a sentence or two' }),
       options: Type.Optional(Type.Array(Type.Object({ label: Type.String(), detail: Type.Optional(Type.String()) }), { maxItems: 6 })),
@@ -100,12 +106,12 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       const agent = agentFor(api.conversationId);
       const options = (args.options || []).map((o) => ({ label: o.label, detail: o.detail || '' }));
       await write(agent, 'munin.question', { text: args.question, options });
-      return { output: [{ type: 'text', text: `Asked ${settings.user}. Their answer comes as a message.` }] };
+      return { output: [{ type: 'text', text: `Asked ${who()}. Their answer comes as a message.` }] };
     },
   });
   const remember = defineTool({
     name: 'remember',
-    description: `Remember something about ${settings.user} for every later conversation: a preference, a fact, a habit. One short sentence.`,
+    description: 'Remember something about the person you work for, for every later conversation: a preference, a fact, a habit. One short sentence.',
     parameters: Type.Object({ note: Type.String() }),
     execute: async (args, api) => {
       const agent = agentFor(api.conversationId);
@@ -122,9 +128,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       section('munin', (input) => {
         const agent = agentFor(input.conversationId);
         if (!agent) return undefined;
-        return `You are ${agent.name}, one of ${settings.user}'s agents in munin, an app where ${settings.user} works with agents. `
-          + `${settings.user} talks to you here, and may be away for hours. Keep replies short. When you need a decision, use ask_human; `
-          + `when you learn something about ${settings.user} worth keeping, use remember.`;
+        const user = who();
+        return `You are ${agent.name}, one of ${user}'s agents in munin, an app where ${user} works with agents. `
+          + `${user} talks to you here, and may be away for hours. Keep replies short. When you need a decision, use ask_human; `
+          + `when you learn something about ${user} worth keeping, use remember.`;
       }, { tag: false }),
       section('memory', (input) => {
         const notes = agentFor(input.conversationId)?.memory || [];
@@ -144,7 +151,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         }
         const target = call.name === 'bash' ? String(call.arguments.command || '').slice(0, 160) : String(call.arguments.path || call.name);
         await write(agent, 'munin.approval', { rule: rule.id, label: rule.label, what: rule.what, third: rule.third, target });
-        return { block: `${settings.user} hasn't allowed this yet (${rule.label.toLowerCase()}). They've been asked; their answer comes as a message. Don't try again before it does.` };
+        return { block: `${who()} hasn't allowed this yet (${rule.label.toLowerCase()}). They've been asked; their answer comes as a message. Don't try again before it does.` };
       },
     })],
   });
@@ -246,7 +253,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   registry.install(CodingTools);
   registry.install(Munin);
   registry.install(Workspace);
-  const tracker = createTracker({ registry, agents: () => agents.values(), agentFor, write, user: settings.user, onTake, mcpUrl: settings.trackerMcp || null });
+  const tracker = createTracker({ registry, agents: () => agents.values(), agentFor, write, user: who, onTake, mcpUrl: settings.trackerMcp || null });
   harness = await Harness.open(storage, {
     models: models.models,
     registry,
@@ -260,6 +267,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   const saved = await harness.snapshot(AgentsDoc, ctx);
   for (const agent of Object.values(saved?.agents || {})) agents.set(agent.name, structuredClone(agent));
   Object.assign(repos, structuredClone(saved?.repos || {}));
+  Object.assign(prefs, structuredClone(saved?.prefs || {}));
   workspace = createWorkspace({ dir: reposDir, repos });
   tracker.connect(); // in the background: until the tracker answers, agents are told it's away
 
@@ -269,6 +277,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       for (const name of Object.keys(doc.agents)) if (!agents.has(name)) delete doc.agents[name];
       for (const [name, agent] of agents) doc.agents[name] = structuredClone(agent);
       doc.repos = structuredClone(repos);
+      doc.prefs = structuredClone(prefs);
     }, ctx);
   }
 
@@ -378,8 +387,29 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   // The API --------------------------------------------------------------------------------
 
   const api = {
+    // `setup` is 'started' while you're in it and 'done' once it's over (or skipped). A runtime
+    // that has agents without setup having asked came before setup, so it counts as done.
     async me() {
-      return { kind: 'runtime', version: '0.1.0', providers: models.providers(), sandbox: sandbox ? { kind: sandbox.kind, image: sandbox.image } : null };
+      return {
+        kind: 'runtime', version: '0.1.0', providers: models.providers(), sandbox: sandbox ? { kind: sandbox.kind, image: sandbox.image } : null,
+        name: who(), setup: prefs.setup || (agents.size ? 'done' : null),
+      };
+    },
+
+    // What agents call you, and where setup is: { name, setup: 'started' | 'done' }.
+    async updateMe(patch = {}) {
+      if ('name' in patch) {
+        const name = String(patch.name ?? '').trim().replace(/\s+/g, ' ');
+        if (name.length > 60) throw invalid('That name is too long: 60 letters at most.');
+        prefs.name = name || null;
+      }
+      if ('setup' in patch) {
+        if (!['started', 'done'].includes(patch.setup)) throw invalid('Setup is "started" or "done".');
+        prefs.setup = patch.setup;
+      }
+      await saveAgents();
+      changed();
+      return api.me();
     },
 
     async agents() {
@@ -424,7 +454,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       if (question.status !== 'open') throw conflict('That question is already answered.');
       const answer = option || String(text || '').trim();
       if (!answer) throw invalid('Pick an option or write an answer.');
-      await input(agent, `${settings.user} answered your question "${question.text}": ${answer}`,
+      await input(agent, `${who()} answered your question "${question.text}": ${answer}`,
         { kind: 'munin.answer', data: { question: id, option: option || null, text: option ? null : answer, at: now() } });
     },
 
@@ -436,13 +466,13 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       await write(agent, 'munin.decision', { approval: id, decision });
       const rule = agent.askFirst.find((r) => r.id === approval.permission);
       if (decision === 'deny') {
-        await input(agent, `${settings.user} doesn't want you to ${approval.what} (${approval.target}). Don't; find another way or ask.`);
+        await input(agent, `${who()} doesn't want you to ${approval.what} (${approval.target}). Don't; find another way or ask.`);
         return;
       }
       if (decision === 'always' && rule) rule.on = false;
       else agent.allowances.push(approval.permission);
       await saveAgents();
-      await input(agent, `${settings.user} allowed you to ${approval.what} (${approval.target})${decision === 'always' ? ', from now on without asking' : ', this once'}. Go ahead.`);
+      await input(agent, `${who()} allowed you to ${approval.what} (${approval.target})${decision === 'always' ? ', from now on without asking' : ', this once'}. Go ahead.`);
     },
 
     async undo(name, id) {
@@ -621,7 +651,30 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     },
 
     async models() {
-      return models.catalog();
+      const inUse = [...agents.values()].filter((a) => a.provider === 'openrouter').map((a) => a.model);
+      return models.catalog({ favourites: favourites(), inUse });
+    },
+
+    // What setup recommends from OpenRouter, key or not: { cheap: [model], frontier: [model] }.
+    async recommendedModels() {
+      return models.recommended();
+    },
+
+    // OpenRouter's models matching `q`, from its whole catalog: { total, models }.
+    async searchModels(q) {
+      return models.search(q);
+    },
+
+    // The OpenRouter models agents pick from, in your order.
+    async setFavourites(ids) {
+      if (!Array.isArray(ids)) throw invalid('Favourites are a list of model ids.');
+      const clean = [...new Set(ids.map((id) => String(id).trim()))];
+      const unknown = clean.find((id) => !models.known(id));
+      if (unknown) throw invalid(`OpenRouter has no model called ${unknown}.`);
+      prefs.favourites = clean;
+      await saveAgents();
+      changed();
+      return api.models();
     },
 
     subscribe(fn) {

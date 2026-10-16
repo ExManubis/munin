@@ -39,6 +39,7 @@ export function connect(base) {
   return {
     kind: 'runtime',
     me: () => call('GET', '/me'),
+    updateMe: (patch) => call('PATCH', '/me', patch),
     agents: () => call('GET', '/agents'),
     agent: (name) => call('GET', agent(name)),
     conversation: (name) => call('GET', `${agent(name)}/conversation`),
@@ -62,6 +63,9 @@ export function connect(base) {
     setKey: (provider, key) => call('PUT', `/providers/${enc(provider)}/key`, { key }),
     removeKey: (provider) => call('DELETE', `/providers/${enc(provider)}/key`),
     models: () => call('GET', '/models'),
+    recommendedModels: () => call('GET', '/models/recommended'),
+    searchModels: (q) => call('GET', `/models/search?q=${enc(q)}`),
+    setFavourites: (models) => call('PUT', '/favourites', { models }),
     repos: () => call('GET', '/repos'),
     setRepo: (key, fields) => call('PUT', `/repos/${enc(key)}`, fields),
     removeRepo: (key) => call('DELETE', `/repos/${enc(key)}`),

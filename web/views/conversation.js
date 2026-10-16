@@ -124,7 +124,7 @@ function render(agent, item, prev, ctx) {
   return null;
 }
 
-const human = () => (store.me.name && store.me.name !== 'me' ? store.me.name : 'You');
+const human = () => store.human || (store.me.name && store.me.name !== 'me' ? store.me.name : 'You');
 
 function message(agent, item, prev) {
   const mine = item.from === 'human';

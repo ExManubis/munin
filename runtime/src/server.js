@@ -27,6 +27,7 @@ export function createRuntimeServer(runtime, settings) {
   const enc = (s) => decodeURIComponent(s);
 
   route('GET', '/me', () => runtime.me());
+  route('PATCH', '/me', (m, body) => runtime.updateMe(body));
   route('GET', '/agents', () => runtime.agents());
   route('POST', '/agents', (m, body) => runtime.createAgent(body));
   route('GET', '/agents/([^/]+)', (m) => runtime.agent(enc(m[1])));
@@ -50,6 +51,9 @@ export function createRuntimeServer(runtime, settings) {
   route('PUT', '/providers/([^/]+)/key', (m, body) => runtime.setKey(enc(m[1]), body.key));
   route('DELETE', '/providers/([^/]+)/key', (m) => runtime.removeKey(enc(m[1])));
   route('GET', '/models', () => runtime.models());
+  route('GET', '/models/recommended', () => runtime.recommendedModels());
+  route('GET', '/models/search', (m, body, url) => runtime.searchModels(url.searchParams.get('q') || ''));
+  route('PUT', '/favourites', (m, body) => runtime.setFavourites(body.models));
   route('GET', '/repos', () => runtime.repos());
   route('PUT', '/repos/([^/]+)', (m, body) => runtime.setRepo(enc(m[1]), body));
   route('DELETE', '/repos/([^/]+)', (m) => runtime.removeRepo(enc(m[1])));
@@ -120,7 +124,7 @@ export function createRuntimeServer(runtime, settings) {
           const raw = Buffer.concat(chunks).toString('utf8');
           body = raw ? JSON.parse(raw) : {};
         }
-        const result = await handler(m, body);
+        const result = await handler(m, body, url);
         return send(res, req.method === 'POST' && /\/(agents|routines)$/.test(url.pathname) ? 201 : 200, result ?? {}, cors);
       } catch (err) {
         if (err instanceof SyntaxError) return send(res, 400, { detail: 'That isn’t JSON.' }, cors);

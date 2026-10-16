@@ -8,9 +8,11 @@ import { store } from '../store.js';
 import { h, bindDraft, drafts, onModEnter, toast, toggle, topbar } from '../ui.js';
 import { openDialog, closeDialog } from '../dialogs.js';
 import { agentFace, roleTag, hhmm } from './agents.js';
+import { modelPicker, searchState } from '../model-picker.js';
 import { routineWhen } from './conversation.js';
 
 let allNotes = false;
+let search = searchState(); // the model picker's search of OpenRouter
 
 export const view = {
   title: (data) => `${data.agent.name} · profile`,
@@ -23,6 +25,7 @@ export const view = {
 
   leave() {
     allNotes = false;
+    search = searchState();
   },
 
   render({ agent, models }, ctx) {
@@ -35,7 +38,7 @@ export const view = {
       h('div', { class: 'profile' },
         header(agent, ctx),
         brief(agent, set),
-        model(agent, models, set),
+        model(agent, models, set, ctx),
         abilities(agent, set, ctx),
         askFirst(agent, set),
         routines(agent, ctx),
@@ -121,17 +124,20 @@ function select(options, value, label, onchange) {
       options.map(([v, text]) => h('option', { value: v, selected: v === value }, text))));
 }
 
-// The runtime's catalog, plus the agent's own provider and model when it isn't offered,
-// so the selects always show what the agent is set to.
-function model(agent, catalog, set) {
-  const providers = catalog.some((p) => p.id === agent.provider) ? catalog : [...catalog, { id: agent.provider, name: `${agent.provider}, not set up`, models: [] }];
-  const offered = providers.find((p) => p.id === agent.provider).models;
-  const models = offered.some((m) => m.id === agent.model) ? offered : [...offered, { id: agent.model, name: agent.model }];
-  return section('Model', null,
+// Your favourite models and the other providers', with the agent's own always among them,
+// and a search of all of OpenRouter's.
+function model(agent, catalog, set, ctx) {
+  return section('Model', 'Your favourites, and anything else on OpenRouter by searching. Prices are dollars per million tokens, in / out.',
+    modelPicker({
+      catalog,
+      provider: agent.provider,
+      model: agent.model,
+      state: search,
+      keep: `profile:${agent.name}:model`,
+      rerender: ctx.rerender,
+      onPick: (provider, model) => (provider !== agent.provider || model !== agent.model ? set({ provider, model }) : ctx.reload()),
+    }),
     h('div', { class: 'select-row' },
-      select(providers.map((p) => [p.id, p.name]), agent.provider, 'Provider',
-        (id) => set({ provider: id, model: catalog.find((p) => p.id === id)?.models[0]?.id ?? agent.model })),
-      select(models.map((m) => [m.id, m.name]), agent.model, 'Model', (id) => set({ model: id })),
       select(THINKING.map((t) => [t, `Thinking: ${t}`]), agent.thinking, 'Thinking', (t) => set({ thinking: t }))),
     h('p', { class: 'hint' }, costHint(catalog, agent.provider, agent.model)));
 }
