@@ -20,3 +20,5 @@ The logo images point at the brand kit in `../brand/logo/treatments/` instead of
 | 07 Type pairings | [png](07-type-pairings.png) · [jsx](07-type-pairings.jsx) · [html](07-type-pairings.html) |
 
 These are snapshots. Paper is the source of truth, so re-export after changing the designs there.
+
+`brief-agents.md` is the brief for the next page, "Agents v1": munin's own agents, the topbar, and the tracker under it.
