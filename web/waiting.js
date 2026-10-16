@@ -54,7 +54,7 @@ export function openWaiting() {
 }
 
 // A question about an issue that's gone from the tracker's inbox was answered there, so the
-// agent's conversation gets that answer too. The real runtime hears it through MCP instead.
+// agent's conversation gets that answer too: the option you picked, or what you wrote.
 const syncing = new Set();
 export async function syncTrackerAnswers() {
   const open = new Set(store.inbox.map((item) => item.question.id));
@@ -64,7 +64,8 @@ export async function syncTrackerAnswers() {
     try {
       const issue = await api.issue(item.issue.id);
       const reply = issue.comments.filter((c) => c.author_kind === 'human' && c.id > item.trackerQuestion).pop();
-      await runtime.answer(agent.name, item.id, { text: reply?.body || 'Answered in the tracker.' });
+      const option = item.options?.find((o) => o.label === reply?.body.trim());
+      await runtime.answer(agent.name, item.id, option ? { option: option.label } : { text: reply?.body || 'Answered in the tracker.' });
     } catch {
       // try again on the next refresh
     } finally {

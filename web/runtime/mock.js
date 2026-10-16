@@ -667,13 +667,14 @@ export const mock = {
   },
 
   // Change any of: role, colour, provider, model, thinking, brief, abilities, apps, budget,
-  // askFirst ({ id: on }).
+  // askFirst ({ id: on }), and tracker ({ projects }).
   async updateAgent(name, patch) {
     const agent = need(name);
     for (const key of ['role', 'colour', 'provider', 'model', 'thinking', 'brief', 'budget']) if (key in patch) agent[key] = patch[key];
     if (patch.abilities) Object.assign(agent.abilities, patch.abilities);
     if (patch.apps) agent.apps = [...patch.apps];
     if (patch.askFirst) for (const rule of agent.askFirst) if (rule.id in patch.askFirst) rule.on = patch.askFirst[rule.id];
+    if (patch.tracker?.projects && agent.tracker) agent.tracker.projects = [...patch.tracker.projects];
     changed();
     return full(agent);
   },

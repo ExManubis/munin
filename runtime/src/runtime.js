@@ -4,6 +4,7 @@
 // (docs/runtime-api.md).
 
 import { mkdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { BACKGROUND_CONTEXT as ctx } from '@earendil-works/chord/context';
 import { Type } from '@earendil-works/pi-ai';
@@ -15,6 +16,7 @@ import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { ROLES, roleName, askFirstFor, ruleMatches } from './roles.js';
 import { toItems, summarize } from './items.js';
+import { createTracker } from './tracker.js';
 
 export class RuntimeError extends Error {
   constructor(status, message) {
@@ -35,6 +37,38 @@ const COLOURS = ['white', 'ember', 'coral', 'rose', 'iris', 'sky', 'teal', 'moss
 const THINKING = ['off', 'low', 'medium', 'high'];
 const UNDO_MS = 8000;
 const DAY = 24 * 60 * 60 * 1000;
+const PROJECT = /^[A-Z][A-Z0-9]{0,9}$/;
+const HOME = homedir();
+const tilde = (path) => (path.startsWith(`${HOME}/`) ? `~${path.slice(HOME.length)}` : path);
+
+// Where an agent reaches the tracker, with the token the tracker gave it. The frontend gets
+// the token from the tracker and hands it over; the runtime never shows it again.
+function trackerLink(value, current) {
+  if (value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) throw invalid('The tracker link is {url, token, projects}.');
+  const link = { url: current?.url || null, token: current?.token || null, projects: current?.projects || [] };
+  if ('url' in value) {
+    let url;
+    try {
+      url = new URL(value.url);
+    } catch {
+      throw invalid("The tracker's address isn't a URL.");
+    }
+    if (!['http:', 'https:'].includes(url.protocol)) throw invalid("The tracker's address isn't an http one.");
+    link.url = url.href;
+  }
+  if ('token' in value) {
+    if (typeof value.token !== 'string' || !value.token.trim()) throw invalid('The tracker token is empty.');
+    link.token = value.token.trim();
+  }
+  if ('projects' in value) {
+    const keys = [...new Set((value.projects || []).map((k) => String(k).trim().toUpperCase()))];
+    if (keys.some((k) => !PROJECT.test(k))) throw invalid('Projects are keys like MUN.');
+    link.projects = keys;
+  }
+  if (link.token && !link.url) throw invalid('A tracker token needs the tracker’s address too.');
+  return link;
+}
 
 export async function openRuntime(settings, { models, storage } = {}) {
   storage ||= settings.db === ':memory:' ? new MemoryStorage() : await openNodeSqliteStorage(settings.db);
@@ -111,6 +145,7 @@ export async function openRuntime(settings, { models, storage } = {}) {
   const registry = createRegistry();
   registry.install(CodingTools);
   registry.install(Munin);
+  const tracker = createTracker({ registry, agents: () => agents.values(), agentFor, write, user: settings.user });
   harness = await Harness.open(storage, {
     models: models.models,
     registry,
@@ -119,6 +154,7 @@ export async function openRuntime(settings, { models, storage } = {}) {
 
   const saved = await harness.snapshot(AgentsDoc, ctx);
   for (const agent of Object.values(saved?.agents || {})) agents.set(agent.name, structuredClone(agent));
+  tracker.connect(); // in the background: until the tracker answers, agents are told it's away
 
   async function saveAgents() {
     await harness.commit(async (tx) => {
@@ -134,7 +170,7 @@ export async function openRuntime(settings, { models, storage } = {}) {
       model: { provider, modelId: model },
       thinkingLevel: agent.thinking,
       instructions: agent.brief,
-      extensions: agent.abilities.code ? [Munin, CodingTools] : [Munin],
+      extensions: [Munin, ...(agent.abilities.code ? [CodingTools] : []), ...(agent.abilities.tracker ? [tracker.extension()] : [])],
       cwd: agent.abilities.code ? agent.folder : null,
     };
   };
@@ -201,10 +237,13 @@ export async function openRuntime(settings, { models, storage } = {}) {
       routines: agent.routines.map((r) => ({ ...r })),
       memory: agent.memory.map((n) => ({ ...n })), memoryCount: agent.memory.length,
       usage: usageOf(entries), budget: agent.budget,
-      worksIn: agent.abilities.code ? { folder: agent.folder, branch: null } : null,
-      tracker: agent.abilities.tracker ? { projects: [], takes: agent.role === 'reviewer' ? 'reviews' : 'issues' } : null,
+      worksIn: agent.abilities.code ? { folder: tilde(agent.folder), branch: null } : null,
+      tracker: agent.abilities.tracker ? {
+        projects: [...(agent.tracker?.projects || [])], takes: agent.role === 'reviewer' ? 'reviews' : 'issues',
+        connected: Boolean(agent.tracker?.token), reachable: tracker.reachable(),
+      } : null,
       paused: agent.paused, createdAt: new Date(agent.createdAt).toISOString(),
-      run: s.run ? { id: s.run.id, issue: null, startedAt: s.run.startedAt, step: s.run.steps[s.run.steps.length - 1]?.text || null } : null,
+      run: s.run ? { id: s.run.id, issue: s.run.issue || null, startedAt: s.run.startedAt, step: s.run.steps[s.run.steps.length - 1]?.text || null } : null,
     };
   }
 
@@ -309,7 +348,7 @@ export async function openRuntime(settings, { models, storage } = {}) {
       await write(agent, 'munin.action', { verb: 'stopped', object: 'by you' });
     },
 
-    async createAgent({ name, role, colour = 'white', provider, model, brief } = {}) {
+    async createAgent({ name, role, colour = 'white', provider, model, brief, tracker: link } = {}) {
       const clean = String(name || '').trim().toLowerCase();
       if (!NAME.test(clean)) throw invalid('A name is 2 to 24 letters, digits or dashes, starting with a letter.');
       if (agents.has(clean)) throw conflict(`There's already an agent called ${clean}.`);
@@ -320,12 +359,14 @@ export async function openRuntime(settings, { models, storage } = {}) {
         name: clean, role, colour, provider: provider || 'standin', model: model || 'stand-in', thinking: 'low',
         brief: String(brief || '').trim() || `You're ${clean}.`, abilities, apps: [], askFirst: askFirstFor(abilities), allowances: [],
         routines: [], memory: [], budget: null, paused: false, createdAt: Date.now(), folder: join(settings.agentsDir, clean), conversationId: null,
+        tracker: link ? trackerLink(link, null) : null,
       };
       if (abilities.code) await mkdir(agent.folder, { recursive: true });
       const conversation = await harness.createConversation({ ownership: { kind: 'ownerless' }, agent: change(agent) }, ctx);
       agent.conversationId = conversation.id;
       agents.set(clean, agent);
       await saveAgents();
+      if (agent.tracker?.token) await tracker.connect();
       return fullOf(agent);
     },
 
@@ -343,8 +384,10 @@ export async function openRuntime(settings, { models, storage } = {}) {
       }
       if (patch.apps) agent.apps = [...patch.apps];
       if (patch.askFirst) for (const rule of agent.askFirst) if (rule.id in patch.askFirst) rule.on = Boolean(patch.askFirst[rule.id]);
+      if ('tracker' in patch) agent.tracker = trackerLink(patch.tracker, agent.tracker);
       await (await conversationOf(agent)).configure(change(agent), ctx);
       await saveAgents();
+      if (agent.abilities.tracker && agent.tracker?.token) await tracker.connect();
       return fullOf(agent);
     },
 
@@ -415,6 +458,7 @@ export async function openRuntime(settings, { models, storage } = {}) {
 
     async close() {
       listeners.clear();
+      tracker.close();
       await harness.close(ctx);
     },
   };

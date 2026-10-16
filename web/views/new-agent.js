@@ -1,8 +1,10 @@
-// A new agent: a role to start from, a name, a colour for its Figbot, a model and a brief.
-// The brief fills in from the role until you change it.
+// A new agent: a role to start from, a name, a colour for its Figbot, a model, the projects it
+// works on when it uses the tracker, and a brief. The brief fills in from the role until you
+// change it.
 
 import { runtime } from '../runtime/index.js';
 import { ROLES, roleOf, costHint, modelIn } from '../runtime/roles.js';
+import { connectToTracker, linkable } from '../runtime/tracker-link.js';
 import { store } from '../store.js';
 import { h, MOD, onModEnter, toast, topbar } from '../ui.js';
 import { check } from '../cards.js';
@@ -12,7 +14,7 @@ let form = blank();
 let catalog = []; // runtime.models(), loaded with the screen
 
 function blank() {
-  return { role: null, name: '', colour: 'white', provider: 'openrouter', model: null, brief: '', briefEdited: false };
+  return { role: null, name: '', colour: 'white', provider: 'openrouter', model: null, projects: null, brief: '', briefEdited: false };
 }
 
 export const view = {
@@ -61,6 +63,7 @@ export const view = {
           h('h2', { class: 'section-title' }, 'Colour'),
           h('p', { class: 'hint section-lead-hint' }, `How you'll tell ${name} apart. Names under a colour are agents already using it.`),
           h('div', { class: 'colour-grid' }, Object.keys(COLOURS).map((c) => colourCard(c, ctx)))),
+        role?.abilities.tracker && store.projects.length ? projectPicker(name, ctx) : null,
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Model'),
           modelPicker(ctx),
@@ -139,6 +142,29 @@ function colourCard(colour, ctx) {
   h('span', { class: 'colour-users' }, colour === 'white' && !users.length ? 'default' : users.join(', ')));
 }
 
+// The tracker's projects; with just one, it's picked already.
+const chosenProjects = () => form.projects || (store.projects.length === 1 ? [store.projects[0].key] : []);
+
+function projectPicker(name, ctx) {
+  const chosen = chosenProjects();
+  return h('section', { class: 'profile-section' },
+    h('h2', { class: 'section-title' }, 'Projects'),
+    h('p', { class: 'hint section-lead-hint' }, `Where ${name} takes ${form.role === 'reviewer' ? 'work to review' : 'issues'} in the tracker.${linkable() ? ' It gets a token of its own there.' : ''}`),
+    h('div', { class: 'project-picks' }, store.projects.map((project) => {
+      const on = chosen.includes(project.key);
+      return h('button', {
+        type: 'button',
+        class: ['chip', on ? 'on' : 'quiet'],
+        'aria-pressed': String(on),
+        title: project.name,
+        onclick: () => {
+          form.projects = on ? chosen.filter((k) => k !== project.key) : [...chosen, project.key];
+          ctx.rerender();
+        },
+      }, project.key);
+    })));
+}
+
 function modelPicker(ctx) {
   const { provider, model } = chosen();
   const models = catalog.find((p) => p.id === provider)?.models || [];
@@ -166,10 +192,21 @@ async function create(ctx) {
       ...chosen(),
       brief: form.brief.trim() || roleOf(form.role).brief(form.name.trim()),
     });
+    if (agent.tracker) await joinTracker(agent.name, chosenProjects());
     form = blank();
     location.hash = `#/agents/${encodeURIComponent(agent.name)}`;
   } catch (err) {
     toast(err.message, { error: true });
     ctx.rerender();
+  }
+}
+
+// The agent exists either way; if the tracker part fails, its profile can try again.
+async function joinTracker(name, projects) {
+  try {
+    if (!linkable()) await runtime.updateAgent(name, { tracker: { projects } });
+    else if (!await connectToTracker(name, projects)) toast(`${name} isn't in the tracker yet. Connect it from its profile.`);
+  } catch (err) {
+    toast(`${name} isn't in the tracker yet: ${err.message}`, { error: true });
   }
 }

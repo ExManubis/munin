@@ -13,6 +13,8 @@ const first = (text, n = 80) => {
   return line.length > n ? `${line.slice(0, n - 1)}…` : line;
 };
 
+const STATUS = { todo: 'Todo', in_progress: 'In progress', in_review: 'In review', done: 'Done', cancelled: 'Cancelled', all: 'all' };
+
 // One line for a tool call, like the steps of a run on the issue page.
 export function describeCall(name, args = {}) {
   switch (name) {
@@ -20,20 +22,29 @@ export function describeCall(name, args = {}) {
     case 'write': return `Wrote ${args.path}`;
     case 'edit': return `Edited ${args.path}`;
     case 'bash': return `Ran ${first(args.command, 100)}`;
+    // The tracker's tools
+    case 'list_projects': return 'Read the projects';
+    case 'list_issues': return `Listed ${args.project || 'all'} issues${args.status ? `, ${STATUS[args.status] || args.status}` : ''}${args.query ? ` matching "${first(args.query, 30)}"` : ''}`;
+    case 'get_issue': return `Read ${args.issue}`;
+    case 'create_issue': return `Filed ${first(args.title, 60)}`;
+    case 'update_issue': return args.status ? `Moved ${args.issue} to ${STATUS[args.status] || args.status}` : `Edited ${args.issue}`;
+    case 'add_comment': return `Commented on ${args.issue}`;
+    case 'events': return 'Read what changed in the tracker';
+    case 'wait_for_work': return `Waited for work in ${args.project}`;
     default: return `${name.replace(/_/g, ' ')}${Object.keys(args).length ? ` ${first(JSON.stringify(args), 80)}` : ''}`;
   }
 }
 
 // Tool calls that show as something else (a question card, an action line) aren't run steps.
-const QUIET_TOOLS = new Set(['ask_human', 'remember']);
+const quiet = (call) => call.name === 'ask_human' || call.name === 'remember' || (call.name === 'add_comment' && call.arguments?.ask_human);
 
 function resultDetail(message) {
   if (message.isError) return 'failed';
   const text = textOf(message.content);
-  if (message.toolName === 'bash') {
-    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-    return lines.length ? first(lines[lines.length - 1], 48) : null;
-  }
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (message.toolName === 'bash') return lines.length ? first(lines[lines.length - 1], 48) : null;
+  if (message.toolName === 'wait_for_work') return lines.length ? first(lines[0].split(/(?<=\.) |:$/)[0].replace(/\.$/, ''), 48) : null;
+  if (message.toolName === 'list_issues') return text.startsWith('No issues') ? 'none' : `${lines.length} ${lines.length === 1 ? 'issue' : 'issues'}`;
   return null;
 }
 
@@ -44,6 +55,7 @@ export function toItems(entries, { busy = false } = {}) {
   const byApproval = new Map();
   let run = null;
   let runs = 0;
+  let working = null; // the issue the agent took and hasn't let go of yet
   const closeRun = (at) => {
     if (run) run.endedAt = iso(at);
     run = null;
@@ -69,10 +81,10 @@ export function toItems(entries, { busy = false } = {}) {
           break;
         }
         if (text) items.push({ id, kind: 'message', from: 'agent', at: iso(at), text });
-        const calls = (message.content || []).filter((c) => c.type === 'toolCall' && !QUIET_TOOLS.has(c.name));
+        const calls = (message.content || []).filter((c) => c.type === 'toolCall' && !quiet(c));
         if (calls.length) {
           if (!run) {
-            run = { id: `${id}-run`, kind: 'run', number: ++runs, issue: null, at: iso(at), startedAt: iso(at), endedAt: null, status: 'running', steps: [] };
+            run = { id: `${id}-run`, kind: 'run', number: ++runs, issue: working, at: iso(at), startedAt: iso(at), endedAt: null, status: 'running', steps: [] };
             items.push(run);
           }
           for (const call of calls) run.steps.push({ id: call.id, at: iso(at), text: describeCall(call.name, call.arguments), detail: null });
@@ -121,7 +133,14 @@ export function toItems(entries, { busy = false } = {}) {
         break;
       }
       case 'munin.action': {
-        items.push({ id, kind: 'action', at: iso(entry.data.at), verb: entry.data.verb, object: entry.data.object || null, issue: entry.data.issue || null });
+        const { issue, status } = entry.data;
+        items.push({ id, kind: 'action', at: iso(entry.data.at), verb: entry.data.verb, object: entry.data.object || null, issue: issue || null });
+        if (status === 'in_progress') {
+          working = issue;
+          if (run && !run.issue) run.issue = issue;
+        } else if (status && working?.id === issue?.id) {
+          working = null;
+        }
         break;
       }
       default:

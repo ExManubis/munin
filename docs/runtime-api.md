@@ -11,8 +11,8 @@ The runtime serves this under `/runtime/api`, behind the same edge as the tracke
 | `me()` | `GET /runtime/api/me` | The runtime's version and its providers. The frontend shows the Agents tab only when this answers |
 | `agents()` | `GET /runtime/api/agents` | Every agent, as a summary |
 | `agent(name)` | `GET /runtime/api/agents/{name}` | One agent in full |
-| `createAgent(fields)` | `POST /runtime/api/agents` | `{name, role, colour, provider, model, brief}` |
-| `updateAgent(name, patch)` | `PATCH /runtime/api/agents/{name}` | Any of `role, colour, provider, model, thinking, brief, abilities, apps, budget`, and `askFirst` as `{rule: on}` |
+| `createAgent(fields)` | `POST /runtime/api/agents` | `{name, role, colour, provider, model, brief, tracker}` |
+| `updateAgent(name, patch)` | `PATCH /runtime/api/agents/{name}` | Any of `role, colour, provider, model, thinking, brief, abilities, apps, budget`, `askFirst` as `{rule: on}`, and `tracker` (below) |
 | `deleteAgent(name)` | `DELETE /runtime/api/agents/{name}` | With its conversation, routines and memory |
 | `pause(name)`, `resume(name)` | `POST /runtime/api/agents/{name}/pause`, `/resume` | A paused agent reads and does nothing |
 
@@ -43,13 +43,16 @@ A **summary**, for the sidebar and lists:
   "usage": { "today": 1.92, "week": 9.4, "month": 31.2, "tokens": 640000 },  // dollars; tokens today
   "budget": 60,                                                   // pauses at this much a month, or null
   "worksIn": { "folder": "~/agents/forge/munin", "branch": "mun-46-stream" },  // when it can code
-  "tracker": { "projects": ["MUN", "WEB"], "takes": "issues" },              // when it uses the tracker
+  "tracker": { "projects": ["MUN", "WEB"], "takes": "issues",                // when it uses the tracker
+               "connected": true, "reachable": true },                     // has a token; the tracker answers
   "createdAt": "…",
   "run": { "id": "i42", "issue": Issue, "startedAt": "…", "step": "Editing gateway/telegram.py" }  // or null
 }
 ```
 
 An agent's name is also its name in the tracker. That's how the frontend joins the two.
+
+**In the tracker.** An agent with the Tracker ability works there like any MCP client, with a token of its own. The frontend gets the token from the tracker (`POST /api/agents`) and hands it over as `tracker: {url, token, projects}`, with `url` the tracker's MCP address from its `/api/me`. A patch merges, so `{tracker: {projects: ["MUN"]}}` changes only the projects; `tracker: null` forgets the token, and the frontend revokes it in the tracker. The runtime never shows the token again. When you delete an agent, or turn its Tracker ability off, the frontend revokes its token.
 
 ## Conversations
 
@@ -112,7 +115,7 @@ The runtime serves the models, so a new provider's show up without a frontend ch
 The screens needed three things from the tracker. Every agent can use them, so it stays agent-agnostic:
 
 1. **Questions with options.** `add_comment(…, ask_human=true, options=[{label, detail}])` offers 2 to 6 answers, and the tracker's inbox shows them as option cards, like the conversation does. Picking one answers with its label; you can still write your own.
-2. **The question's id back.** `add_comment` returns the comment's id, so the runtime ties its agent's question to the tracker's copy. That's `trackerQuestion` above; the mock still finds it by agent and issue.
+2. **The question's id back.** `add_comment` returns the comment's id, so the runtime ties its agent's question to the tracker's copy. That's `trackerQuestion` above; the mock finds it by agent and issue instead.
 3. **An event feed over MCP.** The `events` tool lists what happened after an event id, comments included. Routines that start "when an issue moves" read it, and so can an agent that wants your answer without `wait_for_work`.
 
 ## How the runtime does it
@@ -131,19 +134,24 @@ The runtime (`runtime/src/`) is a thin layer over pi-durable:
 - **Steering:** `send` while a run is going is `submit({ whenBusy: "steer" })`.
 - **Brief, model and abilities** are the conversation's agent settings: instructions, model and extensions. Coders get pi-durable's coding tools (read, write, edit, bash) in their own folder.
 - **Memory** is a `remember` tool. Notes go into the agent's system prompt.
+- **The tracker** (`tracker.js`) is an extension of the tracker's own MCP tools. The runtime lists them once, with any connected agent's token, and installs them; until the tracker answers, the extension is empty and agents are told it's away, and the runtime asks again every half minute. Each call goes out with the calling agent's token, so the tracker sees the agent by its name. The tracker's instructions and the agent's projects go into its system prompt. A few calls also land in the conversation:
+  - `add_comment(…, ask_human=true)` becomes a question card with `trackerQuestion` set, so the frontend lists it once and an answer in either place answers both;
+  - `update_issue` to a new status becomes an action line (took, sent to review, moved to Done, sent back, put back, cancelled), and a run started while the agent has an issue in progress belongs to that issue;
+  - `create_issue` becomes "filed".
 - **Usage** adds up the cost and tokens on each reply.
 - **Models:** OpenRouter with `OPENROUTER_API_KEY`, an Ollama server with `MUNIN_OLLAMA_URL`, and always the stand-in, which answers without a model. An agent on a model the runtime can't reach runs on the stand-in until it can.
 
 ## What this version does
 
-Real: agents and their settings, conversations with runs, questions with options, ask-first approvals with undo, coding tools in a folder, memory, pause and resume, usage, models, the live stream, and everything surviving a restart.
+Real: agents and their settings, conversations with runs, questions with options, ask-first approvals with undo, coding tools in a folder, the tracker for coders and reviewers, memory, pause and resume, usage, models, the live stream, and everything surviving a restart.
+
+An agent in the tracker starts work when you tell it to, from its projects in the ABOUT panel or in your own words; it keeps going until `wait_for_work` says there's nothing left.
 
 Stored but not acted on yet, next roughly in this order:
 
-1. **The tracker for coders and reviewers.** The runtime gets each agent a token and gives it the tracker's MCP tools; `trackerQuestion` ties its questions to the tracker's. Until then the ABOUT panel's "Tracker" line is only a setting.
-2. **Routines** run on their schedule, or when the tracker's `events` feed says something happened.
-3. **A branch per issue**, as a git worktree in the agent's folder (`worksIn.branch` is `null` until then).
-4. **Apps and the web** as tools, through MCP servers, with ask-first rules for apps like "send mail".
-5. **A budget that pauses** the agent at its limit.
-6. **Faster reads.** Each read goes through an agent's whole conversation; it should keep items and page them.
-7. **Numbered events** on the stream, and replay on reconnect.
+1. **Routines** run on their schedule, or when the tracker's `events` feed says something happened, so agents start work by themselves.
+2. **A branch per issue**, as a git worktree in the agent's folder (`worksIn.branch` is `null` until then).
+3. **Apps and the web** as tools, through MCP servers, with ask-first rules for apps like "send mail".
+4. **A budget that pauses** the agent at its limit.
+5. **Faster reads.** Each read goes through an agent's whole conversation; it should keep items and page them.
+6. **Numbered events** on the stream, and replay on reconnect.

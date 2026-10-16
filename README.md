@@ -86,7 +86,9 @@ Reload munin and the Agents tab uses it instead of the mock: the frontend looks 
 
 Without a provider, agents run on a stand-in that answers without a model, so you can try everything but the thinking. Give the runtime `OPENROUTER_API_KEY` in its environment for OpenRouter's models, or `MUNIN_OLLAMA_URL` (like `http://127.0.0.1:11434`) for an Ollama server's, then pick a model on the agent's profile.
 
-Coders get a folder of their own under `~/.munin/agents/<name>`, with a shell and file tools. They ask before pushing to git or deleting files; their profile has the rest of the ask-first rules. Agents and their conversations live in `~/.munin/runtime.sqlite` and survive a restart.
+Coders get a folder of their own under `~/.munin/agents/<name>`, with a shell and file tools. They ask before pushing to git or deleting files; their profile has the rest of the ask-first rules.
+
+Coders and reviewers also work in the tracker, as any MCP client does: munin gets each one a token of its own when you make it, and you pick its projects. Start one with "Work on it" next to a project in its conversation, or just tell it what to do. Its questions about an issue show in the conversation and in the tracker's inbox, and answering in either place answers both. Agents and their conversations live in `~/.munin/runtime.sqlite` and survive a restart.
 
 Settings come from environment variables: `MUNIN_RUNTIME_DB`, `MUNIN_RUNTIME_HOST`, `MUNIN_RUNTIME_PORT`, `MUNIN_AGENTS_DIR`, `MUNIN_OLLAMA_URL` and `MUNIN_USER` (your name, as agents call you). Like the tracker, it has no login: it listens on 127.0.0.1 and only lets in pages from this machine.
 

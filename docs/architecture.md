@@ -47,7 +47,7 @@ agent runtime ──MCP──▶ tracker ◀──MCP── Claude Code, Codex, 
 - **The topbar's parts are the services.** AGENTS is the runtime's part and TRACKER the tracker's; each part has its own sidebar. Settings, behind your square, holds both services' settings.
 - **An agent's name links the two.** An agent in the runtime is the agent of the same name in the tracker. Its face is drawn in its colour everywhere, the tracker's screens included.
 - **A question about an issue lives in the tracker.** The runtime ties its agent's question to the tracker's copy (`trackerQuestion`), so the question shows in both the conversation and the tracker inbox, and answering it in either answers both. The waiting count lists it once.
-- **Adding an agent:** the frontend creates the agent in the tracker and gets its token, then creates it in the runtime with that token. The tracker only ever hears from the runtime's agents over MCP. (Not yet: today the runtime's agents don't use the tracker.)
+- **Adding an agent:** the frontend creates the agent in the runtime, then, for one with the Tracker ability, gets it a token from the tracker and hands that to the runtime. The tracker only ever hears from the runtime's agents over MCP, each with its own token. Deleting the agent, or turning the ability off, revokes the token.
 - **Finding services:** each service answers on a known path: `/api/me` for the tracker, and `/runtime/api/me` for the runtime. The frontend looks for the runtime at its own address (behind the edge) and on port 7779 of the same host (on a laptop, where the runtime lets in pages from 127.0.0.1). When it doesn't answer, the Agents part runs on the mock for now; later it hides, and munin is the tracker plus outside agents.
 - **Live updates:** each service has its own event stream, and the frontend listens to every one that's present.
 
@@ -105,7 +105,8 @@ pi-durable is experimental, and its API changes between releases. Pin exact vers
 4. **Build the agent runtime** against the API the dummy frontend settled (`runtime-api.md`). Started:
    - the tracker's three additions for it are done: questions with options, a question's id back from `add_comment`, and an event feed over MCP;
    - the runtime's first version runs agents on pi-durable with OpenRouter, Ollama or a stand-in model, with questions, ask-first approvals, coding tools and memory, and the frontend uses it when it's running;
-   - next: the tracker for coders, routines that run, apps and the web as tools, and a budget that pauses.
+   - coders and reviewers work in the tracker over MCP with their own tokens, and their questions about issues show in both places;
+   - next: routines that run, a branch per issue, apps and the web as tools, and a budget that pauses.
 5. **Then:** live agent output, cost per issue, approvals, push notifications, and maybe the Claudewitz iPhone app as a client.
 
 ## Open questions

@@ -520,6 +520,8 @@ a.toast:hover { border-color: var(--muted); color: var(--text); }
 
 .chip.quiet { border-color: var(--muted); color: var(--muted); }
 .chip.quiet:hover { color: var(--text); border-color: var(--text); }
+.chip.on { border-style: solid; border-color: var(--text); }
+.project-picks { display: flex; flex-wrap: wrap; gap: 6px; }
 .quiet-hint { flex-shrink: 0; font: 11px/16px var(--mono); color: var(--muted); white-space: nowrap; }
 
 /* "Put an agent on it" */
@@ -799,6 +801,9 @@ button.option-card:hover { border-color: var(--text); }
 .stack { display: flex; flex-direction: column; min-width: 0; }
 .stack .mono { overflow: hidden; text-overflow: ellipsis; }
 .about-section { display: flex; flex-direction: column; gap: 12px; }
+.tracker-row { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.tracker-row .grow { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.setting .project-picks { margin-top: 8px; }
 .routine-mini { display: flex; flex-direction: column; gap: 2px; color: var(--text); }
 .app-row { display: flex; align-items: center; gap: 10px; color: var(--text); }
 .about-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }

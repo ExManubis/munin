@@ -10,6 +10,7 @@ import { h, kbd, MOD, statusIcon, svg, avatar, bindDraft, drafts, onModEnter, to
 import { markdown } from '../markdown.js';
 import { optionRow } from '../cards.js';
 import { agentFace, roleTag, hhmm } from './agents.js';
+import { workMessage } from '../runtime/tracker-link.js';
 
 const picks = new Map(); // question id → the option picked, before sending
 const runs = new Map(); // run id → 'open', 'closed' or 'all'
@@ -381,8 +382,8 @@ function about(agent, ctx) {
         prop('Role', agent.roleName),
         prop('Model', h('span', { class: 'mono' }, model)),
         prop('Today', `$${agent.usage.today.toFixed(2)} · ${tokens(agent.usage.tokens)} tokens`),
-        agent.worksIn ? prop('Works in', h('span', { class: 'stack' }, h('span', { class: 'mono' }, agent.worksIn.folder), agent.worksIn.branch ? h('span', { class: 'mono muted' }, `branch ${agent.worksIn.branch}`) : null)) : null,
-        agent.tracker ? prop('Tracker', `${agent.tracker.projects.join(', ') || 'No projects yet'} · takes ${agent.tracker.takes}`) : null),
+        agent.worksIn ? prop('Works in', h('span', { class: 'stack' }, h('span', { class: 'mono' }, agent.worksIn.folder), agent.worksIn.branch ? h('span', { class: 'mono muted' }, `branch ${agent.worksIn.branch}`) : null)) : null),
+      agent.tracker ? trackerSection(agent, ctx) : null,
       agent.routines.length ? h('div', { class: 'about-section' },
         h('div', { class: 'label' }, 'Routines'),
         agent.routines.map((r) => h('div', { class: 'routine-mini' },
@@ -397,6 +398,32 @@ function about(agent, ctx) {
         agent.paused
           ? h('button', { type: 'button', class: 'link', onclick: () => resume(agent, ctx) }, 'Resume')
           : h('button', { type: 'button', class: 'link', onclick: () => pause(agent, ctx) }, 'Pause'))));
+}
+
+// The projects an agent works on in the tracker, each with a way to start it there.
+function trackerSection(agent, ctx) {
+  const { projects, connected, reachable } = agent.tracker;
+  let status = null;
+  if (connected === false) status = ['Not connected to the tracker yet. ', h('a', { class: 'link', href: `#/agents/${encodeURIComponent(agent.name)}/profile` }, 'Connect')];
+  else if (reachable === false) status = "Can't reach the tracker right now. The runtime tries again every half minute.";
+  else if (!projects.length) status = ['No projects yet. ', h('a', { class: 'link', href: `#/agents/${encodeURIComponent(agent.name)}/profile` }, 'Pick some')];
+  const free = !agent.paused && !agent.run && !agent.typing && connected !== false;
+  return h('div', { class: 'about-section' },
+    h('div', { class: 'label' }, agent.tracker.takes === 'reviews' ? 'Reviews in' : 'Works on'),
+    projects.map((key) => h('div', { class: 'tracker-row' },
+      h('a', { class: 'mono issue-link', href: `#/projects/${encodeURIComponent(key)}` }, key),
+      h('span', { class: 'muted grow' }, store.projects.find((p) => p.key === key)?.name || ''),
+      free ? h('button', { type: 'button', class: 'link', onclick: () => startOn(agent, key, ctx) }, agent.role === 'reviewer' ? 'Review' : 'Work on it') : null)),
+    status ? h('p', { class: 'hint' }, status) : null);
+}
+
+async function startOn(agent, key, ctx) {
+  try {
+    await runtime.send(agent.name, workMessage(agent, key));
+  } catch (err) {
+    toast(err.message, { error: true });
+  }
+  ctx.reload();
 }
 
 export function tokens(n) {
