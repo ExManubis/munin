@@ -88,7 +88,9 @@ fi
 if [ "$(setting MUNIN_AGENT_SANDBOX)" = docker ]; then
   IMAGE=$(setting MUNIN_AGENT_IMAGE)
   say "The coders' image, ${IMAGE:=buildpack-deps:bookworm-scm}"
-  docker pull --quiet "$IMAGE" > /dev/null
+  # Up to date if Docker Hub lets us; the copy already here does otherwise (it rate-limits pulls).
+  docker pull --quiet "$IMAGE" > /dev/null 2>&1 || docker image inspect "$IMAGE" > /dev/null 2>&1 \
+    || fail "couldn't pull $IMAGE. Try: docker pull $IMAGE"
 fi
 
 say "Services"

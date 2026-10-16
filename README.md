@@ -109,7 +109,7 @@ sudo git clone <munin's repository> /opt/munin
 sudo /opt/munin/deploy/install.sh
 ```
 
-munin is then at `https://<machine>.<tailnet>.ts.net` for you and nobody else, with the tracker and the runtime as systemd services behind `tailscale serve`, and each coder in a container of its own. `docs/server.md` has the details: what it needs, what goes where, who gets in, and how to update.
+munin is then at `https://<machine>.<tailnet>.ts.net` for you and nobody else, with the tracker and the runtime as systemd services behind `tailscale serve`, and each coder in a container of its own. On a Mac that stays on, `deploy/install-mac.sh` does the same with launchd, as you. `docs/server.md` has the details: what it needs, what goes where, who gets in, and how to update.
 
 ## Layout
 
@@ -118,7 +118,8 @@ brand/        logo, the Munin Block font and the scripts that draw them
   final/      the asset pack to use: SVG, PNG, favicons, app icons, social cards
   logo/       earlier explorations and treatments
   tools/      generators that render everything from the master bitmaps
-deploy/       putting munin on a server: install.sh, the systemd units, the settings
+deploy/       putting munin on a server: install.sh with the systemd units, install-mac.sh
+              with the launchd agents (mac/), and the settings
 design/       each screen from Paper as PNG, JSX and HTML
 docs/         how munin fits together (architecture.md), what the tracker does (tracker.md),
               the runtime's API (runtime-api.md) and munin on a server (server.md)

@@ -1,0 +1,8 @@
+#!/bin/sh
+# munin's command line on this Mac: the tracker's `munin`, with munin's settings, as in
+# `munin status` or `munin project add MUN munin`. Installed as ~/.munin/bin/munin by
+# deploy/install-mac.sh.
+set -a
+. "@HOME@/.munin/environment"
+set +a
+exec "@MUNIN_DIR@/tracker/.venv/bin/munin" "$@"

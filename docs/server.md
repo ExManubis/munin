@@ -14,7 +14,7 @@ Both services listen on 127.0.0.1 only, run as the `munin` user, and keep everyt
 
 ## Before
 
-A Linux machine with systemd (Debian or Ubuntu, say) that has:
+On a Mac, see [On a Mac](#on-a-mac) at the end. Otherwise, a Linux machine with systemd (Debian or Ubuntu, say) that has:
 
 - **Tailscale**, up (`tailscale up`), with MagicDNS and HTTPS certificates turned on for the tailnet (in the admin console, under DNS). `tailscale serve` needs both.
 - **Docker**, running. Each coder works in a container of its own.
@@ -84,4 +84,32 @@ sudo systemctl disable --now munin-tracker munin-runtime
 sudo rm /etc/systemd/system/munin-*.service /usr/local/bin/munin
 docker ps -aq --filter label=munin.agent | xargs -r docker rm -f
 # and, to drop the data too: sudo rm -r /var/lib/munin /etc/munin; sudo userdel munin
+```
+
+## On a Mac
+
+For a Mac that stays on, a Mac mini say, `deploy/install-mac.sh` does the same on macOS:
+
+```bash
+git clone <munin's repository> ~/munin
+~/munin/deploy/install-mac.sh
+```
+
+It needs Tailscale (the app, signed in, with HTTPS certificates on for the tailnet), Docker Desktop or OrbStack (running, and set to start when you sign in), and Node 22.19 or later, uv and git (`brew install node uv git`). Run it as yourself, in a session where you're signed in to the Mac, not with sudo. How it differs from Linux:
+
+- **It runs as you.** Docker Desktop and OrbStack belong to the signed-in user, and coders need Docker, so the tracker and the runtime are launchd agents of yours (`~/Library/LaunchAgents/munin.tracker.plist` and `munin.runtime.plist`) rather than services of their own user. They restart when they stop, and start when you sign in: turn on automatic login for a Mac that runs on its own.
+- **Everything is in `~/.munin`:** settings in `environment`, keys in `secrets`, the databases, the agents' folders and clones, logs in `logs/`, and the command line as `~/.munin/bin/munin`. Restart a service with `launchctl kickstart -k gui/$(id -u)/munin.runtime`.
+- **The Mac mustn't sleep.** The script says so if it would: System Settings > Energy, or `sudo pmset -a sleep 0`.
+- **Containers are a looser boundary.** Docker Desktop and OrbStack let containers reach the Mac's own 127.0.0.1 through `host.docker.internal` (not yet checked on a Mac), so a coder could reach munin's web API, which on Linux it can't. Files and keys stay out of its reach either way. `MUNIN_AGENT_NETWORK=none` in `~/.munin/environment` closes that, and the internet with it.
+
+It was rehearsed on Linux, as a normal user, with stand-ins for `uname`, `launchctl` (starting each plist's command with only the plist's environment), `tailscale` and `pmset`. Three runs: the first stopped where the image couldn't be pulled (Docker Hub's rate limit; now a copy already there is enough), the second set munin up, the third updated it in place. It hasn't run on a real Mac yet.
+
+To remove it:
+
+```bash
+launchctl bootout gui/$(id -u)/munin.tracker; launchctl bootout gui/$(id -u)/munin.runtime
+rm ~/Library/LaunchAgents/munin.*.plist
+tailscale serve --bg --set-path /runtime/api off; tailscale serve --bg --set-path / off
+docker ps -aq --filter label=munin.agent | xargs docker rm -f
+# and, to drop the data too: rm -r ~/.munin
 ```
