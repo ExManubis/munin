@@ -269,7 +269,9 @@ function comment(c, openIds) {
         time(c.created_at, { cls: 'mono muted' }),
         c.asks_human ? h('span', { class: 'label' }, isOpen ? 'asks you' : 'asked you') : null,
         isOpen ? h('button', { type: 'button', class: 'chip', onclick: focusReply }, 'Waiting on you') : null),
-      markdown(c.body)));
+      markdown(c.body),
+      c.options ? h('ol', { class: 'question-options' }, c.options.map((o) => h('li', {},
+        h('span', { class: 'option-label' }, o.label), o.detail ? h('span', { class: 'option-detail' }, o.detail) : null))) : null));
 }
 
 function reply(issue, asker, ctx) {

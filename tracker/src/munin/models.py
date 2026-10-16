@@ -1,6 +1,18 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Table, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 STATUSES = ("todo", "in_progress", "in_review", "done", "cancelled")
@@ -93,6 +105,8 @@ class Comment(Base):
     body: Mapped[str] = mapped_column(Text)
     # An agent's question for the human. It stays in the inbox until a human replies on the issue.
     asks_human: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Answers a question can offer, as [{"label": ..., "detail": ...}]. The human can still write their own.
+    options: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     issue: Mapped[Issue] = relationship(back_populates="comments")

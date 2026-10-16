@@ -1,22 +1,27 @@
-// A new agent: a role to start from, a name, a colour for its Figbot, a model and a brief.
-// The brief fills in from the role until you change it.
+// A new agent: a role to start from, a name, a colour for its Figbot, a model, the projects it
+// works on when it uses the tracker, and a brief. The brief fills in from the role until you
+// change it.
 
 import { runtime } from '../runtime/index.js';
-import { ROLES, PROVIDERS, roleOf, costHint } from '../runtime/roles.js';
+import { ROLES, roleOf, costHint, modelIn } from '../runtime/roles.js';
+import { connectToTracker, linkable } from '../runtime/tracker-link.js';
 import { store } from '../store.js';
-import { h, MOD, svg, toast, topbar } from '../ui.js';
+import { h, MOD, onModEnter, toast, topbar } from '../ui.js';
+import { check } from '../cards.js';
 import { figbot, COLOURS } from '../figbot.js';
 
 let form = blank();
+let catalog = []; // runtime.models(), loaded with the screen
 
 function blank() {
-  return { role: null, name: '', colour: 'white', provider: 'openrouter', model: null, brief: '', briefEdited: false };
+  return { role: null, name: '', colour: 'white', provider: 'openrouter', model: null, projects: null, brief: '', briefEdited: false };
 }
 
 export const view = {
   title: () => 'New agent',
 
   async load() {
+    catalog = await runtime.models();
     return { taken: store.runtimeAgents.map((a) => [a.name, a.colour]) };
   },
 
@@ -40,7 +45,7 @@ export const view = {
           h('div', { class: 'role-grid' }, ROLES.map((r, i) => roleCard(r, i, ctx)))),
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Name'),
-          h('input', {
+          onModEnter(h('input', {
             class: 'input name-input',
             value: form.name,
             placeholder: 'pip',
@@ -53,19 +58,20 @@ export const view = {
               if (form.role && !form.briefEdited) form.brief = roleOf(form.role).brief(form.name.trim() || 'it');
               ctx.rerender();
             },
-          })),
+          }), () => create(ctx))),
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Colour'),
           h('p', { class: 'hint section-lead-hint' }, `How you'll tell ${name} apart. Names under a colour are agents already using it.`),
           h('div', { class: 'colour-grid' }, Object.keys(COLOURS).map((c) => colourCard(c, ctx)))),
+        role?.abilities.tracker && store.projects.length ? projectPicker(name, ctx) : null,
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Model'),
           modelPicker(ctx),
-          h('p', { class: 'hint' }, role && form.model === role.model ? role.hint : costHint(form.provider, currentModel()))),
+          h('p', { class: 'hint' }, role && chosen().model === role.model ? role.hint : costHint(catalog, chosen().provider, chosen().model))),
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Brief'),
           h('p', { class: 'hint section-lead-hint' }, role ? 'Filled in from the role. Make it yours.' : 'Pick a role and this fills in.'),
-          h('textarea', {
+          onModEnter(h('textarea', {
             class: 'textarea brief-box',
             value: form.brief,
             'aria-label': 'Brief',
@@ -74,7 +80,7 @@ export const view = {
               form.brief = e.target.value;
               form.briefEdited = true;
             },
-          })),
+          }), () => create(ctx))),
         h('div', { class: 'create-row' },
           h('button', { type: 'button', class: 'btn primary', disabled: !form.role || !form.name.trim(), onclick: () => create(ctx) },
             `Create ${form.name.trim() || 'agent'}`, h('span', { class: 'key' }, `${MOD}↵`)),
@@ -95,7 +101,8 @@ export const view = {
   },
 };
 
-const currentModel = () => form.model || (form.role ? roleOf(form.role).model : PROVIDERS[0].models[0].id);
+// The model the agent gets: the one picked, or its role's, or the first on offer.
+const chosen = () => modelIn(catalog, form.provider, form.model || (form.role ? roleOf(form.role).model : null));
 
 function pickRole(id, ctx) {
   form.role = id;
@@ -105,9 +112,6 @@ function pickRole(id, ctx) {
   if (!form.briefEdited) form.brief = role.brief(form.name.trim() || 'it');
   ctx.rerender();
 }
-
-const check = () => svg(14, '0 0 14 14', [['rect', { x: 0, y: 0, width: 14, height: 14, fill: '#EDEDED' }],
-  ['path', { d: 'M3.5 7.5 L6 10 L10.5 4.5', fill: 'none', stroke: '#0A0A0A', 'stroke-width': 1.6 }]], { cls: 'check' });
 
 function roleCard(role, index, ctx) {
   const selected = form.role === role.id;
@@ -138,17 +142,42 @@ function colourCard(colour, ctx) {
   h('span', { class: 'colour-users' }, colour === 'white' && !users.length ? 'default' : users.join(', ')));
 }
 
+// The tracker's projects; with just one, it's picked already.
+const chosenProjects = () => form.projects || (store.projects.length === 1 ? [store.projects[0].key] : []);
+
+function projectPicker(name, ctx) {
+  const chosen = chosenProjects();
+  return h('section', { class: 'profile-section' },
+    h('h2', { class: 'section-title' }, 'Projects'),
+    h('p', { class: 'hint section-lead-hint' }, `Where ${name} takes ${form.role === 'reviewer' ? 'work to review' : 'issues'} in the tracker.${linkable() ? ' It gets a token of its own there.' : ''}`),
+    h('div', { class: 'project-picks' }, store.projects.map((project) => {
+      const on = chosen.includes(project.key);
+      return h('button', {
+        type: 'button',
+        class: ['chip', on ? 'on' : 'quiet'],
+        'aria-pressed': String(on),
+        title: project.name,
+        onclick: () => {
+          form.projects = on ? chosen.filter((k) => k !== project.key) : [...chosen, project.key];
+          ctx.rerender();
+        },
+      }, project.key);
+    })));
+}
+
 function modelPicker(ctx) {
-  const provider = PROVIDERS.find((p) => p.id === form.provider) || PROVIDERS[0];
+  const { provider, model } = chosen();
+  const models = catalog.find((p) => p.id === provider)?.models || [];
   const pick = (options, value, label, onchange) => h('label', { class: 'select-box' },
     h('select', { 'aria-label': label, onchange: (e) => { onchange(e.target.value); ctx.rerender(); } },
       options.map(([v, text]) => h('option', { value: v, selected: v === value }, text))));
   return h('div', { class: 'select-row' },
-    pick(PROVIDERS.map((p) => [p.id, p.name]), form.provider, 'Provider', (id) => {
+    pick(catalog.map((p) => [p.id, p.name]), provider, 'Provider', (id) => {
       form.provider = id;
-      form.model = PROVIDERS.find((p) => p.id === id).models[0].id;
+      form.model = catalog.find((p) => p.id === id).models[0]?.id;
     }),
-    pick(provider.models.map((m) => [m.id, m.id]), currentModel(), 'Model', (id) => {
+    pick(models.map((m) => [m.id, m.name]), model, 'Model', (id) => {
+      form.provider = provider;
       form.model = id;
     }));
 }
@@ -160,14 +189,24 @@ async function create(ctx) {
       name: form.name,
       role: form.role,
       colour: form.colour,
-      provider: form.provider,
-      model: currentModel(),
+      ...chosen(),
       brief: form.brief.trim() || roleOf(form.role).brief(form.name.trim()),
     });
+    if (agent.tracker) await joinTracker(agent.name, chosenProjects());
     form = blank();
     location.hash = `#/agents/${encodeURIComponent(agent.name)}`;
   } catch (err) {
     toast(err.message, { error: true });
     ctx.rerender();
+  }
+}
+
+// The agent exists either way; if the tracker part fails, its profile can try again.
+async function joinTracker(name, projects) {
+  try {
+    if (!linkable()) await runtime.updateAgent(name, { tracker: { projects } });
+    else if (!await connectToTracker(name, projects)) toast(`${name} isn't in the tracker yet. Connect it from its profile.`);
+  } catch (err) {
+    toast(`${name} isn't in the tracker yet: ${err.message}`, { error: true });
   }
 }

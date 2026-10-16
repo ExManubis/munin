@@ -8,7 +8,9 @@ import { runtime } from '../runtime/index.js';
 import { store } from '../store.js';
 import { h, kbd, MOD, statusIcon, svg, avatar, bindDraft, drafts, onModEnter, toast, topbar } from '../ui.js';
 import { markdown } from '../markdown.js';
+import { optionRow } from '../cards.js';
 import { agentFace, roleTag, hhmm } from './agents.js';
+import { workMessage } from '../runtime/tracker-link.js';
 
 const picks = new Map(); // question id → the option picked, before sending
 const runs = new Map(); // run id → 'open', 'closed' or 'all'
@@ -179,23 +181,6 @@ function run(agent, item, ctx) {
         step.detail ? h('span', { class: 'run-step-detail' }, step.detail) : null,
         running && step === last ? h('span', { class: 'cursor', 'aria-hidden': 'true' }) : null))));
 }
-
-function optionRow(index, option, { selected = false, answered = false, onclick } = {}) {
-  return h(answered ? 'div' : 'button', {
-    type: answered ? null : 'button',
-    class: ['option-card', selected && 'selected', answered && 'answered'],
-    onclick,
-    'aria-pressed': answered ? null : String(selected),
-  },
-  h('span', { class: 'key-square' }, index + 1),
-  h('span', { class: 'option-main' },
-    h('span', { class: 'option-label' }, option.label),
-    option.detail ? h('span', { class: 'option-detail' }, option.detail) : null),
-  selected || answered ? check() : null);
-}
-
-const check = () => svg(14, '0 0 14 14', [['rect', { x: 0, y: 0, width: 14, height: 14, fill: '#EDEDED' }],
-  ['path', { d: 'M3.5 7.5 L6 10 L10.5 4.5', fill: 'none', stroke: '#0A0A0A', 'stroke-width': 1.6 }]], { cls: 'check' });
 
 function question(agent, item, ctx) {
   const label = item.issue ? `${agent.name} asks on ${item.issue.id}` : `${agent.name} asks`;
@@ -389,20 +374,22 @@ async function pause(agent, ctx) {
 function about(agent, ctx) {
   const prop = (key, ...value) => h('div', { class: 'prop' }, h('span', { class: 'prop-key' }, key), h('span', { class: 'prop-value' }, value));
   const provider = { openrouter: 'OpenRouter', ollama: 'Ollama' }[agent.provider] || agent.provider;
+  const model = agent.provider === 'standin' ? 'Stand-in, no model' : `${agent.model} · ${provider}`;
   return h('aside', { class: 'about' },
     h('div', { class: 'about-head' }, h('span', { class: 'label' }, 'About')),
     h('div', { class: 'about-body' },
       h('div', { class: 'props-list' },
         prop('Role', agent.roleName),
-        prop('Model', h('span', { class: 'mono' }, `${agent.model} · ${provider}`)),
+        prop('Model', h('span', { class: 'mono' }, model)),
         prop('Today', `$${agent.usage.today.toFixed(2)} · ${tokens(agent.usage.tokens)} tokens`),
-        agent.worksIn ? prop('Works in', h('span', { class: 'stack' }, h('span', { class: 'mono' }, agent.worksIn.folder), h('span', { class: 'mono muted' }, `branch ${agent.worksIn.branch}`))) : null,
-        agent.tracker ? prop('Tracker', `${agent.tracker.projects.join(', ') || 'No projects yet'} · takes ${agent.tracker.takes}`) : null),
+        agent.worksIn ? prop('Works in', h('span', { class: 'stack' }, h('span', { class: 'mono' }, agent.worksIn.folder), agent.worksIn.branch ? h('span', { class: 'mono muted' }, `${agent.worksIn.detached ? 'reviewing' : 'branch'} ${agent.worksIn.branch}`) : null,
+          agent.worksIn.sandbox ? h('span', { class: 'muted' }, 'in a container of its own') : null)) : null),
+      agent.tracker ? trackerSection(agent, ctx) : null,
       agent.routines.length ? h('div', { class: 'about-section' },
         h('div', { class: 'label' }, 'Routines'),
         agent.routines.map((r) => h('div', { class: 'routine-mini' },
           h('div', {}, r.name),
-          h('div', { class: 'mono muted' }, [r.when, r.next ? `next ${r.next}` : r.last ? `last ${lastRun(r.last)}` : null].filter(Boolean).join(' · ')),
+          h('div', { class: 'mono muted' }, [r.when, routineWhen(r)].filter(Boolean).join(' · ')),
           r.does && agent.role === 'coder' ? h('div', { class: 'hint' }, `"${r.does}"`) : null))) : null,
       agent.apps.length ? h('div', { class: 'about-section' },
         h('div', { class: 'label' }, 'Apps'),
@@ -414,15 +401,52 @@ function about(agent, ctx) {
           : h('button', { type: 'button', class: 'link', onclick: () => pause(agent, ctx) }, 'Pause'))));
 }
 
+// The projects an agent works on in the tracker, each with a way to start it there.
+function trackerSection(agent, ctx) {
+  const { projects, connected, reachable } = agent.tracker;
+  let status = null;
+  if (connected === false) status = ['Not connected to the tracker yet. ', h('a', { class: 'link', href: `#/agents/${encodeURIComponent(agent.name)}/profile` }, 'Connect')];
+  else if (reachable === false) status = "Can't reach the tracker right now. The runtime tries again every half minute.";
+  else if (!projects.length) status = ['No projects yet. ', h('a', { class: 'link', href: `#/agents/${encodeURIComponent(agent.name)}/profile` }, 'Pick some')];
+  const free = !agent.paused && !agent.run && !agent.typing && connected !== false;
+  return h('div', { class: 'about-section' },
+    h('div', { class: 'label' }, agent.tracker.takes === 'reviews' ? 'Reviews in' : 'Works on'),
+    projects.map((key) => h('div', { class: 'tracker-row' },
+      h('a', { class: 'mono issue-link', href: `#/projects/${encodeURIComponent(key)}` }, key),
+      h('span', { class: 'muted grow' }, store.projects.find((p) => p.key === key)?.name || ''),
+      free ? h('button', { type: 'button', class: 'link', onclick: () => startOn(agent, key, ctx) }, agent.role === 'reviewer' ? 'Review' : 'Work on it') : null)),
+    status ? h('p', { class: 'hint' }, status) : null);
+}
+
+async function startOn(agent, key, ctx) {
+  try {
+    await runtime.send(agent.name, workMessage(agent, key));
+  } catch (err) {
+    toast(err.message, { error: true });
+  }
+  ctx.reload();
+}
+
 export function tokens(n) {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
   if (n >= 1000) return `${Math.round(n / 1000)}k`;
   return String(n);
 }
 
-export function lastRun(value) {
+// "today 09:00", "tomorrow 07:30", "Mon 09:00", for a routine's last and next run. Text
+// that isn't a time (the mock's "soon") shows as it is.
+export function dayTime(value) {
   const date = new Date(value);
-  const today = new Date().toDateString() === date.toDateString();
-  const yesterday = new Date(Date.now() - 86400000).toDateString() === date.toDateString();
-  return `${today ? 'today' : yesterday ? 'yesterday' : date.toLocaleDateString(undefined, { weekday: 'short' })} ${hhmm(date)}`;
+  if (Number.isNaN(date.getTime())) return String(value);
+  const day = (offset) => new Date(Date.now() + offset * 86400000).toDateString();
+  const names = { [day(0)]: 'today', [day(1)]: 'tomorrow', [day(-1)]: 'yesterday' };
+  return `${names[date.toDateString()] || date.toLocaleDateString(undefined, { weekday: 'short' })} ${hhmm(date)}`;
+}
+
+// When a routine runs next, or last ran, or why it doesn't.
+export function routineWhen(r) {
+  if (r.note) return r.note;
+  if (r.next) return `next ${dayTime(r.next)}`;
+  if (r.last) return `last ${dayTime(r.last)}`;
+  return r.trigger === 'tracker' ? 'watching the tracker' : '';
 }

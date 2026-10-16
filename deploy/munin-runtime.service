@@ -1,0 +1,28 @@
+# munin's agent runtime: its own agents, their conversations and routines. Coders' tools run in a
+# container each, so it needs Docker. It listens on this machine only; tailscale serve passes
+# requests on. Installed by deploy/install.sh, which fills in where munin and Node are.
+
+[Unit]
+Description=munin agent runtime
+After=network-online.target docker.service munin-tracker.service
+Wants=network-online.target docker.service
+
+[Service]
+User=munin
+Group=munin
+SupplementaryGroups=docker
+EnvironmentFile=/etc/munin/environment
+EnvironmentFile=-/etc/munin/secrets
+Environment=HOME=/var/lib/munin
+ExecStart=@NODE@ --disable-warning=ExperimentalWarning @MUNIN_DIR@/runtime/src/main.js
+WorkingDirectory=/var/lib/munin
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/munin
+
+[Install]
+WantedBy=multi-user.target

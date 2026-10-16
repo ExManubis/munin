@@ -282,9 +282,10 @@ function settingsSidebar() {
     h('div', { class: 'label nav-heading first' }, 'Settings'),
     h('nav', { class: 'nav', 'aria-label': 'Settings' },
       jump('providers', 'Models and providers'),
+      store.projects.length ? jump('code', 'Code') : null,
       jump('outside-agents', 'Outside agents'),
       jump('notifications', 'Notifications'),
-      jump('dummy', 'Dummy data')),
+      runtime.kind === 'mock' ? jump('dummy', 'Dummy data') : null),
   ];
 }
 

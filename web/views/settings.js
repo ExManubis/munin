@@ -1,6 +1,6 @@
-// Settings, behind your square in the topbar: the models munin's own agents run on, the
-// outside agents that connect to the tracker over MCP (a token each), notifications, and
-// a reset for the dummy's sample agents.
+// Settings, behind your square in the topbar: the models munin's own agents run on, where
+// each project's code lives, the outside agents that connect to the tracker over MCP (a token
+// each), notifications, and, on the mock runtime, a reset for its sample agents.
 
 import { api } from '../api.js';
 import { runtime } from '../runtime/index.js';
@@ -15,20 +15,21 @@ export const view = {
   title: () => 'Settings',
 
   async load() {
-    const [agents, providers] = await Promise.all([api.agents(), runtime.providers()]);
-    return { agents, providers, me: store.me };
+    const [agents, providers, repos, about] = await Promise.all([api.agents(), runtime.providers(), runtime.repos(), runtime.me()]);
+    return { agents, providers, repos, sandbox: about.sandbox, me: store.me };
   },
 
   leave() {
     created = null; // the token is only ever shown on the screen that created it
   },
 
-  render({ agents, providers, me }, ctx) {
+  render({ agents, providers, repos, sandbox, me }, ctx) {
     const live = agents.filter((a) => !a.revoked);
     return h('div', { class: 'page' },
       topbar([h('span', { class: 'title' }, 'Settings')]),
       h('div', { class: 'agents-page' },
         providerSection(providers),
+        codeSection(repos, sandbox, ctx),
         h('section', { class: 'section', id: 'outside-agents' },
           h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Outside agents'), h('span', { class: 'mono muted' }, `${live.length} connected`)),
           h('p', { class: 'lead' },
@@ -41,7 +42,7 @@ export const view = {
         table(agents, ctx),
         connect(agents, me, ctx),
         notifications(ctx),
-        dummy(ctx)));
+        runtime.kind === 'mock' ? dummy(ctx) : null));
   },
 };
 
@@ -54,8 +55,63 @@ function providerSection(providers) {
         h('span', { class: 'agent-name' }, h('span', {}, p.name)),
         h('span', { class: 'agent-seen' }, p.detail),
         h('span', { class: ['label', p.connected && 'on'] }, p.connected ? 'Connected' : 'Off'),
-        h('span', { class: 'agent-action' },
-          h('button', { type: 'button', class: 'link', onclick: () => toast('The dummy has no real providers yet.') }, p.connected ? 'Change' : 'Set up'))))));
+        // The real runtime takes its providers from its environment, as the detail says.
+        h('span', { class: 'agent-action' }, runtime.kind === 'mock'
+          ? h('button', { type: 'button', class: 'link', onclick: () => toast('The dummy has no real providers yet.') }, p.connected ? 'Change' : 'Set up')
+          : null)))));
+}
+
+// Where each tracker project's code is. The runtime keeps a clone, and each coder gets a
+// worktree per issue, on a branch named after the issue.
+function codeSection(repos, sandbox, ctx) {
+  if (!store.projects.length) return null;
+  return h('section', { class: 'section', id: 'code' },
+    h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Code')),
+    h('p', { class: 'lead' },
+      "Where each project's code lives. munin keeps a clone of it, and a coder that takes an issue gets a worktree of its own, ",
+      'on a branch named after the issue, so agents working side by side never share a checkout.'),
+    runtime.kind === 'runtime' ? h('p', { class: 'hint sandbox-note' }, sandbox
+      ? `Coders run in a container each, from ${sandbox.image}: they see their own folder and munin's clones, and nothing else of this machine.`
+      : "Coders run on this machine, as the runtime's own user. Their shells don't get the runtime's keys, but they can read its files. "
+        + 'Start the runtime with MUNIN_AGENT_SANDBOX=docker to give each a container of its own.') : null,
+    h('div', { class: 'repo-list' }, store.projects.map((project) => repoRow(project, repos.find((r) => r.project === project.key), ctx))));
+}
+
+function repoRow(project, repo, ctx) {
+  const key = `repo:${project.key}`;
+  const source = bindDraft(h('input', {
+    class: 'input',
+    placeholder: 'git@github.com:you/repo.git, or a folder with a clone',
+    autocomplete: 'off',
+    spellcheck: false,
+    'aria-label': `Where ${project.key}'s code is`,
+  }), `${key}:source`, repo?.source || '');
+  const base = bindDraft(h('input', { class: 'input', placeholder: 'main', autocomplete: 'off', spellcheck: false, 'aria-label': `${project.key}'s base branch` }), `${key}:base`, repo?.base || '');
+  const button = h('button', { type: 'submit', class: 'btn small' }, repo ? 'Save' : 'Set up');
+  const save = async (e) => {
+    e.preventDefault();
+    button.disabled = true;
+    button.textContent = repo ? 'Saving…' : 'Cloning…';
+    try {
+      const saved = await runtime.setRepo(project.key, { source: source.value.trim(), base: base.value.trim() || undefined });
+      drafts.delete(`${key}:source`);
+      drafts.delete(`${key}:base`);
+      toast(`${project.key}'s code is set up. New branches start from ${saved.base}.`);
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+    ctx.reload();
+  };
+  const remove = async () => {
+    if (!confirm(`Forget where ${project.key}'s code is? Worktrees agents already have stay.`)) return;
+    await runtime.removeRepo(project.key);
+    ctx.reload();
+  };
+  return h('form', { class: 'repo-row', onsubmit: save },
+    h('span', { class: 'repo-project' }, h('span', { class: 'mono' }, project.key), h('span', { class: 'hint' }, repo ? `branches from ${repo.base}` : project.name)),
+    source,
+    base,
+    h('span', { class: 'repo-actions' }, button, repo ? h('button', { type: 'button', class: 'link', onclick: remove }, 'Remove') : null));
 }
 
 function dummy(ctx) {

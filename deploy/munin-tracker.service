@@ -1,0 +1,25 @@
+# munin's tracker: issues, the inbox, MCP for agents, and the web UI. It listens on this machine
+# only; tailscale serve passes requests on. Installed by deploy/install.sh, which fills in where
+# munin is.
+
+[Unit]
+Description=munin tracker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=munin
+Group=munin
+EnvironmentFile=/etc/munin/environment
+ExecStart=@MUNIN_DIR@/tracker/.venv/bin/munin serve
+WorkingDirectory=/var/lib/munin
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/munin
+
+[Install]
+WantedBy=multi-user.target

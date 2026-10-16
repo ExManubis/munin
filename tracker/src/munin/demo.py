@@ -84,6 +84,11 @@ def seed(s: Session, user: str) -> None:
         "- Docker isolates properly, but adds a 2 GB install and a running daemon\n"
         "- Linux already uses bubblewrap, so only macOS is affected",
         asks_human=True,
+        options=[
+            {"label": "Keep sandbox-exec", "detail": "Works today with no setup. Revisit when Apple removes it."},
+            {"label": "Require Docker", "detail": "Real isolation. Every macOS user needs Docker running."},
+            {"label": "Support both", "detail": "Default to sandbox-exec, choose in config."},
+        ],
     )
 
     take(CLAUDE, memory)
@@ -118,6 +123,10 @@ def seed(s: Session, user: str) -> None:
         "Telegram caps a message at 4,096 characters. When output runs past that, start a new message or "
         "attach the rest as a file?",
         asks_human=True,
+        options=[
+            {"label": "Start a new message", "detail": "Easy to read on the phone."},
+            {"label": "Attach as a file", "detail": "One message, but you have to open it."},
+        ],
     )
 
     take(FIGBOT, gateway)

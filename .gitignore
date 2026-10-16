@@ -3,3 +3,6 @@
 __pycache__/
 .env
 .env.*
+node_modules/
+# Python that deploy/install.sh has uv put next to munin
+.python/

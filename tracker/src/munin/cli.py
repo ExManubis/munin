@@ -92,6 +92,11 @@ def main(argv: list[str] | None = None) -> int:
 
 def _serve(settings: Settings, args: argparse.Namespace) -> int:
     settings = replace(settings, host=args.host or settings.host, port=args.port or settings.port)
+    try:
+        settings.check()
+    except ValueError as error:
+        print(f"munin: {error}", file=sys.stderr)
+        return 2
     return _run(settings, f"database {settings.db_path}", open_browser=args.open)
 
 
@@ -173,7 +178,9 @@ def _agent(s, settings: Settings, args: argparse.Namespace) -> int:
         agent, token = agents.add_agent(s, args.name)
         print(f"Token for {agent.name} (shown once):\n\n  {token}\n")
         print("Claude Code:")
-        print(f'  claude mcp add --transport http munin {settings.url}/mcp --header "Authorization: Bearer {token}"')
+        # Behind the edge, agents on other machines reach munin at its public address.
+        url = settings.public_url or settings.url
+        print(f'  claude mcp add --transport http munin {url}/mcp --header "Authorization: Bearer {token}"')
         print("\nThen tell it: /mcp__munin__continue <project key>")
     elif args.action == "list":
         for agent in agents.list_agents(s):

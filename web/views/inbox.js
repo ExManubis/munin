@@ -5,6 +5,7 @@
 import { api } from '../api.js';
 import { store, remember, displayName } from '../store.js';
 import { markdown } from '../markdown.js';
+import { optionRow } from '../cards.js';
 import { condense, describe, eventIcon } from '../history.js';
 import { openNewProject } from '../dialogs.js';
 import {
@@ -13,6 +14,7 @@ import {
 } from '../ui.js';
 
 let showContext = false; // narrow layout: is the issue context expanded?
+const picks = new Map(); // question id → the option picked, before sending
 let baseline = null; // the newest event id seen before this visit; newer ones get a dot
 const SEEN = 'munin:seen-event';
 const ONBOARDING = 'munin:onboarding'; // "active" once the checklist showed, "done" when finished
@@ -52,13 +54,16 @@ export const view = {
       h('div', { class: 'inbox' }, list(data.items, index, feed), detail(data, index, ctx, lately(data.activity))));
   },
 
-  onKey(e, data) {
+  onKey(e, data, ctx) {
     const index = data.items.findIndex((i) => i.question.id === data.selectedId);
     if (e.key === 'j' || e.key === 'ArrowDown') go(itemHash(data.items[Math.min(index + 1, data.items.length - 1)]));
     else if (e.key === 'k' || e.key === 'ArrowUp') go(itemHash(data.items[Math.max(index - 1, 0)]));
     else if ((e.key === 'Enter' || e.key === 'o') && data.issue) location.hash = `#/issues/${data.issue.id}`;
     else if (e.key === 'r') document.querySelector('[data-keep^="answer:"]')?.focus();
-    else return false;
+    else if (/^[1-9]$/.test(e.key) && data.items[index]?.question.options?.[Number(e.key) - 1]) {
+      picks.set(data.items[index].question.id, Number(e.key) - 1);
+      ctx.rerender();
+    } else return false;
     return true;
   },
 };
@@ -186,20 +191,24 @@ function detail(data, index, ctx, feed) {
   const next = items.slice(index + 1).find((i) => i.issue.id !== issue.id)
     || items.slice(0, index).find((i) => i.issue.id !== issue.id);
 
+  const options = q.options || [];
+  const picked = picks.get(q.id);
   const answer = bindDraft(h('textarea', {
     class: 'textarea answer',
     rows: 2,
-    placeholder: 'Answer in your own words…',
+    placeholder: options.length ? 'Or answer in your own words…' : 'Answer in your own words…',
     'aria-label': `Answer ${agent}`,
   }), `answer:${q.id}`);
   const send = h('button', { type: 'button', class: 'btn primary' }, `Send to ${agent}`, h('span', { class: 'key' }, `${MOD}↵`));
+  // What you write wins over the option picked.
   const submit = async () => {
-    const body = answer.value.trim();
+    const body = answer.value.trim() || (picked !== undefined ? options[picked].label : '');
     if (!body) return answer.focus();
     send.disabled = true;
     try {
       await api.comment(issue.id, body);
       drafts.delete(`answer:${q.id}`);
+      picks.delete(q.id);
       toast(`Sent to ${agent} on ${issue.id}`);
       const target = itemHash(next);
       if (location.hash === target) ctx.reload();
@@ -250,6 +259,13 @@ function detail(data, index, ctx, feed) {
           earlier.length ? commentBlock(before.length > earlier.length ? `Latest ${earlier.length} of ${before.length} earlier comments` : 'Earlier comments', earlier, issue) : null,
           after.length ? commentBlock('Since the question', after, issue) : null),
         h('div', { class: 'reply' },
+          options.length ? h('div', { class: 'options' }, options.map((option, n) => optionRow(n, option, {
+            selected: picked === n,
+            onclick: () => {
+              picks.set(q.id, n);
+              ctx.rerender();
+            },
+          }))) : null,
           answer,
           h('div', { class: 'reply-actions' },
             send,

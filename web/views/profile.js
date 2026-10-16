@@ -2,11 +2,13 @@
 // what it remembers about you, and what it costs.
 
 import { runtime } from '../runtime/index.js';
-import { ABILITIES, APPS, PROVIDERS, THINKING, costHint } from '../runtime/roles.js';
+import { ABILITIES, APPS, THINKING, costHint } from '../runtime/roles.js';
+import { connectToTracker, disconnectFromTracker, revokeTrackerToken, linkable } from '../runtime/tracker-link.js';
+import { store } from '../store.js';
 import { h, bindDraft, drafts, onModEnter, toast, toggle, topbar } from '../ui.js';
 import { openDialog, closeDialog } from '../dialogs.js';
 import { agentFace, roleTag, hhmm } from './agents.js';
-import { lastRun } from './conversation.js';
+import { routineWhen } from './conversation.js';
 
 let allNotes = false;
 
@@ -15,14 +17,15 @@ export const view = {
   scope: (params) => `/agents/${params.name}/profile`,
 
   async load({ name }) {
-    return { agent: await runtime.agent(name) };
+    const [agent, models] = await Promise.all([runtime.agent(name), runtime.models()]);
+    return { agent, models };
   },
 
   leave() {
     allNotes = false;
   },
 
-  render({ agent }, ctx) {
+  render({ agent, models }, ctx) {
     const set = (patch, message) => update(agent, patch, message, ctx);
     return h('div', { class: 'page' },
       topbar([
@@ -32,7 +35,7 @@ export const view = {
       h('div', { class: 'profile' },
         header(agent, ctx),
         brief(agent, set),
-        model(agent, set),
+        model(agent, models, set),
         abilities(agent, set, ctx),
         askFirst(agent, set),
         routines(agent, ctx),
@@ -82,10 +85,12 @@ function header(agent, ctx) {
         type: 'button',
         class: 'link',
         onclick: async () => {
-          if (!confirm(`Delete ${agent.name}? Its conversation, routines and memory go with it.`)) return;
+          const linked = linkable() && agent.tracker?.connected;
+          if (!confirm(`Delete ${agent.name}? Its conversation, routines and memory go with it${linked ? ', and its tracker token stops working' : ''}.`)) return;
           await runtime.deleteAgent(agent.name);
+          location.hash = '#/agents'; // before anything reloads a profile that's gone
           toast(`Deleted ${agent.name}.`);
-          location.hash = '#/agents';
+          if (linked) await revokeTrackerToken(agent.name);
         },
       }, 'Delete')));
 }
@@ -116,15 +121,19 @@ function select(options, value, label, onchange) {
       options.map(([v, text]) => h('option', { value: v, selected: v === value }, text))));
 }
 
-function model(agent, set) {
-  const provider = PROVIDERS.find((p) => p.id === agent.provider) || PROVIDERS[0];
+// The runtime's catalog, plus the agent's own provider and model when it isn't offered,
+// so the selects always show what the agent is set to.
+function model(agent, catalog, set) {
+  const providers = catalog.some((p) => p.id === agent.provider) ? catalog : [...catalog, { id: agent.provider, name: `${agent.provider}, not set up`, models: [] }];
+  const offered = providers.find((p) => p.id === agent.provider).models;
+  const models = offered.some((m) => m.id === agent.model) ? offered : [...offered, { id: agent.model, name: agent.model }];
   return section('Model', null,
     h('div', { class: 'select-row' },
-      select(PROVIDERS.map((p) => [p.id, p.name]), agent.provider, 'Provider',
-        (id) => set({ provider: id, model: PROVIDERS.find((p) => p.id === id).models[0].id })),
-      select(provider.models.map((m) => [m.id, m.id]), agent.model, 'Model', (id) => set({ model: id })),
+      select(providers.map((p) => [p.id, p.name]), agent.provider, 'Provider',
+        (id) => set({ provider: id, model: catalog.find((p) => p.id === id)?.models[0]?.id ?? agent.model })),
+      select(models.map((m) => [m.id, m.name]), agent.model, 'Model', (id) => set({ model: id })),
       select(THINKING.map((t) => [t, `Thinking: ${t}`]), agent.thinking, 'Thinking', (t) => set({ thinking: t }))),
-    h('p', { class: 'hint' }, costHint(agent.provider, agent.model)));
+    h('p', { class: 'hint' }, costHint(catalog, agent.provider, agent.model)));
 }
 
 function settingRow(title, detail, on, label, onchange, extra) {
@@ -145,9 +154,69 @@ function abilities(agent, set, ctx) {
         line = agent.apps.length ? `${list(agent.apps)} ${agent.apps.length === 1 ? 'is' : 'are'} connected. ` : 'Nothing connected yet. ';
         extra = h('button', { type: 'button', class: 'link', onclick: () => connectApps(agent, ctx) }, 'Connect an app');
       }
-      if (id === 'code' && on && agent.worksIn) line = `Works in ${agent.worksIn.folder}, on its own branch.`;
+      if (id === 'code' && on && agent.worksIn) {
+        line = agent.worksIn.branch
+          ? `Works in ${agent.worksIn.folder}, ${agent.worksIn.detached ? 'reviewing' : 'on'} ${agent.worksIn.branch}.`
+          : `Works in ${agent.worksIn.folder}. An issue it takes gets a worktree on a branch of its own, for projects whose code is set up in Settings.`;
+      }
+      if (id === 'tracker') return trackerRow(agent, on, title, set, ctx);
       return settingRow(title, line, on, title, () => set({ abilities: { [id]: !on } }), extra);
     }));
+}
+
+// The tracker: whether the agent has a token there, and the projects it works on.
+function trackerRow(agent, on, title, set, ctx) {
+  const link = agent.tracker;
+  let line = 'Take, review and file issues in munin';
+  let extra = null;
+  if (on && link?.connected === false) {
+    line = 'Not connected to the tracker yet. ';
+    extra = h('button', { type: 'button', class: 'link', onclick: () => connect(agent, ctx) }, 'Connect');
+  } else if (on && link) {
+    line = link.reachable === false
+      ? "Can't reach the tracker right now. The runtime tries again every half minute."
+      : `Has its own token, and takes ${link.takes} in the projects picked here.`;
+    extra = store.projects.length
+      ? h('div', { class: 'project-picks' }, store.projects.map((project) => {
+        const picked = link.projects.includes(project.key);
+        return h('button', {
+          type: 'button',
+          class: ['chip', picked ? 'on' : 'quiet'],
+          'aria-pressed': String(picked),
+          title: project.name,
+          onclick: () => set({ tracker: { projects: picked ? link.projects.filter((k) => k !== project.key) : [...link.projects, project.key] } }),
+        }, project.key);
+      }))
+      : null;
+  }
+  return settingRow(title, line, on, title, () => toggleTracker(agent, !on, ctx), extra);
+}
+
+async function connect(agent, ctx) {
+  try {
+    if (await connectToTracker(agent.name)) toast(`${agent.name} is in the tracker now.`);
+  } catch (err) {
+    toast(err.message, { error: true });
+  }
+  ctx.reload();
+}
+
+// Turning the Tracker ability on gets the agent a token; turning it off revokes it.
+async function toggleTracker(agent, on, ctx) {
+  try {
+    if (!linkable()) await runtime.updateAgent(agent.name, { abilities: { tracker: on } });
+    else if (on) {
+      await runtime.updateAgent(agent.name, { abilities: { tracker: true } });
+      if (!agent.tracker?.connected) await connectToTracker(agent.name);
+    } else {
+      if (!confirm(`Take ${agent.name} out of the tracker? Its token stops working; its issues and comments stay.`)) return;
+      await disconnectFromTracker(agent.name);
+      await runtime.updateAgent(agent.name, { abilities: { tracker: false } });
+    }
+  } catch (err) {
+    toast(err.message, { error: true });
+  }
+  ctx.reload();
 }
 
 const list = (items) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`);
@@ -178,11 +247,12 @@ function askFirst(agent, set) {
     agent.askFirst.map((rule) => settingRow(rule.label, null, rule.on, rule.label, () => set({ askFirst: { [rule.id]: !rule.on } }))));
 }
 
+// Each trigger: its label, an example for the When field, and what munin understands there.
 const TRIGGERS = [
-  ['schedule', 'On a schedule', 'Weekdays 07:30'],
-  ['mail', 'When mail arrives', 'When mail from Paul Eriksen arrives'],
-  ['calendar', 'When the calendar changes', 'When an event is moved or about to start'],
-  ['tracker', 'When an issue moves', 'When an issue moves to In review'],
+  ['schedule', 'On a schedule', 'Weekdays 07:30', "Like 'Weekdays 07:30', 'Mondays at 9', 'Every night 02:00' or 'Every 2 hours, 08–18', in the runtime's time zone."],
+  ['mail', 'When mail arrives', 'When mail from Paul Eriksen arrives', "munin can't connect mail yet, so this waits until it can."],
+  ['calendar', 'When the calendar changes', 'When an event is moved or about to start', "munin can't connect a calendar yet, so this waits until it can."],
+  ['tracker', 'When an issue moves', 'When an issue moves to In review', "Like 'When an issue moves to In review', 'When vera sends my work back' or 'When an issue in MUN is created'."],
 ];
 
 function routines(agent, ctx) {
@@ -192,7 +262,8 @@ function routines(agent, ctx) {
         h('div', { class: 'routine-main' },
           h('div', { class: 'routine-name' }, h('span', {}, r.name), h('span', { class: 'mono muted' }, r.when)),
           r.does ? h('div', { class: 'hint' }, r.does) : null),
-        h('span', { class: 'mono muted routine-when' }, r.next ? `next ${r.next}` : r.last ? `last ${lastRun(r.last)}` : ''),
+        h('span', { class: ['mono muted routine-when', r.note && 'routine-note'] }, routineWhen(r)),
+        r.note || agent.paused ? null : h('button', { type: 'button', class: 'link', onclick: () => runNow(agent, r, ctx) }, 'Run now'),
         h('button', { type: 'button', class: 'link', onclick: () => editRoutine(agent, r, ctx) }, 'Edit'))))
       : h('p', { class: 'hint' }, 'No routines yet.'),
     h('button', { type: 'button', class: 'btn small', onclick: () => editRoutine(agent, null, ctx) }, 'New routine'));
@@ -204,9 +275,11 @@ function editRoutine(agent, routine, ctx) {
   const when = h('input', { class: 'input', value: routine?.when || '', 'aria-label': 'When' });
   const does = h('textarea', { class: 'textarea', value: routine?.does || '', placeholder: 'What it should do, in a sentence or two.', 'aria-label': 'What it does' });
   const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'What starts it' });
+  const understood = h('p', { class: 'hint' });
   const drawSeg = () => {
-    const example = TRIGGERS.find(([id]) => id === trigger)[2];
+    const [, , example, hint] = TRIGGERS.find(([id]) => id === trigger);
     when.placeholder = example;
+    understood.textContent = hint;
     seg.replaceChildren(...TRIGGERS.map(([id, label]) => h('button', {
       type: 'button',
       'aria-pressed': String(trigger === id),
@@ -221,9 +294,10 @@ function editRoutine(agent, routine, ctx) {
     e.preventDefault();
     const fields = { name: name.value.trim(), trigger, when: when.value.trim() || when.placeholder, does: does.value.trim() };
     try {
-      if (routine) await runtime.updateRoutine(agent.name, routine.id, fields);
-      else await runtime.addRoutine(agent.name, fields);
+      const saved = routine ? await runtime.updateRoutine(agent.name, routine.id, fields) : await runtime.addRoutine(agent.name, fields);
       closeDialog();
+      // The runtime says "when" in its own words, so you see what it understood.
+      if (saved?.when && saved.when !== fields.when) toast(`Saved, as "${saved.when}".`);
       ctx.reload();
     } catch (err) {
       toast(err.message, { error: true });
@@ -241,11 +315,21 @@ function editRoutine(agent, routine, ctx) {
     h('div', { class: 'sheet-body' },
       h('label', { class: 'field' }, h('span', { class: 'label' }, 'Name'), name),
       h('div', { class: 'field' }, h('span', { class: 'label' }, 'What starts it'), seg),
-      h('label', { class: 'field' }, h('span', { class: 'label' }, 'When'), when),
+      h('label', { class: 'field' }, h('span', { class: 'label' }, 'When'), when, understood),
       h('label', { class: 'field' }, h('span', { class: 'label' }, 'What it does'), does)),
     h('footer', { class: 'sheet-foot' },
       routine ? h('button', { type: 'button', class: 'link', onclick: remove }, 'Delete') : h('span'),
       h('button', { type: 'submit', class: 'btn primary' }, routine ? 'Save' : 'Add routine'))), name, 'small');
+}
+
+async function runNow(agent, routine, ctx) {
+  try {
+    await runtime.runRoutine(agent.name, routine.id);
+    toast(`${agent.name} is running "${routine.name}".`);
+  } catch (err) {
+    toast(err.message, { error: true });
+  }
+  ctx.reload();
 }
 
 function memory(agent, ctx) {

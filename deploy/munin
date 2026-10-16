@@ -1,0 +1,5 @@
+#!/bin/sh
+# munin's command line on the server: the tracker's `munin`, as the munin user, with munin's
+# settings. Installed as /usr/local/bin/munin by deploy/install.sh; run it with sudo, as in
+# `sudo munin status` or `sudo munin project add MUN munin`.
+exec runuser -u munin -- sh -c 'set -a; . /etc/munin/environment; set +a; exec "$0" "$@"' @MUNIN_DIR@/tracker/.venv/bin/munin "$@"

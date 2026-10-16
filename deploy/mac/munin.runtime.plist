@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- munin's agent runtime, as a launchd agent of yours: its own agents, their conversations and
+     routines, with each coder in a container (Docker Desktop or OrbStack). It reads
+     ~/.munin/environment and ~/.munin/secrets at each start and listens on this Mac only.
+     Installed by deploy/install-mac.sh, which fills in where things are. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>munin.runtime</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>set -a; . "@HOME@/.munin/environment"; if [ -f "@HOME@/.munin/secrets" ]; then . "@HOME@/.munin/secrets"; fi; set +a; exec "@NODE@" --disable-warning=ExperimentalWarning "@MUNIN_DIR@/runtime/src/main.js"</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@PATH@</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>@HOME@/.munin</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+  <key>StandardOutPath</key>
+  <string>@HOME@/.munin/logs/runtime.log</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/.munin/logs/runtime.log</string>
+</dict>
+</plist>

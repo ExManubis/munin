@@ -11,13 +11,13 @@ import anyio
 import anyio.to_thread
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from pydantic import Field
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, sessionmaker
 
 from munin import agents
 from munin import issues as svc
 from munin.issues import Actor, MuninError
-from munin.models import Comment, Issue, utcnow
+from munin.models import Comment, Event, Issue, utcnow
 
 INSTRUCTIONS = """\
 Munin is an issue tracker shared by you, other agents and a human.
@@ -42,8 +42,10 @@ Set duplicates and issues that aren't needed to status="cancelled".
 
 The human reads munin, not your session. To ask them something, use
 add_comment(issue, question, ask_human=true) and work on something else meanwhile; their reply
-appears in the issue's comments. If you give up on an issue, comment why and set status="todo"
-and assignee="none".
+appears in the issue's comments. When the answer is one of a few, offer them as options. If you give up
+on an issue, comment why and set status="todo" and assignee="none".
+
+events(after=…) lists what changed in the tracker since an event you saw, comments included.
 
 Before you stop: if nothing is available to you right now but other agents are still working on
 the project, call wait_for_work(project). It returns as soon as there's something for you (an
@@ -57,6 +59,11 @@ OTHERS_AROUND = timedelta(minutes=5)
 
 Status = Literal["todo", "in_progress", "in_review", "done", "cancelled"]
 IssueRef = Annotated[str, Field(description="Issue id, like MUN-12")]
+
+
+class QuestionOption(BaseModel):
+    label: str = Field(description="The answer, in a few words")
+    detail: str = Field("", description="One line on what picking it means")
 
 
 def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
@@ -186,11 +193,40 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         ask_human: Annotated[
             bool, Field(description="True if this is a question for the human. It shows in their inbox.")
         ] = False,
+        options: Annotated[
+            list[QuestionOption] | None,
+            Field(description="With ask_human: 2 to 6 answers to pick from. The human can still write their own."),
+        ] = None,
     ) -> str:
-        """Comment on an issue."""
+        """Comment on an issue, or ask the human something. Returns the comment's id."""
         with sessions() as s:
-            comment = svc.add_comment(s, _actor(ctx), issue, body, ask_human)
-            return f"Commented on {comment.issue.ref}" + (" and asked the human." if comment.asks_human else ".")
+            picks = [option.model_dump() for option in options] if options else None
+            comment = svc.add_comment(s, _actor(ctx), issue, body, ask_human, picks)
+            if comment.asks_human:
+                return (
+                    f"Asked the human on {comment.issue.ref} (comment {comment.id}). Their answer shows up in the "
+                    "issue's comments, and wait_for_work tells you when it does."
+                )
+            return f"Commented on {comment.issue.ref} (comment {comment.id})."
+
+    @tool
+    def events(
+        after: Annotated[
+            int | None, Field(description="An event id from an earlier call. Leave it out for the latest events.")
+        ] = None,
+        project: Annotated[str | None, Field(description="Only this project, like MUN")] = None,
+        limit: Annotated[int, Field(ge=1, le=200)] = 50,
+    ) -> str:
+        """What happened in the tracker, oldest first: issues created, moved, assigned and edited, and comments,
+        including the human's answers. Pass the last id you saw as `after` to get only what's new."""
+        with sessions() as s:
+            found = svc.events_after(s, after, limit, project)
+            if not found:
+                return f"Nothing new after event {after}." if after is not None else "Nothing has happened yet."
+            lines = _feed_lines(s, found)
+            more = len(found) == limit
+            lines.append(f"{'More' if more else 'Next time'}: events(after={found[-1].id})")
+            return "\n".join(lines)
 
     @tool
     async def wait_for_work(
@@ -317,7 +353,32 @@ def _issue_text(issue: Issue) -> str:
 
 def _comment_text(comment: Comment) -> str:
     asks = " (question for the human)" if comment.asks_human else ""
-    return f"\n{comment.author} ({comment.author_kind}), {_when(comment.created_at)}{asks}:\n{comment.body}"
+    text = f"\n{comment.author} ({comment.author_kind}), {_when(comment.created_at)}{asks}:\n{comment.body}"
+    if comment.options:
+        picks = [
+            f"{n}. {o['label']}" + (f" ({o['detail']})" if o.get("detail") else "")
+            for n, o in enumerate(comment.options, 1)
+        ]
+        text += "\nOptions: " + "; ".join(picks)
+    return text
+
+
+def _feed_lines(s: Session, events: list[Event]) -> list[str]:
+    """One line per event, with a take (moved to in_progress and assigned at once) as one line."""
+    folded = {event.id: line for event, line in svc.history(events)}
+    lines = []
+    for event in events:
+        comment = svc.comment_of(s, event)
+        if comment:
+            first = comment.body.strip().splitlines()[0] if comment.body.strip() else ""
+            verb = "asked the human" if comment.asks_human else "commented"
+            text = f"{comment.author} {verb}: {first[:120]}"
+        elif event.id in folded:
+            text = folded[event.id]
+        else:
+            continue  # the assignee half of a take
+        lines.append(f"#{event.id} {_when(event.created_at)}  {event.issue.ref}  {text}")
+    return lines
 
 
 def _when(moment) -> str:
