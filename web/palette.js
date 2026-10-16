@@ -2,6 +2,7 @@
 
 import { store } from './store.js';
 import { h, kbd, icon, avatar } from './ui.js';
+import { figbot } from './figbot.js';
 import { searchIssues, issueOption } from './search.js';
 import { openDialog, closeDialog, openNewIssue, openNewProject, openShortcuts } from './dialogs.js';
 import { notificationsSupported, notificationsOn, toggleNotifications } from './notify.js';
@@ -11,6 +12,7 @@ const go = (hash) => () => (location.hash = hash);
 
 function fixedItems() {
   return [
+    { group: 'Actions', label: 'New agent', icon: icon('plus'), key: 'N', run: go('#/agents/new') },
     { group: 'Actions', label: 'New issue', icon: icon('plus'), key: 'C', run: openNewIssue },
     { group: 'Actions', label: 'New project', icon: icon('plus'), run: openNewProject },
     notificationsSupported && {
@@ -20,8 +22,15 @@ function fixedItems() {
       run: toggleNotifications,
     },
     { group: 'Actions', label: 'Keyboard shortcuts', icon: icon('list'), key: '?', run: openShortcuts },
-    { group: 'Go to', label: 'Inbox', icon: icon('inbox'), hint: store.inbox.length ? `${store.inbox.length} waiting` : '', run: go('#/inbox') },
-    { group: 'Go to', label: 'Agents', icon: avatar('agent', { kind: 'agent', size: 12 }), run: go('#/agents') },
+    ...store.runtimeAgents.map((a) => ({
+      group: 'Agents',
+      label: a.name,
+      icon: figbot({ colour: a.colour, size: 12, state: 'idle', animate: false }),
+      hint: a.waiting ? 'asks you' : a.roleName,
+      run: go(`#/agents/${encodeURIComponent(a.name)}`),
+    })),
+    { group: 'Go to', label: 'Tracker inbox', icon: icon('inbox'), hint: store.inbox.length ? `${store.inbox.length} waiting` : '', run: go('#/inbox') },
+    { group: 'Go to', label: 'Settings', icon: avatar(store.me.name, { kind: 'human', size: 12 }), run: go('#/settings') },
     ...store.projects.map((p) => ({
       group: 'Go to',
       label: p.name,

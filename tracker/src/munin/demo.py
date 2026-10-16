@@ -13,11 +13,14 @@ from munin.models import Agent, Comment, Event, Issue, utcnow
 CLAUDE = Actor("claude-code", "agent")
 CODEX = Actor("codex", "agent")
 FIGBOT = Actor("figbot", "agent")
+# munin's own agents, from the frontend's sample cast; in the tracker they're agents like any other
+FORGE = Actor("forge", "agent")
+VERA = Actor("vera", "agent")
 
 
 def seed(s: Session, user: str) -> None:
     me = Actor(user, "human")
-    for agent in (CLAUDE, CODEX, FIGBOT):
+    for agent in (CLAUDE, CODEX, FIGBOT, FORGE, VERA):
         agents.add_agent(s, agent.name)
 
     svc.create_project(
@@ -100,11 +103,22 @@ def seed(s: Session, user: str) -> None:
     take(CODEX, redact)
     finish(CODEX, redact, "Masks anything that looks like a key or token in log lines. 14 tests.")
 
-    take(CLAUDE, stream)
-    svc.add_comment(s, CLAUDE, stream, "Plan: buffer output and edit one message every 1.5 s to stay under the limit.")
-    svc.add_comment(s, me, stream, "Use the token in .env.test. It's a sandbox bot, so spam it as much as you like.")
+    take(FORGE, retry)
+    finish(FORGE, retry, "On a 429 it now backs off with jitter, up to 3 times. Tests cover the backoff.")
+    svc.add_comment(s, VERA, retry, "Reviewed and merged into main.")
+    svc.update_issue(s, VERA, retry, status="done")
 
-    take(CLAUDE, retry)
+    take(FORGE, stream)
+    svc.add_comment(s, FORGE, stream, "Plan: buffer output and edit one message every 1.5 s to stay under the limit.")
+    svc.add_comment(s, me, stream, "Use the sandbox bot for testing. Spam it as much as you like.")
+    svc.add_comment(
+        s,
+        FORGE,
+        stream,
+        "Telegram caps a message at 4,096 characters. When output runs past that, start a new message or "
+        "attach the rest as a file?",
+        asks_human=True,
+    )
 
     take(FIGBOT, gateway)
     svc.add_comment(s, FIGBOT, gateway, "Gave up after 3 attempts. The gateway test times out on CI only.")

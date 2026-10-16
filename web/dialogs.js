@@ -15,7 +15,8 @@ export function onCreated(fn) {
   afterChange = fn;
 }
 
-dialog.addEventListener('close', () => dialog.replaceChildren());
+// A dialog opened right after another closed must keep its content when the old close event lands.
+dialog.addEventListener('close', () => !dialog.open && dialog.replaceChildren());
 // A click on the backdrop lands on the <dialog> itself.
 dialog.addEventListener('mousedown', (e) => {
   if (e.target === dialog) dialog.close();
@@ -250,7 +251,9 @@ export function openNewProject() {
 // Keyboard shortcuts ------------------------------------------------------------------
 
 const SHORTCUTS = [
-  ['Anywhere', [[[`${MOD.trim()} K`], 'Search or jump to anything'], [['C'], 'New issue'], [['?'], 'This list']]],
+  ['Anywhere', [[[`${MOD.trim()} K`], 'Search or jump to anything'], [['G', 'A'], 'Go to Agents'], [['G', 'T'], 'Go to the Tracker'], [['?'], 'This list']]],
+  ['Agents', [[['N'], 'New agent'], [['1', '…', '9'], "Pick an option on the agent's question"], [['P'], 'Profile'], [['R'], 'View the run'], [['S'], 'Stop the run']]],
+  ['Tracker', [[['C'], 'New issue']]],
   ['Inbox', [[['J', 'K'], 'Next and previous question'], [['↵'], 'Open the issue'], [['R'], 'Write an answer']]],
   ['Issue', [[['E'], 'Edit title and description'], [['R'], 'Write a comment']]],
   ['Project', [[['E'], 'Edit the brief'], [['B'], 'Switch between list and board']]],

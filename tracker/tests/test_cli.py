@@ -42,9 +42,11 @@ def test_demo_data_looks_lived_in(tmp_path):
     with connect(tmp_path / "demo.db")() as s:
         seed(s, "me")
         assert [p.key for p in svc.list_projects(s)] == ["MUN", "WEB"]
-        assert [c.issue.ref for c in svc.inbox(s)] == ["MUN-1", "MUN-3"]
+        assert [c.issue.ref for c in svc.inbox(s)] == ["MUN-1", "MUN-3", "MUN-2"]
+        assert [c.author for c in svc.inbox(s)] == ["codex", "claude-code", "forge"]
         statuses = {i.ref: i.status for i in svc.list_issues(s, status="all")}
         assert statuses["MUN-3"] == "in_review" and statuses["MUN-6"] == "todo" and statuses["MUN-11"] == "done"
+        assert statuses["MUN-5"] == "done" and statuses["MUN-2"] == "in_progress"
         assert [b.ref for b in svc.open_blockers(svc.get_issue(s, "MUN-9"))] == ["MUN-8"]
         history = svc.recent_events(s, limit=500)
         assert history[-1].created_at < history[0].created_at  # spread out, oldest first in time

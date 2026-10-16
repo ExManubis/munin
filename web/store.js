@@ -5,6 +5,9 @@ export const store = {
   projects: [],
   inbox: [],
   agents: [],
+  // From the agent runtime: its agents, and what they're waiting on you for.
+  runtimeAgents: [],
+  waiting: [],
   // The project the current screen is about; the new-issue dialog starts there.
   projectKey: null,
 };

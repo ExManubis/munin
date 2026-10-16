@@ -404,3 +404,13 @@ forge  13:57
 - **hugin's profile header reads "Asks you", not "Idle",** with the `curious` face, to match the open dentist question in 09.
 - **pip isn't in 12's sidebar,** because pip is the agent being created there. The other artboards show the sidebar after pip exists.
 - **The phone composer's key box shows `↑`,** not `⌘↵`.
+
+## Changed while building the dummy frontend
+
+- **No answer field inside an open question card in a conversation.** The message box answers it: its placeholder reads "Answer hugin, or pick an option…", and a line under it says the message answers the question. The tracker inbox has no message box, so its card keeps the field.
+- **PROFILE and the model are only in the ABOUT panel.** The conversation header shows the face, name and role. Where the panel doesn't fit (narrower than about 1000 px, and on the phone), the header gets a tertiary `PROFILE` link instead.
+- **The agents sidebar is 288 px,** not 232, so line 2 has room next to the `ASKS` chip. The tracker's sidebar stays 232.
+- **`Always allow` shows `UNDO` for 8 seconds** after `PROFILE` on the answered card, because one click changes a permission for good.
+- **Settings sits behind the `M` square:** models and providers, outside agents (the old Agents & MCP page, with munin's own agents marked `OWN`), notifications, and a reset for the dummy's sample agents. The tracker sidebar's row of faces opens it.
+- **The `WAITING ON YOU` chip opens a list** of everything waiting, from conversations and the tracker inbox. A question about an issue is listed once. On the phone, the count in the Agents header opens the same list.
+

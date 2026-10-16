@@ -4,6 +4,7 @@
 import { api } from './api.js';
 import { store, remember } from './store.js';
 import { firstLine, toast } from './ui.js';
+import { waitingItems } from './waiting.js';
 
 const SETTING = 'munin:notify';
 export const notificationsSupported = 'Notification' in window;
@@ -47,7 +48,7 @@ let badged = null;
 const RAVEN = 'M2 3H9V4H12V5H14V6H15V7H16V8H14V7H9V8H13V9H8V10H7V11H6V12H5V14H4V13H3V12H2V11H1V9H0V6H1V4H2ZM7 4H6V5H7ZM8 10H9V11H8ZM7 11H8V12H7ZM6 12H7V13H6Z';
 
 export function updateBadges() {
-  const waiting = store.inbox.length;
+  const waiting = waitingItems().length;
   document.title = waiting ? `(${waiting}) ${baseTitle}` : baseTitle;
   if (badged === waiting > 0) return;
   badged = waiting > 0;

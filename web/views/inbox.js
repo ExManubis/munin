@@ -145,7 +145,7 @@ function checklist(steps, feed) {
         step('project', 'Create a project', 'A project holds a pile of issues and a brief that agents read before they start.',
           h('button', { type: 'button', class: primaryIf('project'), onclick: openNewProject }, 'New project')),
         step('token', 'Add an agent token', 'Each agent gets its own token, so you can revoke one without touching the others.',
-          h('a', { class: primaryIf('token'), href: '#/agents' }, 'Open Agents')),
+          h('a', { class: primaryIf('token'), href: '#/settings' }, 'Open Settings')),
         step('connected', 'Connect it', ['Run this where the agent works, with its token in place of <token>:', code(command)]),
         step('working', 'Put it to work', ['In Claude Code, run this and the agent takes the top of the pile:', code(slash)])),
       feed));
