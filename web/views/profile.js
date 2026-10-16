@@ -8,7 +8,7 @@ import { store } from '../store.js';
 import { h, bindDraft, drafts, onModEnter, toast, toggle, topbar } from '../ui.js';
 import { openDialog, closeDialog } from '../dialogs.js';
 import { agentFace, roleTag, hhmm } from './agents.js';
-import { lastRun } from './conversation.js';
+import { routineWhen } from './conversation.js';
 
 let allNotes = false;
 
@@ -243,11 +243,12 @@ function askFirst(agent, set) {
     agent.askFirst.map((rule) => settingRow(rule.label, null, rule.on, rule.label, () => set({ askFirst: { [rule.id]: !rule.on } }))));
 }
 
+// Each trigger: its label, an example for the When field, and what munin understands there.
 const TRIGGERS = [
-  ['schedule', 'On a schedule', 'Weekdays 07:30'],
-  ['mail', 'When mail arrives', 'When mail from Paul Eriksen arrives'],
-  ['calendar', 'When the calendar changes', 'When an event is moved or about to start'],
-  ['tracker', 'When an issue moves', 'When an issue moves to In review'],
+  ['schedule', 'On a schedule', 'Weekdays 07:30', "Like 'Weekdays 07:30', 'Mondays at 9', 'Every night 02:00' or 'Every 2 hours, 08–18', in the runtime's time zone."],
+  ['mail', 'When mail arrives', 'When mail from Paul Eriksen arrives', "munin can't connect mail yet, so this waits until it can."],
+  ['calendar', 'When the calendar changes', 'When an event is moved or about to start', "munin can't connect a calendar yet, so this waits until it can."],
+  ['tracker', 'When an issue moves', 'When an issue moves to In review', "Like 'When an issue moves to In review', 'When vera sends my work back' or 'When an issue in MUN is created'."],
 ];
 
 function routines(agent, ctx) {
@@ -257,7 +258,8 @@ function routines(agent, ctx) {
         h('div', { class: 'routine-main' },
           h('div', { class: 'routine-name' }, h('span', {}, r.name), h('span', { class: 'mono muted' }, r.when)),
           r.does ? h('div', { class: 'hint' }, r.does) : null),
-        h('span', { class: 'mono muted routine-when' }, r.next ? `next ${r.next}` : r.last ? `last ${lastRun(r.last)}` : ''),
+        h('span', { class: ['mono muted routine-when', r.note && 'routine-note'] }, routineWhen(r)),
+        r.note || agent.paused ? null : h('button', { type: 'button', class: 'link', onclick: () => runNow(agent, r, ctx) }, 'Run now'),
         h('button', { type: 'button', class: 'link', onclick: () => editRoutine(agent, r, ctx) }, 'Edit'))))
       : h('p', { class: 'hint' }, 'No routines yet.'),
     h('button', { type: 'button', class: 'btn small', onclick: () => editRoutine(agent, null, ctx) }, 'New routine'));
@@ -269,9 +271,11 @@ function editRoutine(agent, routine, ctx) {
   const when = h('input', { class: 'input', value: routine?.when || '', 'aria-label': 'When' });
   const does = h('textarea', { class: 'textarea', value: routine?.does || '', placeholder: 'What it should do, in a sentence or two.', 'aria-label': 'What it does' });
   const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'What starts it' });
+  const understood = h('p', { class: 'hint' });
   const drawSeg = () => {
-    const example = TRIGGERS.find(([id]) => id === trigger)[2];
+    const [, , example, hint] = TRIGGERS.find(([id]) => id === trigger);
     when.placeholder = example;
+    understood.textContent = hint;
     seg.replaceChildren(...TRIGGERS.map(([id, label]) => h('button', {
       type: 'button',
       'aria-pressed': String(trigger === id),
@@ -286,9 +290,10 @@ function editRoutine(agent, routine, ctx) {
     e.preventDefault();
     const fields = { name: name.value.trim(), trigger, when: when.value.trim() || when.placeholder, does: does.value.trim() };
     try {
-      if (routine) await runtime.updateRoutine(agent.name, routine.id, fields);
-      else await runtime.addRoutine(agent.name, fields);
+      const saved = routine ? await runtime.updateRoutine(agent.name, routine.id, fields) : await runtime.addRoutine(agent.name, fields);
       closeDialog();
+      // The runtime says "when" in its own words, so you see what it understood.
+      if (saved?.when && saved.when !== fields.when) toast(`Saved, as "${saved.when}".`);
       ctx.reload();
     } catch (err) {
       toast(err.message, { error: true });
@@ -306,11 +311,21 @@ function editRoutine(agent, routine, ctx) {
     h('div', { class: 'sheet-body' },
       h('label', { class: 'field' }, h('span', { class: 'label' }, 'Name'), name),
       h('div', { class: 'field' }, h('span', { class: 'label' }, 'What starts it'), seg),
-      h('label', { class: 'field' }, h('span', { class: 'label' }, 'When'), when),
+      h('label', { class: 'field' }, h('span', { class: 'label' }, 'When'), when, understood),
       h('label', { class: 'field' }, h('span', { class: 'label' }, 'What it does'), does)),
     h('footer', { class: 'sheet-foot' },
       routine ? h('button', { type: 'button', class: 'link', onclick: remove }, 'Delete') : h('span'),
       h('button', { type: 'submit', class: 'btn primary' }, routine ? 'Save' : 'Add routine'))), name, 'small');
+}
+
+async function runNow(agent, routine, ctx) {
+  try {
+    await runtime.runRoutine(agent.name, routine.id);
+    toast(`${agent.name} is running "${routine.name}".`);
+  } catch (err) {
+    toast(err.message, { error: true });
+  }
+  ctx.reload();
 }
 
 function memory(agent, ctx) {

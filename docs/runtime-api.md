@@ -89,9 +89,10 @@ An **item** is one of:
 
 | Mock | HTTP | Does |
 |---|---|---|
-| `addRoutine(name, routine)` | `POST /runtime/api/agents/{name}/routines` | |
-| `updateRoutine(name, id, fields)` | `PATCH /runtime/api/agents/{name}/routines/{id}` | |
+| `addRoutine(name, routine)` | `POST /runtime/api/agents/{name}/routines` | `{name, trigger, when, does}`; returns the routine, with `when` in munin's words. A `when` it doesn't understand is a 422 with examples |
+| `updateRoutine(name, id, fields)` | `PATCH /runtime/api/agents/{name}/routines/{id}` | Any of those; returns the routine |
 | `deleteRoutine(name, id)` | `DELETE /runtime/api/agents/{name}/routines/{id}` | |
+| `runRoutine(name, id)` | `POST /runtime/api/agents/{name}/routines/{id}/run` | Runs it now, whatever starts it |
 | `forget(name, noteId)` | `DELETE /runtime/api/agents/{name}/memory/{id}` | |
 | `providers()` | `GET /runtime/api/providers` | `[{id, name, connected, detail}]`. The runtime takes them from its environment; setting one up from Settings is still to design |
 | `models()` | `GET /runtime/api/models` | The models to pick from: `[{id, name, models: [{id, name, day}]}]`, `day` being a rough cost in dollars for a day of steady use |
@@ -99,10 +100,18 @@ An **item** is one of:
 A **routine** starts on a schedule or a trigger:
 
 ```jsonc
-{ "id": "r3", "name": "Paul first", "trigger": "mail",            // schedule | mail | calendar | tracker
-  "when": "When mail from Paul Eriksen arrives", "does": "Tell me right away and draft a reply.",
-  "next": null, "last": "…" }                                     // next for schedules, last for triggers
+{ "id": "r3", "name": "Fix what vera flags", "trigger": "tracker",  // schedule | tracker | mail | calendar
+  "when": "When vera moves forge's issue from In review to Todo",  // as munin understood it
+  "does": "Pick it back up and fix what she found.",
+  "next": null, "last": "…",                                       // next for schedules; last for any
+  "note": null }                                                   // why it doesn't run yet, if it doesn't
 ```
+
+What the runtime understands in `when`:
+
+- **On a schedule**, in the runtime's time zone (its `TZ`): "Weekdays 07:30", "Mondays at 9", "Mon, Wed, Fri 09:00", "Every night 02:00", "Every 2 hours, 08–18", "Every 30 minutes on weekdays". It's saved as "Weekdays 07:30", "Every 2 hours, 08:00–18:00" and so on.
+- **When something happens in the tracker:** "When an issue moves to In review", "When vera sends my work back", "When an issue in MUN is created", "When someone comments on my issue", "When anything happens in MUN". An agent's own doing never starts its routines.
+- **Mail and calendar** are kept as written, with a note that they wait for those apps.
 
 The runtime serves the models, so a new provider's show up without a frontend change. Roles, abilities and apps are still fixed lists in `web/runtime/roles.js`, with the runtime's half in `runtime/src/roles.js`; the runtime should serve them too, at `GET /runtime/api/roles`.
 
@@ -134,6 +143,7 @@ The runtime (`runtime/src/`) is a thin layer over pi-durable:
 - **Steering:** `send` while a run is going is `submit({ whenBusy: "steer" })`.
 - **Brief, model and abilities** are the conversation's agent settings: instructions, model and extensions. Coders get pi-durable's coding tools (read, write, edit, bash) in their own folder.
 - **Memory** is a `remember` tool. Notes go into the agent's system prompt.
+- **Routines** (`routines.js`, `schedule.js`, `watch.js`) run on a timer. A routine that's due becomes an input of munin's own kind (`munin.routine`), queued behind whatever the agent is doing (`whenBusy: "followUp"`), and shows in the conversation as "ran routine". A routine whose last run is still queued isn't queued again, a paused agent skips its routines, and a run the runtime missed while it was down still happens if it's less than 15 minutes late. For tracker triggers, the runtime reads the tracker's `events` feed every half minute with the agent's own token, starting from the moment the routine is first watched, and matches its lines without asking a model. A routine on `my issue` asks the tracker whose issue it is.
 - **The tracker** (`tracker.js`) is an extension of the tracker's own MCP tools. The runtime lists them once, with any connected agent's token, and installs them; until the tracker answers, the extension is empty and agents are told it's away, and the runtime asks again every half minute. Each call goes out with the calling agent's token, so the tracker sees the agent by its name. The tracker's instructions and the agent's projects go into its system prompt. A few calls also land in the conversation:
   - `add_comment(…, ask_human=true)` becomes a question card with `trackerQuestion` set, so the frontend lists it once and an answer in either place answers both;
   - `update_issue` to a new status becomes an action line (took, sent to review, moved to Done, sent back, put back, cancelled), and a run started while the agent has an issue in progress belongs to that issue;
@@ -143,15 +153,14 @@ The runtime (`runtime/src/`) is a thin layer over pi-durable:
 
 ## What this version does
 
-Real: agents and their settings, conversations with runs, questions with options, ask-first approvals with undo, coding tools in a folder, the tracker for coders and reviewers, memory, pause and resume, usage, models, the live stream, and everything surviving a restart.
+Real: agents and their settings, conversations with runs, questions with options, ask-first approvals with undo, coding tools in a folder, the tracker for coders and reviewers, routines on a schedule or a tracker trigger, memory, pause and resume, usage, models, the live stream, and everything surviving a restart.
 
-An agent in the tracker starts work when you tell it to, from its projects in the ABOUT panel or in your own words; it keeps going until `wait_for_work` says there's nothing left.
+An agent in the tracker starts work when you tell it to, from its projects in the ABOUT panel, or when a routine says so: "Weekdays 09:00: continue the MUN project" keeps a coder on the pile, and "When an issue moves to In review" puts a reviewer on what lands. It keeps going until `wait_for_work` says there's nothing left.
 
 Stored but not acted on yet, next roughly in this order:
 
-1. **Routines** run on their schedule, or when the tracker's `events` feed says something happened, so agents start work by themselves.
-2. **A branch per issue**, as a git worktree in the agent's folder (`worksIn.branch` is `null` until then).
-3. **Apps and the web** as tools, through MCP servers, with ask-first rules for apps like "send mail".
-4. **A budget that pauses** the agent at its limit.
-5. **Faster reads.** Each read goes through an agent's whole conversation; it should keep items and page them.
-6. **Numbered events** on the stream, and replay on reconnect.
+1. **A branch per issue**, as a git worktree in the agent's folder (`worksIn.branch` is `null` until then).
+2. **Apps and the web** as tools, through MCP servers, with ask-first rules for apps like "send mail". Mail and calendar routines start then.
+3. **A budget that pauses** the agent at its limit.
+4. **Faster reads.** Each read goes through an agent's whole conversation; it should keep items and page them.
+5. **Numbered events** on the stream, and replay on reconnect.

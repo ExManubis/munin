@@ -388,7 +388,7 @@ function about(agent, ctx) {
         h('div', { class: 'label' }, 'Routines'),
         agent.routines.map((r) => h('div', { class: 'routine-mini' },
           h('div', {}, r.name),
-          h('div', { class: 'mono muted' }, [r.when, r.next ? `next ${r.next}` : r.last ? `last ${lastRun(r.last)}` : null].filter(Boolean).join(' · ')),
+          h('div', { class: 'mono muted' }, [r.when, routineWhen(r)].filter(Boolean).join(' · ')),
           r.does && agent.role === 'coder' ? h('div', { class: 'hint' }, `"${r.does}"`) : null))) : null,
       agent.apps.length ? h('div', { class: 'about-section' },
         h('div', { class: 'label' }, 'Apps'),
@@ -432,9 +432,20 @@ export function tokens(n) {
   return String(n);
 }
 
-export function lastRun(value) {
+// "today 09:00", "tomorrow 07:30", "Mon 09:00", for a routine's last and next run. Text
+// that isn't a time (the mock's "soon") shows as it is.
+export function dayTime(value) {
   const date = new Date(value);
-  const today = new Date().toDateString() === date.toDateString();
-  const yesterday = new Date(Date.now() - 86400000).toDateString() === date.toDateString();
-  return `${today ? 'today' : yesterday ? 'yesterday' : date.toLocaleDateString(undefined, { weekday: 'short' })} ${hhmm(date)}`;
+  if (Number.isNaN(date.getTime())) return String(value);
+  const day = (offset) => new Date(Date.now() + offset * 86400000).toDateString();
+  const names = { [day(0)]: 'today', [day(1)]: 'tomorrow', [day(-1)]: 'yesterday' };
+  return `${names[date.toDateString()] || date.toLocaleDateString(undefined, { weekday: 'short' })} ${hhmm(date)}`;
+}
+
+// When a routine runs next, or last ran, or why it doesn't.
+export function routineWhen(r) {
+  if (r.note) return r.note;
+  if (r.next) return `next ${dayTime(r.next)}`;
+  if (r.last) return `last ${dayTime(r.last)}`;
+  return r.trigger === 'tracker' ? 'watching the tracker' : '';
 }

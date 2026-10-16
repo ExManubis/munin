@@ -56,6 +56,7 @@ export function connect(base) {
     addRoutine: (name, routine) => call('POST', `${agent(name)}/routines`, routine),
     updateRoutine: (name, id, fields) => call('PATCH', `${agent(name)}/routines/${enc(id)}`, fields),
     deleteRoutine: (name, id) => call('DELETE', `${agent(name)}/routines/${enc(id)}`),
+    runRoutine: (name, id) => call('POST', `${agent(name)}/routines/${enc(id)}/run`, {}),
     forget: (name, id) => call('DELETE', `${agent(name)}/memory/${enc(id)}`),
     providers: () => call('GET', '/providers'),
     models: () => call('GET', '/models'),

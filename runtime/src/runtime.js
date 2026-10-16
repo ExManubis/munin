@@ -3,6 +3,7 @@
 // approvals as entries in their conversations, and the API the frontend reads
 // (docs/runtime-api.md).
 
+import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -17,6 +18,7 @@ import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite
 import { ROLES, roleName, askFirstFor, ruleMatches } from './roles.js';
 import { toItems, summarize } from './items.js';
 import { createTracker } from './tracker.js';
+import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
 
 export class RuntimeError extends Error {
   constructor(status, message) {
@@ -70,7 +72,8 @@ function trackerLink(value, current) {
   return link;
 }
 
-export async function openRuntime(settings, { models, storage } = {}) {
+// `now` and `timers` are for tests: a clock to run routines by, and whether a timer runs them.
+export async function openRuntime(settings, { models, storage, now = Date.now, timers = true } = {}) {
   storage ||= settings.db === ':memory:' ? new MemoryStorage() : await openNodeSqliteStorage(settings.db);
   const agents = new Map(); // name → settings
   const listeners = new Set();
@@ -78,7 +81,7 @@ export async function openRuntime(settings, { models, storage } = {}) {
 
   const agentFor = (conversationId) => [...agents.values()].find((a) => a.conversationId === conversationId) || null;
   const conversationOf = async (agent) => harness.conversation(agent.conversationId, ctx);
-  const write = async (agent, kind, data) => (await conversationOf(agent)).submit({ type: 'write', entry: { kind, data: { at: Date.now(), ...data } } }, ctx);
+  const write = async (agent, kind, data) => (await conversationOf(agent)).submit({ type: 'write', entry: { kind, data: { at: now(), ...data } } }, ctx);
 
   // munin's extension: who the agent is and what it remembers, asking the human, remembering
   // things, and asking first before what its rules say.
@@ -234,7 +237,7 @@ export async function openRuntime(settings, { models, storage } = {}) {
       brief: agent.brief, thinking: agent.thinking,
       abilities: { ...agent.abilities }, apps: [...agent.apps],
       askFirst: agent.askFirst.map(({ match, tool, tools, ...rule }) => rule),
-      routines: agent.routines.map((r) => ({ ...r })),
+      routines: agent.routines.map((r) => routineOut(r, agent)),
       memory: agent.memory.map((n) => ({ ...n })), memoryCount: agent.memory.length,
       usage: usageOf(entries), budget: agent.budget,
       worksIn: agent.abilities.code ? { folder: tilde(agent.folder), branch: null } : null,
@@ -312,7 +315,7 @@ export async function openRuntime(settings, { models, storage } = {}) {
       const answer = option || String(text || '').trim();
       if (!answer) throw invalid('Pick an option or write an answer.');
       await input(agent, `${settings.user} answered your question "${question.text}": ${answer}`,
-        { kind: 'munin.answer', data: { question: id, option: option || null, text: option ? null : answer, at: Date.now() } });
+        { kind: 'munin.answer', data: { question: id, option: option || null, text: option ? null : answer, at: now() } });
     },
 
     async decide(name, id, decision) {
@@ -413,19 +416,37 @@ export async function openRuntime(settings, { models, storage } = {}) {
       await write(agent, 'munin.action', { verb: 'resumed', object: 'by you' });
     },
 
-    async addRoutine(name, { name: title, trigger = 'schedule', when = '', does = '' } = {}) {
+    async addRoutine(name, fields = {}) {
       const agent = need(name);
-      if (!String(title || '').trim()) throw invalid('A routine needs a name.');
-      agent.routines.push({ id: `r${Date.now()}`, name: title.trim(), trigger, when, does, next: null, last: null });
+      const routine = { id: `r${randomUUID().slice(0, 8)}`, ...prepared(fields, agent), last: null };
+      agent.routines.push(routine);
       await saveAgents();
+      return routineOut(routine, agent);
     },
 
     async updateRoutine(name, id, fields = {}) {
-      const routine = need(name).routines.find((r) => r.id === id);
-      if (!routine) throw new RuntimeError(404, 'That routine is gone.');
-      for (const key of ['name', 'trigger', 'when', 'does']) if (key in fields) routine[key] = fields[key];
+      const agent = need(name);
+      const at = agent.routines.findIndex((r) => r.id === id);
+      if (at < 0) throw new RuntimeError(404, 'That routine is gone.');
+      const old = agent.routines[at];
+      agent.routines[at] = { id, ...prepared({ ...old, ...fields }, agent), last: old.last };
       await saveAgents();
+      return routineOut(agent.routines[at], agent);
     },
+
+    // Run it now, whatever its schedule.
+    async runRoutine(name, id) {
+      const agent = need(name);
+      const routine = agent.routines.find((r) => r.id === id);
+      if (!routine) throw new RuntimeError(404, 'That routine is gone.');
+      if (agent.paused) throw conflict(`${name} is paused. Resume it first.`);
+      await runRoutine(agent, routine, { why: 'you asked' });
+      await saveAgents();
+      return routineOut(routine, agent);
+    },
+
+    // Whatever routines are due now; the timer calls this, and tests do.
+    tick: () => scheduler.tick(),
 
     async deleteRoutine(name, id) {
       const agent = need(name);
@@ -457,10 +478,67 @@ export async function openRuntime(settings, { models, storage } = {}) {
     },
 
     async close() {
+      closed = true;
+      clearTimeout(timer);
       listeners.clear();
       tracker.close();
       await harness.close(ctx);
     },
   };
+
+  // Routines ------------------------------------------------------------------------------
+
+  function prepared(fields, agent) {
+    try {
+      return prepareRoutine(fields, agent, now());
+    } catch (err) {
+      if (err instanceof RoutineError) throw invalid(err.message);
+      throw err;
+    }
+  }
+
+  const iso = (ms) => (ms == null ? null : new Date(ms).toISOString());
+  const routineOut = (r, agent) => ({
+    id: r.id, name: r.name, trigger: r.trigger, when: r.when, does: r.does,
+    next: iso(r.next), last: iso(r.last), note: routineNote(r, agent),
+  });
+
+  // A routine's input waits behind whatever the agent is doing; one that's still waiting
+  // isn't queued again.
+  const queued = new Map();
+  async function runRoutine(agent, routine, { why, issue = null }) {
+    if (agent.paused) return false;
+    const key = `${agent.name}/${routine.id}`;
+    if (queued.has(key) && (await queued.get(key).status(ctx)).status === 'queued') return false;
+    routine.last = now();
+    const text = `Your routine "${routine.name}" runs now, because ${why}.\n\nWhat to do: ${routine.does}`;
+    const entry = { kind: 'munin.routine', data: { routine: routine.id, name: routine.name, issue, at: now() } };
+    queued.set(key, await (await conversationOf(agent)).submit({ type: 'input', content: text, whenBusy: 'followUp', entry }, ctx));
+    return true;
+  }
+
+  const scheduler = createScheduler({
+    agents: () => agents.values(),
+    run: runRoutine,
+    feed: (agent, args) => tracker.call(agent, 'events', args),
+    issue: (agent, ref) => tracker.call(agent, 'get_issue', { issue: ref }),
+    save: saveAgents,
+    now,
+  });
+  let closed = false;
+  let timer = null;
+  const loop = async () => {
+    try {
+      await scheduler.tick();
+    } catch (err) {
+      console.error('routines:', err);
+    }
+    if (!closed) {
+      timer = setTimeout(loop, scheduler.wait());
+      timer.unref?.();
+    }
+  };
+  if (timers) loop();
+
   return api;
 }

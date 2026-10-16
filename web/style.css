@@ -838,6 +838,7 @@ button.option-card:hover { border-color: var(--text); }
 .routine-main { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
 .routine-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; color: var(--text); }
 .routine-when { flex-shrink: 0; }
+.routine-when.routine-note { flex-shrink: 1; max-width: 260px; text-align: right; }
 .profile-section > .btn.small { align-self: flex-start; }
 .notes { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 2px 0 2px 16px; border-left: 1px solid var(--line); list-style: none; }
 .note { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; color: var(--text-2); }

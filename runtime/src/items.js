@@ -132,6 +132,11 @@ export function toItems(entries, { busy = false } = {}) {
         }
         break;
       }
+      case 'munin.routine': {
+        closeRun(entry.data.at);
+        items.push({ id, kind: 'action', at: iso(entry.data.at), verb: 'ran routine', object: entry.data.name, issue: entry.data.issue || null });
+        break;
+      }
       case 'munin.action': {
         const { issue, status } = entry.data;
         items.push({ id, kind: 'action', at: iso(entry.data.at), verb: entry.data.verb, object: entry.data.object || null, issue: issue || null });

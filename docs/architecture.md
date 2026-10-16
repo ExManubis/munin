@@ -106,12 +106,13 @@ pi-durable is experimental, and its API changes between releases. Pin exact vers
    - the tracker's three additions for it are done: questions with options, a question's id back from `add_comment`, and an event feed over MCP;
    - the runtime's first version runs agents on pi-durable with OpenRouter, Ollama or a stand-in model, with questions, ask-first approvals, coding tools and memory, and the frontend uses it when it's running;
    - coders and reviewers work in the tracker over MCP with their own tokens, and their questions about issues show in both places;
-   - next: routines that run, a branch per issue, apps and the web as tools, and a budget that pauses.
+   - routines run on a schedule, or when the tracker's event feed shows a match, so agents start work by themselves;
+   - next: a branch per issue, apps and the web as tools, and a budget that pauses.
 5. **Then:** live agent output, cost per issue, approvals, push notifications, and maybe the Claudewitz iPhone app as a client.
 
 ## Open questions
 
 - **Routing at the edge:** whether `tailscale serve` passes path prefixes through unchanged, or a small proxy such as Caddy sits behind it.
-- **Your answers and running agents:** the runtime can read the tracker's `events` feed to hear answers at once instead of polling `wait_for_work`; how often, and whether the tracker should push instead, is still open.
+- **The tracker's feed, read or pushed:** the runtime reads the tracker's `events` feed every half minute for agents with tracker routines, with each agent's own token. That's simple and keeps the tracker unaware of the runtime; whether the tracker should push instead, once there are many agents, is still open.
 - **Costs:** budgets per project or per agent, and what happens at the limit.
 - **The command line:** one `munin` command for every service, or one per service. Today `munin` is the tracker's.

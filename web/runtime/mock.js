@@ -705,8 +705,10 @@ export const mock = {
   async addRoutine(name, { name: title, trigger, when, does }) {
     const agent = need(name);
     if (!String(title || '').trim()) throw new Error('A routine needs a name.');
-    agent.routines.push({ id: `r${Date.now()}`, name: title.trim(), trigger, when, does, next: trigger === 'schedule' ? 'soon' : null });
+    const routine = { id: `r${Date.now()}`, name: title.trim(), trigger, when, does, next: trigger === 'schedule' ? 'soon' : null };
+    agent.routines.push(routine);
     changed();
+    return { ...routine };
   },
 
   async updateRoutine(name, id, fields) {
@@ -714,6 +716,18 @@ export const mock = {
     if (!routine) throw new Error('That routine is gone.');
     if ('name' in fields && !String(fields.name || '').trim()) throw new Error('A routine needs a name.');
     Object.assign(routine, fields);
+    changed();
+    return { ...routine };
+  },
+
+  async runRoutine(name, id) {
+    const agent = need(name);
+    const routine = agent.routines.find((r) => r.id === id);
+    if (!routine) throw new Error('That routine is gone.');
+    if (agent.paused) throw new Error(`${name} is paused. Resume it first.`);
+    routine.last = Date.now();
+    act(name, 'ran routine', routine.name);
+    soon(name, 1800, () => say(name, `Done: ${routine.does.charAt(0).toLowerCase()}${routine.does.slice(1)}`));
     changed();
   },
 

@@ -37,6 +37,7 @@ export function createRuntimeServer(runtime, settings) {
   route('POST', '/agents/([^/]+)/routines', (m, body) => runtime.addRoutine(enc(m[1]), body));
   route('PATCH', '/agents/([^/]+)/routines/([^/]+)', (m, body) => runtime.updateRoutine(enc(m[1]), enc(m[2]), body));
   route('DELETE', '/agents/([^/]+)/routines/([^/]+)', (m) => runtime.deleteRoutine(enc(m[1]), enc(m[2])));
+  route('POST', '/agents/([^/]+)/routines/([^/]+)/run', (m) => runtime.runRoutine(enc(m[1]), enc(m[2])));
   route('DELETE', '/agents/([^/]+)/memory/([^/]+)', (m) => runtime.forget(enc(m[1]), enc(m[2])));
   route('GET', '/waiting', () => runtime.waiting());
   route('GET', '/providers', () => runtime.providers());
@@ -93,7 +94,7 @@ export function createRuntimeServer(runtime, settings) {
           body = raw ? JSON.parse(raw) : {};
         }
         const result = await handler(m, body);
-        return send(res, req.method === 'POST' && url.pathname.endsWith('/agents') ? 201 : 200, result ?? {}, cors);
+        return send(res, req.method === 'POST' && /\/(agents|routines)$/.test(url.pathname) ? 201 : 200, result ?? {}, cors);
       } catch (err) {
         if (err instanceof SyntaxError) return send(res, 400, { detail: 'That isn’t JSON.' }, cors);
         if (err instanceof RuntimeError) return send(res, err.status, { detail: err.message }, cors);

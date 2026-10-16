@@ -204,9 +204,17 @@ export function createTracker({ registry, agents, agentFor, write, user }) {
     return false;
   }
 
+  // A tool call as the agent, outside a conversation: the routines read the event feed this way.
+  async function call(agent, name, args) {
+    const result = await mcpClient(agent.tracker.url, agent.tracker.token).call(name, args);
+    if (result?.isError) throw new TrackerError(textOf(result));
+    return textOf(result);
+  }
+
   return {
     extension: () => extension,
     connect,
+    call,
     reachable: () => Boolean(listed),
     close() {
       closed = true;
