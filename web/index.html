@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="apple-mobile-web-app-title" content="munin">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>munin</title>
+<link rel="icon" href="favicon.ico" sizes="48x48">
+<link rel="icon" href="favicon.svg" type="image/svg+xml" id="favicon">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="site.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Red+Hat+Text:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar" aria-label="Sidebar"></aside>
+  <main class="main" id="main"></main>
+  <nav class="tabbar" id="tabbar" aria-label="Main"></nav>
+</div>
+<div class="offline" id="offline" role="alert" hidden>Can't reach munin. Retrying every 5 seconds.</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<dialog class="modal" id="dialog" aria-label="Dialog"></dialog>
+</body>
+</html>

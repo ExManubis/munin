@@ -1,0 +1,339 @@
+"""JSON API for the web UI. It acts as the human; there's no login, so munin only listens locally."""
+
+import asyncio
+from datetime import UTC, datetime
+from importlib.metadata import version
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import StreamingResponse
+from pydantic import AfterValidator, BaseModel
+from sqlalchemy.orm import Session
+
+from munin import agents as agent_svc
+from munin import issues as svc
+from munin.issues import Actor
+from munin.models import Agent, Comment, Event, Issue, Project
+
+router = APIRouter(prefix="/api")
+
+
+def session(request: Request):
+    with request.app.state.sessions() as s:
+        yield s
+
+
+def human(request: Request) -> Actor:
+    return Actor(name=request.app.state.settings.user, kind="human")
+
+
+DB = Annotated[Session, Depends(session)]
+Human = Annotated[Actor, Depends(human)]
+
+
+# Response shapes
+
+# The database keeps UTC without a timezone; say so on the way out ("...Z").
+UTCDateTime = Annotated[datetime, AfterValidator(lambda moment: moment.replace(tzinfo=UTC))]
+
+
+class ProjectOut(BaseModel):
+    key: str
+    name: str
+    description: str
+    counts: dict[str, int]
+
+
+class CommentOut(BaseModel):
+    id: int
+    author: str
+    author_kind: str
+    body: str
+    asks_human: bool
+    created_at: UTCDateTime
+
+
+class EventOut(BaseModel):
+    id: int
+    actor: str
+    actor_kind: str
+    kind: str
+    old: str | None
+    new: str | None
+    created_at: UTCDateTime
+
+
+class IssueBriefOut(BaseModel):
+    id: str
+    title: str
+    status: str
+    assignee: str | None
+
+
+class IssueOut(BaseModel):
+    id: str
+    project: str
+    title: str
+    description: str
+    status: str
+    assignee: str | None
+    position: float
+    created_by: str
+    created_at: UTCDateTime
+    updated_at: UTCDateTime
+    # When the issue entered its status; older issues fall back to their last update.
+    status_changed_at: UTCDateTime
+    waiting_on_human: bool
+    # Ids of the issues this one waits for that aren't done yet.
+    blocked_by: list[str]
+
+
+class IssueDetailOut(IssueOut):
+    waits_for: list[IssueBriefOut]
+    blocks: list[IssueBriefOut]
+    comments: list[CommentOut]
+    events: list[EventOut]
+
+
+class InboxItemOut(BaseModel):
+    issue: IssueOut
+    question: CommentOut
+
+
+class ActivityOut(EventOut):
+    issue: IssueBriefOut
+    project: str
+    text: str
+
+
+class AgentOut(BaseModel):
+    name: str
+    token_hint: str
+    created_at: UTCDateTime
+    last_seen_at: UTCDateTime | None
+    revoked: bool
+    # Issues the agent has in progress right now.
+    working_on: list[IssueBriefOut]
+
+
+class NewAgentOut(AgentOut):
+    token: str
+
+
+def _project_out(project: Project, counts: dict[str, int]) -> ProjectOut:
+    return ProjectOut(key=project.key, name=project.name, description=project.description, counts=counts)
+
+
+def _comment_out(comment: Comment) -> CommentOut:
+    return CommentOut.model_validate(comment, from_attributes=True)
+
+
+def _event_out(event: Event) -> EventOut:
+    return EventOut.model_validate(event, from_attributes=True)
+
+
+def _brief_out(issue: Issue) -> IssueBriefOut:
+    return IssueBriefOut(id=issue.ref, title=issue.title, status=issue.status, assignee=issue.assignee)
+
+
+def _issue_out(issue: Issue) -> IssueOut:
+    return IssueOut(
+        id=issue.ref,
+        project=issue.project.key,
+        title=issue.title,
+        description=issue.description,
+        status=issue.status,
+        assignee=issue.assignee,
+        position=issue.position,
+        created_by=issue.created_by,
+        created_at=issue.created_at,
+        updated_at=issue.updated_at,
+        status_changed_at=issue.status_changed_at or issue.updated_at,
+        waiting_on_human=svc.waiting_on_human(issue),
+        blocked_by=[blocker.ref for blocker in svc.open_blockers(issue)],
+    )
+
+
+def _issue_detail_out(issue: Issue) -> IssueDetailOut:
+    return IssueDetailOut(
+        **_issue_out(issue).model_dump(),
+        waits_for=[_brief_out(blocker) for blocker in issue.blocked_by],
+        blocks=[_brief_out(blocked) for blocked in issue.blocks],
+        comments=[_comment_out(c) for c in issue.comments],
+        events=[_event_out(e) for e in issue.events],
+    )
+
+
+def _agent_out(agent: Agent, working_on: list[Issue]) -> AgentOut:
+    return AgentOut(
+        name=agent.name,
+        token_hint=agent.token_hint,
+        created_at=agent.created_at,
+        last_seen_at=agent.last_seen_at,
+        revoked=agent.revoked_at is not None,
+        working_on=[_brief_out(issue) for issue in working_on if issue.assignee == agent.name],
+    )
+
+
+# Request shapes
+
+
+class ProjectIn(BaseModel):
+    key: str
+    name: str
+    description: str = ""
+
+
+class ProjectPatch(BaseModel):
+    name: str | None = None
+    description: str | None = None
+
+
+class IssueIn(BaseModel):
+    project: str
+    title: str
+    description: str = ""
+    status: str = "todo"
+    assignee: str | None = None
+    blocked_by: list[str] = []
+
+
+class IssuePatch(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    status: str | None = None
+    assignee: str | None = None
+    position: float | None = None
+    blocked_by: list[str] | None = None
+
+
+class CommentIn(BaseModel):
+    body: str
+
+
+class AgentIn(BaseModel):
+    name: str
+
+
+# Routes
+
+
+@router.get("/me")
+def me(request: Request) -> dict:
+    # The address this page was opened on also reaches /mcp, even when munin listens on 0.0.0.0.
+    return {
+        "name": request.app.state.settings.user,
+        "mcp_url": f"{str(request.base_url).rstrip('/')}/mcp",
+        "version": version("munin"),
+    }
+
+
+@router.get("/projects")
+def list_projects(s: DB) -> list[ProjectOut]:
+    counts = svc.issue_counts(s)
+    return [_project_out(p, counts.get(p.key, {})) for p in svc.list_projects(s)]
+
+
+@router.post("/projects", status_code=201)
+def create_project(body: ProjectIn, s: DB) -> ProjectOut:
+    return _project_out(svc.create_project(s, body.key, body.name, body.description), {})
+
+
+@router.patch("/projects/{key}")
+def update_project(key: str, body: ProjectPatch, s: DB) -> ProjectOut:
+    project = svc.update_project(s, key, name=body.name, description=body.description)
+    return _project_out(project, svc.issue_counts(s).get(project.key, {}))
+
+
+@router.get("/issues")
+def list_issues(
+    s: DB,
+    project: str | None = None,
+    status: str | None = None,
+    assignee: str | None = None,
+    q: Annotated[str | None, Query(description="An issue id, or words in titles and descriptions")] = None,
+    limit: Annotated[int | None, Query(ge=1, le=500)] = None,
+) -> list[IssueOut]:
+    return [_issue_out(issue) for issue in svc.list_issues(s, project, status, assignee, limit, q)]
+
+
+@router.post("/issues", status_code=201)
+def create_issue(body: IssueIn, s: DB, actor: Human) -> IssueDetailOut:
+    issue = svc.create_issue(
+        s, actor, body.project, body.title, body.description, body.status, body.assignee, body.blocked_by
+    )
+    return _issue_detail_out(issue)
+
+
+@router.get("/issues/{ref}")
+def get_issue(ref: str, s: DB) -> IssueDetailOut:
+    return _issue_detail_out(svc.get_issue(s, ref))
+
+
+@router.patch("/issues/{ref}")
+def update_issue(ref: str, body: IssuePatch, s: DB, actor: Human) -> IssueDetailOut:
+    changes = body.model_dump(exclude_unset=True)
+    return _issue_detail_out(svc.update_issue(s, actor, ref, **changes))
+
+
+@router.post("/issues/{ref}/comments", status_code=201)
+def add_comment(ref: str, body: CommentIn, s: DB, actor: Human) -> IssueDetailOut:
+    comment = svc.add_comment(s, actor, ref, body.body)
+    return _issue_detail_out(comment.issue)
+
+
+@router.get("/inbox")
+def inbox(s: DB) -> list[InboxItemOut]:
+    return [InboxItemOut(issue=_issue_out(c.issue), question=_comment_out(c)) for c in svc.inbox(s)]
+
+
+@router.get("/activity")
+def activity(s: DB, project: str | None = None, limit: Annotated[int, Query(ge=1, le=200)] = 50) -> list[ActivityOut]:
+    """What happened lately, newest first."""
+    return [
+        ActivityOut(
+            **_event_out(event).model_dump(),
+            issue=_brief_out(event.issue),
+            project=event.issue.project.key,
+            text=svc.describe_event(event),
+        )
+        for event in svc.recent_events(s, limit, project)
+    ]
+
+
+@router.get("/stream")
+async def stream(request: Request) -> StreamingResponse:
+    """Server-sent events: a "changed" event whenever anything in munin changes."""
+    changes = request.app.state.changes
+
+    async def events():
+        seen, quiet = changes.revision, 0.0
+        yield "retry: 3000\n\n"
+        while not await request.is_disconnected():
+            if changes.revision != seen:
+                seen, quiet = changes.revision, 0.0
+                yield f"event: changed\ndata: {seen}\n\n"
+            elif quiet >= 15:
+                quiet = 0.0
+                yield ": still here\n\n"
+            await asyncio.sleep(0.25)
+            quiet += 0.25
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/agents")
+def list_agents(s: DB) -> list[AgentOut]:
+    working = svc.list_issues(s, status="in_progress")
+    return [_agent_out(agent, working) for agent in agent_svc.list_agents(s)]
+
+
+@router.post("/agents", status_code=201)
+def add_agent(body: AgentIn, s: DB) -> NewAgentOut:
+    agent, token = agent_svc.add_agent(s, body.name)
+    return NewAgentOut(**_agent_out(agent, []).model_dump(), token=token)
+
+
+@router.delete("/agents/{name}")
+def revoke_agent(name: str, s: DB) -> AgentOut:
+    return _agent_out(agent_svc.revoke_agent(s, name), [])
