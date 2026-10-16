@@ -2,13 +2,14 @@
 // The brief fills in from the role until you change it.
 
 import { runtime } from '../runtime/index.js';
-import { ROLES, PROVIDERS, roleOf, costHint } from '../runtime/roles.js';
+import { ROLES, roleOf, costHint, modelIn } from '../runtime/roles.js';
 import { store } from '../store.js';
-import { h, MOD, toast, topbar } from '../ui.js';
+import { h, MOD, onModEnter, toast, topbar } from '../ui.js';
 import { check } from '../cards.js';
 import { figbot, COLOURS } from '../figbot.js';
 
 let form = blank();
+let catalog = []; // runtime.models(), loaded with the screen
 
 function blank() {
   return { role: null, name: '', colour: 'white', provider: 'openrouter', model: null, brief: '', briefEdited: false };
@@ -18,6 +19,7 @@ export const view = {
   title: () => 'New agent',
 
   async load() {
+    catalog = await runtime.models();
     return { taken: store.runtimeAgents.map((a) => [a.name, a.colour]) };
   },
 
@@ -41,7 +43,7 @@ export const view = {
           h('div', { class: 'role-grid' }, ROLES.map((r, i) => roleCard(r, i, ctx)))),
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Name'),
-          h('input', {
+          onModEnter(h('input', {
             class: 'input name-input',
             value: form.name,
             placeholder: 'pip',
@@ -54,7 +56,7 @@ export const view = {
               if (form.role && !form.briefEdited) form.brief = roleOf(form.role).brief(form.name.trim() || 'it');
               ctx.rerender();
             },
-          })),
+          }), () => create(ctx))),
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Colour'),
           h('p', { class: 'hint section-lead-hint' }, `How you'll tell ${name} apart. Names under a colour are agents already using it.`),
@@ -62,11 +64,11 @@ export const view = {
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Model'),
           modelPicker(ctx),
-          h('p', { class: 'hint' }, role && form.model === role.model ? role.hint : costHint(form.provider, currentModel()))),
+          h('p', { class: 'hint' }, role && chosen().model === role.model ? role.hint : costHint(catalog, chosen().provider, chosen().model))),
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Brief'),
           h('p', { class: 'hint section-lead-hint' }, role ? 'Filled in from the role. Make it yours.' : 'Pick a role and this fills in.'),
-          h('textarea', {
+          onModEnter(h('textarea', {
             class: 'textarea brief-box',
             value: form.brief,
             'aria-label': 'Brief',
@@ -75,7 +77,7 @@ export const view = {
               form.brief = e.target.value;
               form.briefEdited = true;
             },
-          })),
+          }), () => create(ctx))),
         h('div', { class: 'create-row' },
           h('button', { type: 'button', class: 'btn primary', disabled: !form.role || !form.name.trim(), onclick: () => create(ctx) },
             `Create ${form.name.trim() || 'agent'}`, h('span', { class: 'key' }, `${MOD}↵`)),
@@ -96,7 +98,8 @@ export const view = {
   },
 };
 
-const currentModel = () => form.model || (form.role ? roleOf(form.role).model : PROVIDERS[0].models[0].id);
+// The model the agent gets: the one picked, or its role's, or the first on offer.
+const chosen = () => modelIn(catalog, form.provider, form.model || (form.role ? roleOf(form.role).model : null));
 
 function pickRole(id, ctx) {
   form.role = id;
@@ -137,16 +140,18 @@ function colourCard(colour, ctx) {
 }
 
 function modelPicker(ctx) {
-  const provider = PROVIDERS.find((p) => p.id === form.provider) || PROVIDERS[0];
+  const { provider, model } = chosen();
+  const models = catalog.find((p) => p.id === provider)?.models || [];
   const pick = (options, value, label, onchange) => h('label', { class: 'select-box' },
     h('select', { 'aria-label': label, onchange: (e) => { onchange(e.target.value); ctx.rerender(); } },
       options.map(([v, text]) => h('option', { value: v, selected: v === value }, text))));
   return h('div', { class: 'select-row' },
-    pick(PROVIDERS.map((p) => [p.id, p.name]), form.provider, 'Provider', (id) => {
+    pick(catalog.map((p) => [p.id, p.name]), provider, 'Provider', (id) => {
       form.provider = id;
-      form.model = PROVIDERS.find((p) => p.id === id).models[0].id;
+      form.model = catalog.find((p) => p.id === id).models[0]?.id;
     }),
-    pick(provider.models.map((m) => [m.id, m.id]), currentModel(), 'Model', (id) => {
+    pick(models.map((m) => [m.id, m.name]), model, 'Model', (id) => {
+      form.provider = provider;
       form.model = id;
     }));
 }
@@ -158,8 +163,7 @@ async function create(ctx) {
       name: form.name,
       role: form.role,
       colour: form.colour,
-      provider: form.provider,
-      model: currentModel(),
+      ...chosen(),
       brief: form.brief.trim() || roleOf(form.role).brief(form.name.trim()),
     });
     form = blank();

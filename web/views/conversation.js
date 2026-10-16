@@ -373,14 +373,15 @@ async function pause(agent, ctx) {
 function about(agent, ctx) {
   const prop = (key, ...value) => h('div', { class: 'prop' }, h('span', { class: 'prop-key' }, key), h('span', { class: 'prop-value' }, value));
   const provider = { openrouter: 'OpenRouter', ollama: 'Ollama' }[agent.provider] || agent.provider;
+  const model = agent.provider === 'standin' ? 'Stand-in, no model' : `${agent.model} · ${provider}`;
   return h('aside', { class: 'about' },
     h('div', { class: 'about-head' }, h('span', { class: 'label' }, 'About')),
     h('div', { class: 'about-body' },
       h('div', { class: 'props-list' },
         prop('Role', agent.roleName),
-        prop('Model', h('span', { class: 'mono' }, `${agent.model} · ${provider}`)),
+        prop('Model', h('span', { class: 'mono' }, model)),
         prop('Today', `$${agent.usage.today.toFixed(2)} · ${tokens(agent.usage.tokens)} tokens`),
-        agent.worksIn ? prop('Works in', h('span', { class: 'stack' }, h('span', { class: 'mono' }, agent.worksIn.folder), h('span', { class: 'mono muted' }, `branch ${agent.worksIn.branch}`))) : null,
+        agent.worksIn ? prop('Works in', h('span', { class: 'stack' }, h('span', { class: 'mono' }, agent.worksIn.folder), agent.worksIn.branch ? h('span', { class: 'mono muted' }, `branch ${agent.worksIn.branch}`) : null)) : null,
         agent.tracker ? prop('Tracker', `${agent.tracker.projects.join(', ') || 'No projects yet'} · takes ${agent.tracker.takes}`) : null),
       agent.routines.length ? h('div', { class: 'about-section' },
         h('div', { class: 'label' }, 'Routines'),

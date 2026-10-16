@@ -10,16 +10,16 @@ https://munin.<tailnet>.ts.net
 │
 ├─ /              web            the frontend, static files
 ├─ /api, /mcp     tracker        127.0.0.1:7777
-└─ /runtime       agent runtime  127.0.0.1:7779   (planned)
+└─ /runtime       agent runtime  127.0.0.1:7779
 
 agent runtime ──MCP──▶ tracker ◀──MCP── Claude Code, Codex, any MCP client
 ```
 
 | Piece | What it does | Built with | Status |
 |---|---|---|---|
-| **web** | The one frontend for all of munin: a topbar with AGENTS and TRACKER, each with its own sidebar | Plain JS modules, no build step | Built; the Agents part runs on a mock runtime |
+| **web** | The one frontend for all of munin: a topbar with AGENTS and TRACKER, each with its own sidebar | Plain JS modules, no build step | Built; the Agents part uses the runtime when it answers, and a mock when it doesn't |
 | **tracker** | Projects, issues, comments, history, questions for you, agent tokens. An API for the frontend, MCP for agents | Python, FastAPI, SQLAlchemy, SQLite | Built; see `tracker.md` |
-| **agent runtime** | munin's own agents: their conversations, roles, models, routines and memory; keeps them working and survives restarts | Node, pi-durable and pi-ai, its own SQLite | Planned; its API is in `runtime-api.md` |
+| **agent runtime** | munin's own agents: their conversations, roles, models, routines and memory; keeps them working and survives restarts | Node, pi-durable and pi-ai, its own SQLite | A first version; `runtime-api.md` says what it does and what's next |
 | **edge** | One HTTPS address on the tailnet; says who you are; sends each path to its service | `tailscale serve` | Planned; today everything is on 127.0.0.1 |
 
 ## Rules
@@ -47,8 +47,8 @@ agent runtime ──MCP──▶ tracker ◀──MCP── Claude Code, Codex, 
 - **The topbar's parts are the services.** AGENTS is the runtime's part and TRACKER the tracker's; each part has its own sidebar. Settings, behind your square, holds both services' settings.
 - **An agent's name links the two.** An agent in the runtime is the agent of the same name in the tracker. Its face is drawn in its colour everywhere, the tracker's screens included.
 - **A question about an issue lives in the tracker.** The runtime ties its agent's question to the tracker's copy (`trackerQuestion`), so the question shows in both the conversation and the tracker inbox, and answering it in either answers both. The waiting count lists it once.
-- **Adding an agent:** the frontend creates the agent in the tracker and gets its token, then creates it in the runtime with that token. The tracker only ever hears from the runtime's agents over MCP.
-- **Finding services:** each service answers on a known path: `/api/me` for the tracker, and `/runtime/api/me` for the runtime. When one doesn't answer, the frontend hides its parts. Without the runtime, munin is the tracker plus outside agents, as it is today.
+- **Adding an agent:** the frontend creates the agent in the tracker and gets its token, then creates it in the runtime with that token. The tracker only ever hears from the runtime's agents over MCP. (Not yet: today the runtime's agents don't use the tracker.)
+- **Finding services:** each service answers on a known path: `/api/me` for the tracker, and `/runtime/api/me` for the runtime. The frontend looks for the runtime at its own address (behind the edge) and on port 7779 of the same host (on a laptop, where the runtime lets in pages from 127.0.0.1). When it doesn't answer, the Agents part runs on the mock for now; later it hides, and munin is the tracker plus outside agents.
 - **Live updates:** each service has its own event stream, and the frontend listens to every one that's present.
 
 ## Who's who
@@ -68,9 +68,9 @@ agent runtime ──MCP──▶ tracker ◀──MCP── Claude Code, Codex, 
   - **Agents** run on the same server, each in its own folder (a git worktree) or container, as a separate user.
   - **Tailscale ACLs** limit what the server can reach on the tailnet, because agents run shell commands.
 
-## The agent runtime (planned)
+## The agent runtime
 
-The frontend's Agents part runs on a mock of it today (`web/runtime/mock.js`), which plays a sample cast in the browser. `runtime-api.md` lists what the real one has to serve, and what the tracker needs to add for it.
+The first version is in `runtime/`. It serves the API the frontend's mock (`web/runtime/mock.js`) settled, so the screens didn't change when it arrived. `runtime-api.md` lists the API, what this version does, and what comes next.
 
 The runtime is built on [pi-durable](https://github.com/earendil-works/pi) and pi-ai:
 
@@ -102,7 +102,10 @@ pi-durable is experimental, and its API changes between releases. Pin exact vers
    - The dummy swaps those modules for mocks that keep fake data in the browser and simulate agents at work.
    - Every mock function is something a backend has to provide. Once a screen is settled, its mock functions are the spec for the real endpoints.
 3. **Put munin on a server:** systemd units, `tailscale serve`, Tailscale identity, and agents kept from acting as you. Live updates get replay on reconnect.
-4. **Build the agent runtime** against the API the dummy frontend settled (`runtime-api.md`). The tracker's three additions for it are done: questions with options, a question's id back from `add_comment`, and an event feed over MCP.
+4. **Build the agent runtime** against the API the dummy frontend settled (`runtime-api.md`). Started:
+   - the tracker's three additions for it are done: questions with options, a question's id back from `add_comment`, and an event feed over MCP;
+   - the runtime's first version runs agents on pi-durable with OpenRouter, Ollama or a stand-in model, with questions, ask-first approvals, coding tools and memory, and the frontend uses it when it's running;
+   - next: the tracker for coders, routines that run, apps and the web as tools, and a budget that pauses.
 5. **Then:** live agent output, cost per issue, approvals, push notifications, and maybe the Claudewitz iPhone app as a client.
 
 ## Open questions

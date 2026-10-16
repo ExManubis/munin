@@ -1,6 +1,6 @@
 // Settings, behind your square in the topbar: the models munin's own agents run on, the
-// outside agents that connect to the tracker over MCP (a token each), notifications, and
-// a reset for the dummy's sample agents.
+// outside agents that connect to the tracker over MCP (a token each), notifications, and,
+// on the mock runtime, a reset for its sample agents.
 
 import { api } from '../api.js';
 import { runtime } from '../runtime/index.js';
@@ -41,7 +41,7 @@ export const view = {
         table(agents, ctx),
         connect(agents, me, ctx),
         notifications(ctx),
-        dummy(ctx)));
+        runtime.kind === 'mock' ? dummy(ctx) : null));
   },
 };
 
@@ -54,8 +54,10 @@ function providerSection(providers) {
         h('span', { class: 'agent-name' }, h('span', {}, p.name)),
         h('span', { class: 'agent-seen' }, p.detail),
         h('span', { class: ['label', p.connected && 'on'] }, p.connected ? 'Connected' : 'Off'),
-        h('span', { class: 'agent-action' },
-          h('button', { type: 'button', class: 'link', onclick: () => toast('The dummy has no real providers yet.') }, p.connected ? 'Change' : 'Set up'))))));
+        // The real runtime takes its providers from its environment, as the detail says.
+        h('span', { class: 'agent-action' }, runtime.kind === 'mock'
+          ? h('button', { type: 'button', class: 'link', onclick: () => toast('The dummy has no real providers yet.') }, p.connected ? 'Change' : 'Set up')
+          : null)))));
 }
 
 function dummy(ctx) {

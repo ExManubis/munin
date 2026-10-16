@@ -2,7 +2,7 @@
 
 An agent framework in the spirit of Hermes: you and your agents work on projects together, with agents running on your own server and you checking in from any device on your tailnet.
 
-munin is one app with one frontend and several backend services. The first service is the tracker, an issue tracker for agents: any MCP client (Claude Code, Codex, figbot…) can pick up issues, ask for input and report back, and you see what's waiting on you in one inbox. Next comes an agent runtime for munin's own agents: coders, assistants, or just someone fun to talk to, each on a model from OpenRouter or another gateway. Its screens are built already, on a stand-in runtime with a sample cast (`web/runtime/mock.js`). `docs/architecture.md` has the plan and `docs/runtime-api.md` what the runtime has to serve.
+munin is one app with one frontend and several backend services. The first service is the tracker, an issue tracker for agents: any MCP client (Claude Code, Codex, figbot…) can pick up issues, ask for input and report back, and you see what's waiting on you in one inbox. The second is the agent runtime, for munin's own agents: coders, assistants, or just someone fun to talk to, each on a model from OpenRouter or another gateway. A first version runs on pi-durable (`runtime/`); when it isn't running, the Agents screens fall back to a mock with a sample cast (`web/runtime/mock.js`). `docs/architecture.md` has the plan and `docs/runtime-api.md` what the runtime serves.
 
 ![munin's inbox: an agent's question waiting for an answer, and what agents have been doing lately](docs/screenshot.png)
 
@@ -72,6 +72,26 @@ cd tracker
 uv run pytest
 ```
 
+## Run the agent runtime
+
+It needs Node 22.19 or later. Next to `munin serve`:
+
+```bash
+cd runtime
+npm install
+npm start                               # http://127.0.0.1:7779/runtime/api
+```
+
+Reload munin and the Agents tab uses it instead of the mock: the frontend looks for the runtime on port 7779 of the same host, or at its own address behind the edge. Make an agent with N and talk to it.
+
+Without a provider, agents run on a stand-in that answers without a model, so you can try everything but the thinking. Give the runtime `OPENROUTER_API_KEY` in its environment for OpenRouter's models, or `MUNIN_OLLAMA_URL` (like `http://127.0.0.1:11434`) for an Ollama server's, then pick a model on the agent's profile.
+
+Coders get a folder of their own under `~/.munin/agents/<name>`, with a shell and file tools. They ask before pushing to git or deleting files; their profile has the rest of the ask-first rules. Agents and their conversations live in `~/.munin/runtime.sqlite` and survive a restart.
+
+Settings come from environment variables: `MUNIN_RUNTIME_DB`, `MUNIN_RUNTIME_HOST`, `MUNIN_RUNTIME_PORT`, `MUNIN_AGENTS_DIR`, `MUNIN_OLLAMA_URL` and `MUNIN_USER` (your name, as agents call you). Like the tracker, it has no login: it listens on 127.0.0.1 and only lets in pages from this machine.
+
+`npm test` runs its tests.
+
 ## Layout
 
 ```
@@ -80,12 +100,16 @@ brand/        logo, the Munin Block font and the scripts that draw them
   logo/       earlier explorations and treatments
   tools/      generators that render everything from the master bitmaps
 design/       each screen from Paper as PNG, JSX and HTML
-docs/         how munin fits together (architecture.md) and what the tracker does (tracker.md)
+docs/         how munin fits together (architecture.md), what the tracker does (tracker.md)
+              and the runtime's API (runtime-api.md)
+runtime/      the agent runtime: munin's own agents on pi-durable, and its HTTP API
+  src/
+  test/
 tracker/      the tracker: FastAPI server, API, MCP endpoint and CLI
   src/munin/  the Python package
   tests/
 web/          the frontend for all of munin (plain JS, no build step)
-  runtime/    the agent runtime as the frontend sees it; a mock until the runtime exists
+  runtime/    the agent runtime as the frontend sees it: the HTTP client, and the mock
   views/      one module per screen
 ```
 

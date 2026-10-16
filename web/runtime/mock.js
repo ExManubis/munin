@@ -1,14 +1,39 @@
-// A stand-in for munin's agent runtime, so the frontend can be built before the runtime exists.
-// It keeps the cast from design/brief-agents.md in localStorage and plays them: forge works
-// through a run and asks about an issue, atlas reads up on something, a routine of hugin's
-// fires and asks to send mail, and every agent answers what you send it.
+// A stand-in for munin's agent runtime, for when the runtime isn't running; the frontend was
+// built on it before the runtime existed. It keeps the cast from design/brief-agents.md in
+// localStorage and plays them: forge works through a run and asks about an issue, atlas reads
+// up on something, a routine of hugin's fires and asks to send mail, and every agent answers
+// what you send it.
 //
-// Every exported function is something the real runtime has to provide over HTTP;
+// Every exported function is something the runtime serves over HTTP too;
 // docs/runtime-api.md lists them. The two marked "mock only" are glue for the dummy.
 
-import { roleOf, PROVIDERS } from './roles.js';
+import { roleOf } from './roles.js';
 
-const KEY = 'munin:mock-runtime:v1';
+const KEY = 'munin:mock-runtime:v2';
+
+// What runtime.models() gives: each provider and the models it offers, with a rough cost
+// per day of steady use.
+const MODELS = [
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    models: [
+      { id: 'anthropic/claude-haiku-5.5', name: 'Claude Haiku 5.5', day: 0.1 },
+      { id: 'anthropic/claude-sonnet-5.5', name: 'Claude Sonnet 5.5', day: 0.6 },
+      { id: 'anthropic/claude-opus-5.5', name: 'Claude Opus 5.5', day: 2 },
+      { id: '~google/gemini-flash-latest', name: 'Gemini Flash', day: 0.15 },
+    ],
+  },
+  {
+    id: 'ollama',
+    name: 'Ollama, on the server',
+    models: [
+      { id: 'llama3.3', name: 'llama3.3', day: 0 },
+      { id: 'qwen3-coder', name: 'qwen3-coder', day: 0 },
+    ],
+  },
+];
+
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
 
@@ -65,7 +90,7 @@ function seed(now) {
   };
 
   agent({
-    name: 'hugin', role: 'assistant', colour: 'sky', provider: 'openrouter', model: 'haiku-5.5', createdAt: ago(22 * 24 * HOUR),
+    name: 'hugin', role: 'assistant', colour: 'sky', provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', createdAt: ago(22 * 24 * HOUR),
     brief: "You're hugin, Mikkel's assistant. Keep his calendar and inbox in order, and say things once, briefly. Ask before you send mail or accept invites for him. Start weekdays with a briefing; after that, only interrupt for things that can't wait.",
     abilities: { apps: true, web: true }, apps: ['Calendar', 'Gmail'],
     askFirst: [
@@ -101,7 +126,7 @@ function seed(now) {
   });
 
   agent({
-    name: 'forge', role: 'coder', colour: 'ember', provider: 'openrouter', model: 'opus-5.5', thinking: 'medium', createdAt: ago(20 * 24 * HOUR),
+    name: 'forge', role: 'coder', colour: 'ember', provider: 'openrouter', model: 'anthropic/claude-opus-5.5', thinking: 'medium', createdAt: ago(20 * 24 * HOUR),
     brief: "You're forge, a coder on munin. Take issues from the top of the pile, work on a branch named after the issue, and send it to review with a short note. Ask when something is unclear instead of guessing.",
     abilities: { code: true, tracker: true, web: true },
     worksIn: { folder: '~/agents/forge/munin', branch: 'mun-46-stream' }, tracker: { projects: ['MUN', 'WEB'], takes: 'issues' },
@@ -150,7 +175,7 @@ function seed(now) {
   };
 
   agent({
-    name: 'vera', role: 'reviewer', colour: 'iris', provider: 'openrouter', model: 'sonnet-5.5', createdAt: ago(18 * 24 * HOUR),
+    name: 'vera', role: 'reviewer', colour: 'iris', provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5', createdAt: ago(18 * 24 * HOUR),
     brief: "You're vera, the reviewer. Review what the other agents send to review: run the tests, read the diff, merge what's good and send back what isn't, saying exactly what's missing.",
     abilities: { code: true, tracker: true }, worksIn: { folder: '~/agents/vera/munin', branch: 'main' }, tracker: { projects: ['MUN', 'WEB'], takes: 'reviews' },
     askFirst: [{ id: 'push_main', label: 'Pushing to main', what: 'push to main', third: 'pushes to main', on: false }],
@@ -165,7 +190,7 @@ function seed(now) {
   say('vera', ago(14 * MIN), '{gateway} is merged. Nothing else to review yet.');
 
   agent({
-    name: 'atlas', role: 'researcher', colour: 'teal', provider: 'openrouter', model: 'sonnet-5.5', createdAt: ago(9 * 24 * HOUR),
+    name: 'atlas', role: 'researcher', colour: 'teal', provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5', createdAt: ago(9 * 24 * HOUR),
     brief: "You're atlas, a researcher. Read up on what you're asked, say what you found in a few lines, and list your sources.",
     abilities: { web: true }, usage: { today: 0.31, week: 1.2, month: 3.9, tokens: 120000 }, memoryCount: 2,
     memory: [{ id: 'm1', text: 'Wants short answers first, details after.' }],
@@ -182,7 +207,7 @@ function seed(now) {
   };
 
   agent({
-    name: 'quill', role: 'writer', colour: 'rose', provider: 'openrouter', model: 'sonnet-5.5', createdAt: ago(12 * 24 * HOUR),
+    name: 'quill', role: 'writer', colour: 'rose', provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5', createdAt: ago(12 * 24 * HOUR),
     brief: "You're quill, a writer. Draft and edit munin's docs and site in plain, short sentences, and keep one voice across everything.",
     abilities: { web: true }, usage: { today: 0.22, week: 1.9, month: 6.1, tokens: 86000 }, memoryCount: 6,
     memory: [{ id: 'm1', text: 'House style: short sentences, no exclamation marks.' }],
@@ -193,7 +218,7 @@ function seed(now) {
   say('quill', ago(4 * HOUR), 'Draft 2 of "Why munin" is ready. The opening is shorter and the Hermes comparison is gone. It’s in docs/why-munin.md.');
 
   agent({
-    name: 'pip', role: 'companion', colour: 'straw', provider: 'openrouter', model: 'haiku-5.5', createdAt: ago(5 * 24 * HOUR),
+    name: 'pip', role: 'companion', colour: 'straw', provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', createdAt: ago(5 * 24 * HOUR),
     brief: "You're pip. You're curious and cheerful, and you like riddles, word games and odd facts. Keep replies short. When Mikkel seems busy, let him be.",
     abilities: {}, usage: { today: 0, week: 0.04, month: 0.09, tokens: 0 }, memoryCount: 1,
     memory: [{ id: 'm1', text: 'Got the echo riddle right away.' }],
@@ -204,7 +229,7 @@ function seed(now) {
   say('pip', ago(3 * 24 * HOUR + 7 * MIN), 'An echo! One for one. Ready for round two of the riddle?');
 
   agent({
-    name: 'moss', role: 'companion', colour: 'moss', provider: 'ollama', model: 'llama', paused: true, pausedAt: ago(26 * HOUR), createdAt: ago(7 * 24 * HOUR),
+    name: 'moss', role: 'companion', colour: 'moss', provider: 'ollama', model: 'llama3.3', paused: true, pausedAt: ago(26 * HOUR), createdAt: ago(7 * 24 * HOUR),
     brief: "You're moss. You're slow, calm and fond of plants, and you share one odd nature fact a day.",
     abilities: {}, usage: { today: 0, week: 0, month: 0, tokens: 0 }, memoryCount: 0,
   });
@@ -535,7 +560,7 @@ export const mock = {
   kind: 'mock',
 
   async me() {
-    return { kind: 'mock', version: 'dummy', providers: PROVIDERS.map((p) => ({ id: p.id, name: p.name, connected: true })) };
+    return { kind: 'mock', version: 'dummy', providers: MODELS.map((p) => ({ id: p.id, name: p.name, connected: true })) };
   },
 
   async agents() {
@@ -711,6 +736,10 @@ export const mock = {
       { id: 'vercel', name: 'Vercel AI Gateway', connected: false, detail: 'Not set up' },
       { id: 'cloudflare', name: 'Cloudflare AI Gateway', connected: false, detail: 'Not set up' },
     ];
+  },
+
+  async models() {
+    return MODELS;
   },
 
   subscribe(fn) {

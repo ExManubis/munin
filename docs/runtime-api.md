@@ -1,8 +1,8 @@
 # The agent runtime's API
 
-What the frontend needs from the agent runtime, worked out by building the Agents screens on a mock first. The mock is `web/runtime/mock.js`; every function it exports is listed here with the HTTP endpoint the real runtime should serve for it. `web/runtime/index.js` is where the frontend picks the mock or the real client. Both have the same functions, so the screens don't change when the runtime arrives.
+What the frontend needs from the agent runtime, worked out by building the Agents screens on a mock first. The mock is `web/runtime/mock.js`; every function it exports is listed here with the HTTP endpoint the runtime serves for it. The runtime is in `runtime/`, and `web/runtime/client.js` calls it. `web/runtime/index.js` picks the runtime when it answers and the mock when it doesn't; both have the same functions, so the screens don't care which. It looks on port 7779 of the page's host and at the page's own address; `munin:runtime-url` in the browser's localStorage points it somewhere else.
 
-The runtime serves this under `/runtime/api`, behind the same edge as the tracker (see `architecture.md`). Times are ISO 8601 in UTC. Errors are `{"detail": "…"}` with 404, 409 or 422, like the tracker's.
+The runtime serves this under `/runtime/api`, behind the same edge as the tracker (see `architecture.md`). Times are ISO 8601 in UTC. Errors are `{"detail": "…"}` with 400, 404, 409 or 422, like the tracker's. [What this version does](#what-this-version-does) says which parts are real yet.
 
 ## Agents
 
@@ -26,7 +26,7 @@ A **summary**, for the sidebar and lists:
   "preview": "Telegram caps a message at 4,096…",  // the open question, what it's doing, or its last message
   "lastAt": "2026-10-16T13:30:00Z",
   "typing": false,               // writing a reply right now
-  "provider": "openrouter", "model": "opus-5.5"
+  "provider": "openrouter", "model": "anthropic/claude-opus-5.5"
 }
 ```
 
@@ -55,7 +55,7 @@ An agent's name is also its name in the tracker. That's how the frontend joins t
 
 | Mock | HTTP | Does |
 |---|---|---|
-| `conversation(name)` | `GET /runtime/api/agents/{name}/conversation` | `{agent, items}`, oldest first. The real one pages with `?before=` |
+| `conversation(name)` | `GET /runtime/api/agents/{name}/conversation` | `{agent, items}`, oldest first. It should page with `?before=`; it doesn't yet |
 | `send(name, text)` | `POST /runtime/api/agents/{name}/messages` | A message from you. While a question is open, it answers the newest one instead. While the agent works, it steers |
 | `answer(name, id, {option} or {text})` | `POST /runtime/api/agents/{name}/items/{id}/answer` | Answers a question |
 | `decide(name, id, decision)` | `POST /runtime/api/agents/{name}/items/{id}/decide` | `once`, `always` or `deny` on an approval. `always` switches the matching ask-first rule off |
@@ -90,7 +90,8 @@ An **item** is one of:
 | `updateRoutine(name, id, fields)` | `PATCH /runtime/api/agents/{name}/routines/{id}` | |
 | `deleteRoutine(name, id)` | `DELETE /runtime/api/agents/{name}/routines/{id}` | |
 | `forget(name, noteId)` | `DELETE /runtime/api/agents/{name}/memory/{id}` | |
-| `providers()` | `GET /runtime/api/providers` | `[{id, name, connected, detail}]`; setting one up is still to design |
+| `providers()` | `GET /runtime/api/providers` | `[{id, name, connected, detail}]`. The runtime takes them from its environment; setting one up from Settings is still to design |
+| `models()` | `GET /runtime/api/models` | The models to pick from: `[{id, name, models: [{id, name, day}]}]`, `day` being a rough cost in dollars for a day of steady use |
 
 A **routine** starts on a schedule or a trigger:
 
@@ -100,11 +101,11 @@ A **routine** starts on a schedule or a trigger:
   "next": null, "last": "…" }                                     // next for schedules, last for triggers
 ```
 
-Roles, abilities, apps, providers and models are fixed lists in `web/runtime/roles.js` for now. The runtime should serve them, at `GET /runtime/api/roles` and `GET /runtime/api/models`, so a new provider's models show up without a frontend change.
+The runtime serves the models, so a new provider's show up without a frontend change. Roles, abilities and apps are still fixed lists in `web/runtime/roles.js`, with the runtime's half in `runtime/src/roles.js`; the runtime should serve them too, at `GET /runtime/api/roles`.
 
 ## Live updates
 
-`GET /runtime/api/stream` is a server-sent event stream that says `changed`, like the tracker's `/api/stream`; the mock calls `subscribe(fn)` instead. It should number its events so a reconnecting client can ask for what it missed (`Last-Event-ID`). The Claudewitz daemon does this, and it matters on a phone that keeps dropping off.
+`GET /runtime/api/stream` is a server-sent event stream that says `changed`, like the tracker's `/api/stream`, at most ten times a second; the mock calls `subscribe(fn)` instead. The client reloads after a reconnect, since it can't tell what it missed. The stream should number its events so a reconnecting client can ask for what it missed (`Last-Event-ID`). The Claudewitz daemon does this, and it matters on a phone that keeps dropping off.
 
 ## What the tracker added for this
 
@@ -114,19 +115,35 @@ The screens needed three things from the tracker. Every agent can use them, so i
 2. **The question's id back.** `add_comment` returns the comment's id, so the runtime ties its agent's question to the tracker's copy. That's `trackerQuestion` above; the mock still finds it by agent and issue.
 3. **An event feed over MCP.** The `events` tool lists what happened after an event id, comments included. Routines that start "when an issue moves" read it, and so can an agent that wants your answer without `wait_for_work`.
 
-## Building it on pi-durable
+## How the runtime does it
 
-Most of this maps straight onto pi-durable:
+The runtime (`runtime/src/`) is a thin layer over pi-durable:
 
-- **A conversation** is a pi-durable conversation, one per agent, in the runtime's SQLite file.
-- **Messages and runs** come from its entries and tasks.
+- **A conversation** is a pi-durable conversation, one per agent, in the runtime's SQLite file. The agents' settings are one session document next to them (`munin.agents`).
+- **Messages and runs** come from its entries (`items.js`).
   - `pi.user` and `pi.assistant` text become messages.
-  - A run is the generation and tool tasks from one input to its answer.
-  - Each tool call becomes a step, and the tool's `details` give the step's detail line.
-- **Actions** are tool calls the agent's extension marks as worth showing (sent mail, took an issue), written as entries of munin's own kind, like `munin.action`.
-- **Questions and approvals** are munin entry kinds too.
-  - An approval comes from a `beforeTool` hook that blocks a tool switched on under "ask me first" and waits for the decision.
-  - "Always allow" switches that rule off for later calls.
+  - A run is the tool calls from one input to the answer. Each call is a step, and its result gives the step's detail line: the last line a command printed, or `failed`.
+  - A reply that fails or is stopped becomes an action.
+- **Questions, answers, approvals, decisions and actions** are entries of munin's own kinds (`munin.question`, `munin.answer`, `munin.approval`, `munin.decision`, `munin.action`).
+  - Agents ask with an `ask_human` tool, with options or without.
+  - An answer goes to the agent as an input, so it steers a running agent.
+- **Ask-first rules** are a `beforeTool` hook. A call a rule covers is blocked and an approval written. The decision goes to the agent as a message, and "once" lets the next such call through. "Always" switches the rule off; undo switches it back on.
 - **Steering:** `send` while a run is going is `submit({ whenBusy: "steer" })`.
-- **Usage** comes from the conversation's `pi.usage` document. The budget is a hook that pauses the agent at the limit.
-- **Brief, model and abilities** live in the conversation's `pi.agent` document (instructions, model, extensions).
+- **Brief, model and abilities** are the conversation's agent settings: instructions, model and extensions. Coders get pi-durable's coding tools (read, write, edit, bash) in their own folder.
+- **Memory** is a `remember` tool. Notes go into the agent's system prompt.
+- **Usage** adds up the cost and tokens on each reply.
+- **Models:** OpenRouter with `OPENROUTER_API_KEY`, an Ollama server with `MUNIN_OLLAMA_URL`, and always the stand-in, which answers without a model. An agent on a model the runtime can't reach runs on the stand-in until it can.
+
+## What this version does
+
+Real: agents and their settings, conversations with runs, questions with options, ask-first approvals with undo, coding tools in a folder, memory, pause and resume, usage, models, the live stream, and everything surviving a restart.
+
+Stored but not acted on yet, next roughly in this order:
+
+1. **The tracker for coders and reviewers.** The runtime gets each agent a token and gives it the tracker's MCP tools; `trackerQuestion` ties its questions to the tracker's. Until then the ABOUT panel's "Tracker" line is only a setting.
+2. **Routines** run on their schedule, or when the tracker's `events` feed says something happened.
+3. **A branch per issue**, as a git worktree in the agent's folder (`worksIn.branch` is `null` until then).
+4. **Apps and the web** as tools, through MCP servers, with ask-first rules for apps like "send mail".
+5. **A budget that pauses** the agent at its limit.
+6. **Faster reads.** Each read goes through an agent's whole conversation; it should keep items and page them.
+7. **Numbered events** on the stream, and replay on reconnect.

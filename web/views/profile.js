@@ -2,7 +2,7 @@
 // what it remembers about you, and what it costs.
 
 import { runtime } from '../runtime/index.js';
-import { ABILITIES, APPS, PROVIDERS, THINKING, costHint } from '../runtime/roles.js';
+import { ABILITIES, APPS, THINKING, costHint } from '../runtime/roles.js';
 import { h, bindDraft, drafts, onModEnter, toast, toggle, topbar } from '../ui.js';
 import { openDialog, closeDialog } from '../dialogs.js';
 import { agentFace, roleTag, hhmm } from './agents.js';
@@ -15,14 +15,15 @@ export const view = {
   scope: (params) => `/agents/${params.name}/profile`,
 
   async load({ name }) {
-    return { agent: await runtime.agent(name) };
+    const [agent, models] = await Promise.all([runtime.agent(name), runtime.models()]);
+    return { agent, models };
   },
 
   leave() {
     allNotes = false;
   },
 
-  render({ agent }, ctx) {
+  render({ agent, models }, ctx) {
     const set = (patch, message) => update(agent, patch, message, ctx);
     return h('div', { class: 'page' },
       topbar([
@@ -32,7 +33,7 @@ export const view = {
       h('div', { class: 'profile' },
         header(agent, ctx),
         brief(agent, set),
-        model(agent, set),
+        model(agent, models, set),
         abilities(agent, set, ctx),
         askFirst(agent, set),
         routines(agent, ctx),
@@ -116,15 +117,19 @@ function select(options, value, label, onchange) {
       options.map(([v, text]) => h('option', { value: v, selected: v === value }, text))));
 }
 
-function model(agent, set) {
-  const provider = PROVIDERS.find((p) => p.id === agent.provider) || PROVIDERS[0];
+// The runtime's catalog, plus the agent's own provider and model when it isn't offered,
+// so the selects always show what the agent is set to.
+function model(agent, catalog, set) {
+  const providers = catalog.some((p) => p.id === agent.provider) ? catalog : [...catalog, { id: agent.provider, name: `${agent.provider}, not set up`, models: [] }];
+  const offered = providers.find((p) => p.id === agent.provider).models;
+  const models = offered.some((m) => m.id === agent.model) ? offered : [...offered, { id: agent.model, name: agent.model }];
   return section('Model', null,
     h('div', { class: 'select-row' },
-      select(PROVIDERS.map((p) => [p.id, p.name]), agent.provider, 'Provider',
-        (id) => set({ provider: id, model: PROVIDERS.find((p) => p.id === id).models[0].id })),
-      select(provider.models.map((m) => [m.id, m.id]), agent.model, 'Model', (id) => set({ model: id })),
+      select(providers.map((p) => [p.id, p.name]), agent.provider, 'Provider',
+        (id) => set({ provider: id, model: catalog.find((p) => p.id === id)?.models[0]?.id ?? agent.model })),
+      select(models.map((m) => [m.id, m.name]), agent.model, 'Model', (id) => set({ model: id })),
       select(THINKING.map((t) => [t, `Thinking: ${t}`]), agent.thinking, 'Thinking', (t) => set({ thinking: t }))),
-    h('p', { class: 'hint' }, costHint(agent.provider, agent.model)));
+    h('p', { class: 'hint' }, costHint(catalog, agent.provider, agent.model)));
 }
 
 function settingRow(title, detail, on, label, onchange, extra) {
