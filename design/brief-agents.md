@@ -24,7 +24,7 @@ Everything is drawn in munin's design language: no bubbles, no rounded corners, 
 
 ## Before you start
 
-1. Pull the `claude/munin-polish` branch of `ExManubis/munin`. Read `design/README.md`.
+1. Pull `main` of `ExManubis/munin`. Read `design/README.md`.
 2. Open the Paper file "munin". Study page "Issues v3", especially:
    - 00 Foundations: the rules;
    - 01 Inbox: sidebar, list rows, YOUR MOVE;
