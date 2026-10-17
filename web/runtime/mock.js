@@ -95,7 +95,8 @@ function seed(now) {
 
   agent({
     name: 'hugin', role: 'assistant', colour: 'sky', provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', createdAt: ago(22 * 24 * HOUR),
-    brief: "You're hugin, an assistant: organised, a step ahead, and calm when the day gets busy. You keep track of plans, people and loose ends, mention things once, and notice what's about to be forgotten. Ask before you send mail or accept invites on their behalf. Start weekdays with a briefing; after that, only interrupt for things that can't wait.",
+    brief: `${roleOf('assistant').brief('hugin')} Start weekdays with a briefing; after that, only interrupt for things that can't wait.`,
+    examples: roleOf('assistant').examples('hugin'),
     abilities: { apps: true, web: true }, apps: ['Calendar', 'Gmail'],
     askFirst: [
       { id: 'send_mail', label: 'Sending mail', what: 'send mail', third: 'sends mail', on: true },
@@ -131,7 +132,7 @@ function seed(now) {
 
   agent({
     name: 'forge', role: 'coder', colour: 'ember', provider: 'openrouter', model: 'anthropic/claude-opus-5.5', thinking: 'medium', createdAt: ago(20 * 24 * HOUR),
-    brief: "You're forge, a coder on munin. Take issues from the top of the pile, work on a branch named after the issue, and send it to review with a short note. Ask when something is unclear instead of guessing.",
+    brief: roleOf('coder').brief('forge'), examples: roleOf('coder').examples('forge'),
     abilities: { code: true, tracker: true, web: true },
     worksIn: { folder: '~/agents/forge/munin', branch: 'mun-46-stream' }, tracker: { projects: ['MUN', 'WEB'], takes: 'issues' },
     askFirst: [
@@ -180,7 +181,7 @@ function seed(now) {
 
   agent({
     name: 'vera', role: 'reviewer', colour: 'iris', provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5', createdAt: ago(18 * 24 * HOUR),
-    brief: "You're vera, the reviewer. Review what the other agents send to review: run the tests, read the diff, merge what's good and send back what isn't, saying exactly what's missing.",
+    brief: roleOf('reviewer').brief('vera'), examples: roleOf('reviewer').examples('vera'),
     abilities: { code: true, tracker: true }, worksIn: { folder: '~/agents/vera/munin', branch: 'main' }, tracker: { projects: ['MUN', 'WEB'], takes: 'reviews' },
     askFirst: [{ id: 'push_main', label: 'Pushing to main', what: 'push to main', third: 'pushes to main', on: false }],
     usage: { today: 0.74, week: 4.1, month: 14.8, tokens: 230000 }, memoryCount: 4,
@@ -195,7 +196,7 @@ function seed(now) {
 
   agent({
     name: 'atlas', role: 'researcher', colour: 'teal', provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5', createdAt: ago(9 * 24 * HOUR),
-    brief: "You're atlas, a researcher. Read up on what you're asked, say what you found in a few lines, and list your sources.",
+    brief: roleOf('researcher').brief('atlas'), examples: roleOf('researcher').examples('atlas'),
     abilities: { web: true }, usage: { today: 0.31, week: 1.2, month: 3.9, tokens: 120000 }, memoryCount: 2,
     memory: [{ id: 'm1', text: 'Wants short answers first, details after.' }],
   });
@@ -212,7 +213,7 @@ function seed(now) {
 
   agent({
     name: 'quill', role: 'writer', colour: 'rose', provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5', createdAt: ago(12 * 24 * HOUR),
-    brief: "You're quill, a writer. Draft and edit munin's docs and site in plain, short sentences, and keep one voice across everything.",
+    brief: `${roleOf('writer').brief('quill')} Most of what you write is munin's docs and site.`, examples: roleOf('writer').examples('quill'),
     abilities: { web: true }, usage: { today: 0.22, week: 1.9, month: 6.1, tokens: 86000 }, memoryCount: 6,
     memory: [{ id: 'm1', text: 'House style: short sentences, no exclamation marks.' }],
   });
@@ -223,7 +224,7 @@ function seed(now) {
 
   agent({
     name: 'pip', role: 'companion', colour: 'straw', provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', createdAt: ago(5 * 24 * HOUR),
-    brief: "You're pip: curious, cheerful and a little odd. You like riddles, word games and strange facts, and you'd rather ask a good question than give a long answer. When things seem busy, keep it light and short.",
+    brief: roleOf('companion').brief('pip'), examples: roleOf('companion').examples('pip'),
     abilities: {}, usage: { today: 0, week: 0.04, month: 0.09, tokens: 0 }, memoryCount: 1,
     memory: [{ id: 'm1', text: 'Got the echo riddle right away.' }],
   });
@@ -235,6 +236,7 @@ function seed(now) {
   agent({
     name: 'moss', role: 'companion', colour: 'moss', provider: 'ollama', model: 'llama3.3', paused: true, pausedAt: ago(26 * HOUR), createdAt: ago(7 * 24 * HOUR),
     brief: "You're moss. You're slow, calm and fond of plants, and you share one odd nature fact a day.",
+    examples: "You: Morning, moss.\nmoss: Morning. Today's fact, if you want it: some mosses dry out for decades and green up again with a little water. No hurry.",
     abilities: {}, usage: { today: 0, week: 0, month: 0, tokens: 0 }, memoryCount: 0,
   });
   say('moss', ago(2 * 24 * HOUR), 'Want to hear about the moss that came back to life after 1,500 years in Antarctic ice?');
@@ -329,6 +331,7 @@ function full(agent) {
   return {
     ...summary(agent),
     brief: agent.brief,
+    examples: agent.examples || '',
     thinking: agent.thinking,
     abilities: { ...agent.abilities },
     apps: [...agent.apps],
@@ -672,13 +675,13 @@ export const mock = {
     changed();
   },
 
-  async createAgent({ name, role, colour = 'white', provider = 'openrouter', model, brief }) {
+  async createAgent({ name, role, colour = 'white', provider = 'openrouter', model, brief, examples }) {
     const clean = String(name || '').trim().toLowerCase();
     if (!/^[a-z][a-z0-9-]{1,23}$/.test(clean)) throw new Error('A name is 2 to 24 letters, digits or dashes, starting with a letter.');
     if (state.agents[clean]) throw new Error(`There's already an agent called ${clean}.`);
     const preset = roleOf(role);
     state.agents[clean] = {
-      name: clean, role: preset.id, colour, provider, model: model || preset.model, thinking: 'low', brief: brief || preset.brief(clean),
+      name: clean, role: preset.id, colour, provider, model: model || preset.model, thinking: 'low', brief: brief || preset.brief(clean), examples: examples ?? preset.examples(clean),
       abilities: { ...preset.abilities }, apps: [], askFirst: [], routines: [], memory: [], memoryCount: 0, worksIn: preset.abilities.code ? { folder: `~/agents/${clean}`, branch: 'main' } : null,
       tracker: preset.abilities.tracker ? { projects: [], takes: preset.id === 'reviewer' ? 'reviews' : 'issues' } : null,
       usage: { today: 0, week: 0, month: 0, tokens: 0 }, budget: null, paused: false, createdAt: Date.now(),
@@ -688,11 +691,11 @@ export const mock = {
     return full(state.agents[clean]);
   },
 
-  // Change any of: role, colour, provider, model, thinking, brief, abilities, apps, budget,
-  // askFirst ({ id: on }), and tracker ({ projects }).
+  // Change any of: role, colour, provider, model, thinking, brief, examples, abilities, apps,
+  // budget, askFirst ({ id: on }), and tracker ({ projects }).
   async updateAgent(name, patch) {
     const agent = need(name);
-    for (const key of ['role', 'colour', 'provider', 'model', 'thinking', 'brief', 'budget']) if (key in patch) agent[key] = patch[key];
+    for (const key of ['role', 'colour', 'provider', 'model', 'thinking', 'brief', 'examples', 'budget']) if (key in patch) agent[key] = patch[key];
     if (patch.abilities) Object.assign(agent.abilities, patch.abilities);
     if (patch.apps) {
       // Like the runtime: each app picked gets an ask-first rule for anything that changes something.

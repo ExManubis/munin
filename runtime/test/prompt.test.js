@@ -56,3 +56,12 @@ test("a bare agent isn't offered what it doesn't have, and hears who can switch 
   for (const ability of ['Web', 'Apps', 'Code', 'Tracker']) assert.match(text, new RegExp(`the person you work for can turn on the ${ability} ability on your profile`));
   assert.doesNotMatch(text, /Images ability/, "munin can't make pictures for anyone yet");
 });
+
+test("what reaches your phone: all a non-coder says, and a coder's questions and approvals", () => {
+  const hugin = { name: 'hugin', role: 'assistant', abilities: { apps: true }, askFirst: [] };
+  const forge = { name: 'forge', role: 'coder', abilities: { code: true }, askFirst: [] };
+  assert.match(capabilities(hugin, 'Mikkel', { devices: 1 }), /- Reaching Mikkel: what you say reaches their phone too, as notifications, even with munin closed\.\n/);
+  assert.match(capabilities(forge, 'Mikkel', { devices: 2 }), /- Reaching Mikkel: your questions and approvals reach their phone too, as notifications, even with munin closed; the rest of what you say waits in munin\.\n/);
+  assert.match(capabilities(forge, null, { devices: 0 }), /- Reaching the person you work for: what you say waits in munin until they look\. Once they turn on notifications in munin's Settings, your questions and approvals reach their phone too\./);
+  for (const agent of [hugin, forge]) assert.doesNotMatch(capabilities(agent, 'Mikkel'), /Reach a phone/, 'munin can now');
+});

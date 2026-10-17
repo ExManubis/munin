@@ -15,14 +15,14 @@ import {
 import { createBashTool, createCodingTools } from '@earendil-works/pi-durable/tools';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
-import { ROLES, ROUTINES_RULE, roleName, askFirstFor, ruleMatches, upgradeBrief } from './roles.js';
+import { ROLES, SOULS, ROUTINES_RULE, roleName, askFirstFor, ruleMatches, upgradeBrief, examplesFor } from './roles.js';
 import { toItems, summarize } from './items.js';
 import { AppError, describeAppCall, openApps } from './apps.js';
 import { GoogleError, openGoogle } from './google.js';
 import { PushError, openPush } from './push.js';
 import { googleApps } from './googleapps.js';
 import { readPageTool, webSearchTool } from './web.js';
-import { identity, about, capabilities } from './prompt.js';
+import { identity, about, capabilities, team } from './prompt.js';
 import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
 import { createWorkspace, WorkspaceError } from './workspace.js';
@@ -214,8 +214,9 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     name: 'munin',
     tools: [askHuman, remember, ...routineTools],
     sections: [
-      // Who the agent is, who it's talking with and how it talks, then what it knows about you
-      // (prompt.js). The brief is part of the first section, so it comes before munin's own notes.
+      // Who the agent is, who it's talking with and how it talks, then what it can do, who else
+      // is on the team and what it knows about you (prompt.js). The brief and the examples are
+      // part of the first section, so they come before munin's own notes.
       section('munin', (input) => {
         const agent = agentFor(input.conversationId);
         return agent ? identity(agent, named()) : undefined;
@@ -231,7 +232,13 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
           repos: Object.keys(repos),
           routines: agent.routines.length,
           watches: { mail: Boolean(googleFor(agent, 'mail')), calendar: Boolean(googleFor(agent, 'calendar')) },
+          devices: push.status().devices,
         });
+      }, { tag: false }),
+      // Who else is on the team (prompt.js), so the agent can say whose job something is.
+      section('team', (input) => {
+        const agent = agentFor(input.conversationId);
+        return agent ? team([...agents.values()].filter((a) => a !== agent)) : undefined;
       }, { tag: false }),
       section('about', (input) => {
         const agent = agentFor(input.conversationId);
@@ -438,7 +445,11 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   }, ctx);
 
   const saved = await harness.snapshot(AgentsDoc, ctx);
-  for (const agent of Object.values(saved?.agents || {})) agents.set(agent.name, { ...structuredClone(agent), brief: upgradeBrief(agent.brief) });
+  for (const agent of Object.values(saved?.agents || {})) {
+    const brief = upgradeBrief(agent.brief);
+    // An agent from before examples gets its role's, while its brief is still the role's soul.
+    agents.set(agent.name, { ...structuredClone(agent), brief, examples: agent.examples ?? examplesFor({ ...agent, brief }) });
+  }
   for (const agent of agents.values()) {
     syncAppRules(agent);
     if (!agent.askFirst.some((rule) => rule.id === ROUTINES_RULE.id)) agent.askFirst.push({ ...ROUTINES_RULE });
@@ -604,7 +615,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     const s = summarize(items, { busy, paused: agent.paused });
     return {
       ...await summaryOf(agent),
-      brief: agent.brief, thinking: agent.thinking,
+      brief: agent.brief, examples: agent.examples || '', thinking: agent.thinking,
       abilities: { ...agent.abilities }, apps: [...agent.apps],
       askFirst: agent.askFirst.map(({ match, tool, tools, ...rule }) => rule),
       routines: agent.routines.map((r) => routineOut(r, agent)),
@@ -763,7 +774,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       await write(agent, 'munin.action', { verb: 'stopped', object: 'by you' });
     },
 
-    async createAgent({ name, role, colour = 'white', provider, model, brief, tracker: link } = {}) {
+    // A brief left empty is the role's soul. Examples left out are the role's while the brief is
+    // its soul, or else none yet (null), which the next start fills in once the brief has been
+    // brought up to its role's soul (upgradeBrief); examples given empty stay empty.
+    async createAgent({ name, role, colour = 'white', provider, model, brief, examples, tracker: link } = {}) {
       const clean = String(name || '').trim().toLowerCase();
       if (!NAME.test(clean)) throw invalid('A name is 2 to 24 letters, digits or dashes, starting with a letter.');
       if (agents.has(clean)) throw conflict(`There's already an agent called ${clean}.`);
@@ -772,10 +786,11 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       const abilities = { ...ROLES[role].abilities };
       const agent = {
         name: clean, role, colour, provider: provider || 'standin', model: model || 'stand-in', thinking: 'low',
-        brief: String(brief || '').trim() || `You're ${clean}.`, abilities, apps: [], askFirst: [...askFirstFor(abilities), { ...ROUTINES_RULE }], allowances: [],
+        brief: String(brief || '').trim() || SOULS[role].brief(), examples: null, abilities, apps: [], askFirst: [...askFirstFor(abilities), { ...ROUTINES_RULE }], allowances: [],
         routines: [], memory: [], budget: null, paused: false, createdAt: Date.now(), folder: join(settings.agentsDir, clean), conversationId: null,
         tracker: link ? trackerLink(link, null) : null,
       };
+      agent.examples = examples === undefined ? examplesFor(agent) || null : String(examples || '').trim();
       if (abilities.code) await mkdir(agent.folder, { recursive: true });
       const conversation = await harness.createConversation({ ownership: { kind: 'ownerless' }, agent: change(agent) }, ctx);
       agent.conversationId = conversation.id;
@@ -792,6 +807,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       if ('role' in patch && !ROLES[patch.role]) throw invalid(`There's no role called ${patch.role}.`);
       for (const key of ['role', 'colour', 'provider', 'model', 'thinking', 'budget']) if (key in patch) agent[key] = patch[key];
       if ('brief' in patch) agent.brief = String(patch.brief || '').trim() || agent.brief;
+      if ('examples' in patch) agent.examples = String(patch.examples || '').trim();
       if (patch.abilities) {
         Object.assign(agent.abilities, patch.abilities);
         if (agent.abilities.code && !agent.askFirst.some((rule) => rule.id === 'push')) agent.askFirst = [...askFirstFor(agent.abilities), ...agent.askFirst];

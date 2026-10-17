@@ -1,9 +1,9 @@
 // A new agent: a role to start from, a name, a colour for its Figbot, a model, the projects it
-// works on when it uses the tracker, and a brief. The brief fills in from the role until you
-// change it.
+// works on when it uses the tracker, a brief and how it talks. The brief and the examples fill
+// in from the role until you change them.
 
 import { runtime } from '../runtime/index.js';
-import { ROLES, roleOf, costHint, modelIn } from '../runtime/roles.js';
+import { ROLES, roleOf, costHint, modelIn, startingModel } from '../runtime/roles.js';
 import { connectToTracker, linkable } from '../runtime/tracker-link.js';
 import { store } from '../store.js';
 import { h, MOD, onModEnter, toast, topbar } from '../ui.js';
@@ -16,7 +16,7 @@ let catalog = []; // runtime.models(), loaded with the screen
 let search = searchState(); // the model picker's search of OpenRouter
 
 function blank() {
-  return { role: null, name: '', colour: 'white', provider: 'openrouter', model: null, projects: null, brief: '', briefEdited: false };
+  return { role: null, name: '', colour: 'white', provider: 'openrouter', model: null, projects: null, brief: '', briefEdited: false, examples: '', examplesEdited: false };
 }
 
 export const view = {
@@ -58,7 +58,7 @@ export const view = {
             dataset: { keep: 'new-agent:name' },
             oninput: (e) => {
               form.name = e.target.value;
-              if (form.role && !form.briefEdited) form.brief = roleOf(form.role).brief(form.name.trim() || 'it');
+              fillFromRole();
               ctx.rerender();
             },
           }), () => create(ctx))),
@@ -81,7 +81,7 @@ export const view = {
               ctx.rerender();
             },
           }),
-          h('p', { class: 'hint' }, role && chosen().model === role.model ? role.hint : costHint(catalog, chosen().provider, chosen().model))),
+          h('p', { class: 'hint' }, role && (chosen().model === role.model || (role.apart && !form.model && chosen().provider !== 'standin')) ? role.hint : costHint(catalog, chosen().provider, chosen().model))),
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Brief'),
           h('p', { class: 'hint section-lead-hint' }, role ? 'Filled in from the role. Make it yours.' : 'Pick a role and this fills in.'),
@@ -93,6 +93,19 @@ export const view = {
             oninput: (e) => {
               form.brief = e.target.value;
               form.briefEdited = true;
+            },
+          }), () => create(ctx))),
+        h('section', { class: 'profile-section' },
+          h('h2', { class: 'section-title' }, 'How it talks'),
+          h('p', { class: 'hint section-lead-hint' }, role ? `A few made-up exchanges that show how ${name} sounds. "You:" is you.` : 'Pick a role and this fills in.'),
+          onModEnter(h('textarea', {
+            class: 'textarea brief-box',
+            value: form.examples,
+            'aria-label': 'How it talks',
+            dataset: { keep: 'new-agent:examples' },
+            oninput: (e) => {
+              form.examples = e.target.value;
+              form.examplesEdited = true;
             },
           }), () => create(ctx))),
         h('div', { class: 'create-row' },
@@ -115,15 +128,26 @@ export const view = {
   },
 };
 
-// The model the agent gets: the one picked, or its role's, or the first on offer.
-const chosen = () => modelIn(catalog, form.provider, form.model || (form.role ? roleOf(form.role).model : null));
+// The model the agent gets: the one picked, or the one its role starts on, or the first on offer.
+const chosen = () => {
+  if (form.model) return modelIn(catalog, form.provider, form.model);
+  return form.role ? startingModel(catalog, roleOf(form.role), store.runtimeAgents) : modelIn(catalog, form.provider, null);
+};
+
+// The brief and the examples from the role, for the name so far, until you change them.
+function fillFromRole() {
+  if (!form.role) return;
+  const role = roleOf(form.role);
+  const name = form.name.trim().toLowerCase() || 'it'; // as the runtime keeps it
+  if (!form.briefEdited) form.brief = role.brief(name);
+  if (!form.examplesEdited) form.examples = role.examples(name);
+}
 
 function pickRole(id, ctx) {
   form.role = id;
-  const role = roleOf(id);
-  form.model = role.model;
+  form.model = null;
   form.provider = 'openrouter';
-  if (!form.briefEdited) form.brief = role.brief(form.name.trim() || 'it');
+  fillFromRole();
   ctx.rerender();
 }
 
@@ -188,6 +212,7 @@ async function create(ctx) {
       colour: form.colour,
       ...chosen(),
       brief: form.brief.trim() || roleOf(form.role).brief(form.name.trim()),
+      examples: form.examplesEdited ? form.examples.trim() : roleOf(form.role).examples(form.name.trim().toLowerCase()),
     });
     if (agent.tracker) await joinTracker(agent.name, chosenProjects());
     form = blank();
