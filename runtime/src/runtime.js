@@ -23,6 +23,7 @@ import { PushError, openPush } from './push.js';
 import { googleApps } from './googleapps.js';
 import { readPageTool, webSearchTool } from './web.js';
 import { identity, about, capabilities, team } from './prompt.js';
+import { MemoryError, addNote, changeNote, forgetNote, kindOf, room } from './memory.js';
 import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
 import { createWorkspace, WorkspaceError } from './workspace.js';
@@ -132,17 +133,56 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       return { output: [{ type: 'text', text: `Asked ${them()}. Their answer comes as a message.` }] };
     },
   });
+  const say = (text, isError = false) => ({ output: [{ type: 'text', text }], ...(isError ? { isError: true } : {}) });
+  // Memory (memory.js): notes in three kinds, each with room for so many characters. When a kind
+  // is full, the agent makes room by changing or forgetting notes, one at a time.
+  const KIND = Type.Union([Type.Literal('you'), Type.Literal('work'), Type.Literal('self')], {
+    description: 'you: about the person you work for (a preference, a fact, a habit). work: how the work is done here (commands, conventions, where things live). self: how you work best (what works, what to avoid).',
+  });
+  const memoryCall = (run) => async (args, toolApi) => {
+    const agent = agentFor(toolApi.conversationId);
+    try {
+      return say(await run(agent, args));
+    } catch (err) {
+      if (err instanceof MemoryError) return say(err.message, true);
+      throw err;
+    }
+  };
   const remember = defineTool({
     name: 'remember',
-    description: 'Remember something about the person you work for, for every later conversation: a preference, a fact, a habit. One short sentence.',
-    parameters: Type.Object({ note: Type.String() }),
-    execute: async (args, api) => {
-      const agent = agentFor(api.conversationId);
-      agent.memory.unshift({ id: `m${Date.now()}`, text: args.note.trim() });
+    description: 'Remember something for every later conversation, as one short sentence. Say it as what works ("Mikkel likes small PRs", "Run the gateway tests with TELEGRAM_TEST_TOKEN set"), not as what went wrong.',
+    parameters: Type.Object({ note: Type.String(), kind: KIND }),
+    execute: memoryCall(async (agent, args) => {
+      const { notes, note } = addNote(agent.memory, { kind: args.kind, text: args.note });
+      agent.memory = notes;
       await saveAgents();
-      await write(agent, 'munin.action', { verb: 'remembered', object: args.note.trim() });
-      return { output: [{ type: 'text', text: 'Remembered.' }] };
-    },
+      await write(agent, 'munin.action', { verb: 'remembered', object: note.text });
+      return `Remembered, as ${note.id}.`;
+    }),
+  });
+  const changeNoteTool = defineTool({
+    name: 'change_note',
+    description: 'Change one of your notes by its id: say it better, say two notes in one, or move it to another kind. Only what you give changes.',
+    parameters: Type.Object({ note: Type.String({ description: 'Its id, like m3fa9c1' }), text: Type.Optional(Type.String()), kind: Type.Optional(KIND) }),
+    execute: memoryCall(async (agent, args) => {
+      const { notes, note } = changeNote(agent.memory, args.note, { text: args.text, kind: args.kind });
+      agent.memory = notes;
+      await saveAgents();
+      await write(agent, 'munin.action', { verb: 'changed a note', object: note.text });
+      return `Changed ${note.id}.`;
+    }),
+  });
+  const forgetNoteTool = defineTool({
+    name: 'forget_note',
+    description: "Forget one of your notes by its id, when it's no longer true or matters less than what you need room for.",
+    parameters: Type.Object({ note: Type.String({ description: 'Its id, like m3fa9c1' }) }),
+    execute: memoryCall(async (agent, args) => {
+      const { notes, old } = forgetNote(agent.memory, args.note);
+      agent.memory = notes;
+      await saveAgents();
+      await write(agent, 'munin.action', { verb: 'forgot', object: old.text });
+      return `Forgot ${old.id}.`;
+    }),
   });
   // Routines the agent sets up for itself, when you ask it to: the same as on its profile, and
   // each change an action line in its conversation. ROUTINES_RULE can make them ask first.
@@ -152,7 +192,6 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     does: Type.Optional(Type.String({ description: 'What to do each time, as you would say it to yourself' })),
     trigger: Type.Optional(Type.Union([Type.Literal('schedule'), Type.Literal('tracker'), Type.Literal('mail'), Type.Literal('calendar')], { description: 'schedule (the default), tracker, mail or calendar' })),
   };
-  const say = (text, isError = false) => ({ output: [{ type: 'text', text }], ...(isError ? { isError: true } : {}) });
   const routineLine = (r) => `${r.id} · ${r.name} · ${r.when}${r.next ? ` · next ${new Date(r.next).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}${r.note ? ` · ${r.note}` : ''}\n  does: ${r.does}`;
   const findRoutine = (agent, which) => {
     const key = String(which || '').trim().toLowerCase();
@@ -212,7 +251,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
   const Munin = defineExtension({
     name: 'munin',
-    tools: [askHuman, remember, ...routineTools],
+    tools: [askHuman, remember, changeNoteTool, forgetNoteTool, ...routineTools],
     sections: [
       // Who the agent is, who it's talking with and how it talks, then what it can do, who else
       // is on the team and what it knows about you (prompt.js). The brief and the examples are
@@ -448,7 +487,9 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   for (const agent of Object.values(saved?.agents || {})) {
     const brief = upgradeBrief(agent.brief);
     // An agent from before examples gets its role's, while its brief is still the role's soul.
-    agents.set(agent.name, { ...structuredClone(agent), brief, examples: agent.examples ?? examplesFor({ ...agent, brief }) });
+    // Notes from before memory had kinds are about you.
+    const memory = (agent.memory || []).map((n) => ({ ...n, kind: kindOf(n) }));
+    agents.set(agent.name, { ...structuredClone(agent), brief, examples: agent.examples ?? examplesFor({ ...agent, brief }), memory });
   }
   for (const agent of agents.values()) {
     syncAppRules(agent);
@@ -619,7 +660,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       abilities: { ...agent.abilities }, apps: [...agent.apps],
       askFirst: agent.askFirst.map(({ match, tool, tools, ...rule }) => rule),
       routines: agent.routines.map((r) => routineOut(r, agent)),
-      memory: agent.memory.map((n) => ({ ...n })), memoryCount: agent.memory.length,
+      memory: agent.memory.map((n) => ({ ...n, kind: kindOf(n) })), memoryCount: agent.memory.length, memoryRoom: room(agent.memory),
       usage: usageOf(entries), budget: agent.budget,
       worksIn: agent.abilities.code ? {
         folder: tilde(agent.work?.folder || agent.folder), branch: agent.work?.branch || null,
@@ -897,6 +938,19 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       const agent = need(name);
       agent.memory = agent.memory.filter((n) => n.id !== noteId);
       await saveAgents();
+    },
+
+    // A note changed by you: its text, its kind, or both. It has to fit, like the agent's own.
+    async changeNote(name, noteId, { text, kind } = {}) {
+      const agent = need(name);
+      try {
+        agent.memory = changeNote(agent.memory, noteId, { text, kind }).notes;
+      } catch (err) {
+        if (err instanceof MemoryError) throw (/There's no note/.test(err.message) ? new RuntimeError(404, err.message) : invalid(err.message));
+        throw err;
+      }
+      await saveAgents();
+      return fullOf(agent);
     },
 
     async providers() {

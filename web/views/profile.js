@@ -1,11 +1,12 @@
 // An agent's profile: its brief and how it talks, its model, what it can reach, what it asks
-// first, its routines, what it remembers about you, and what it costs.
+// first, its routines, what it has done in the tracker, what it remembers, and what it costs.
 
+import { api } from '../api.js';
 import { runtime } from '../runtime/index.js';
-import { ABILITIES, THINKING, costHint } from '../runtime/roles.js';
+import { ABILITIES, MEMORY_KINDS, THINKING, costHint, kindOf } from '../runtime/roles.js';
 import { connectToTracker, disconnectFromTracker, revokeTrackerToken, linkable } from '../runtime/tracker-link.js';
 import { store } from '../store.js';
-import { h, bindDraft, drafts, onModEnter, toast, toggle, topbar } from '../ui.js';
+import { h, ago, bindDraft, drafts, onModEnter, toast, toggle, topbar } from '../ui.js';
 import { openDialog, closeDialog } from '../dialogs.js';
 import { agentFace, roleTag, hhmm } from './agents.js';
 import { modelPicker, searchState } from '../model-picker.js';
@@ -19,8 +20,9 @@ export const view = {
   scope: (params) => `/agents/${params.name}/profile`,
 
   async load({ name }) {
-    const [agent, models, apps] = await Promise.all([runtime.agent(name), runtime.models(), runtime.apps()]);
-    return { agent, models, apps };
+    // Its track record comes from the tracker, which knows the agent by name (record.py there).
+    const [agent, models, apps, record] = await Promise.all([runtime.agent(name), runtime.models(), runtime.apps(), api.agentRecord(name).catch(() => null)]);
+    return { agent, models, apps, record };
   },
 
   leave() {
@@ -28,7 +30,7 @@ export const view = {
     search = searchState();
   },
 
-  render({ agent, models, apps }, ctx) {
+  render({ agent, models, apps, record }, ctx) {
     const set = (patch, message) => update(agent, patch, message, ctx);
     return h('div', { class: 'page' },
       topbar([
@@ -43,6 +45,7 @@ export const view = {
         abilities(agent, apps, set, ctx),
         askFirst(agent, set),
         routines(agent, ctx),
+        trackRecord(agent, record),
         memory(agent, ctx),
         usage(agent, set)));
   },
@@ -365,25 +368,93 @@ async function runNow(agent, routine, ctx) {
   ctx.reload();
 }
 
+// What the agent has done in the tracker: what it shipped, how often its work came back from
+// review, what it reviewed for others and where it works. For an agent that isn't in the
+// tracker and has done nothing there, nothing.
+function trackRecord(agent, record) {
+  if (!record) return null;
+  const did = record.shipped || record.sent_to_review || record.reviewed;
+  if (!did) return agent.abilities.tracker ? section('Track record', `Nothing in the tracker yet. What ${agent.name} ships and reviews shows here.`) : null;
+  const prop = (key, ...value) => h('div', { class: 'prop' }, h('span', { class: 'prop-key' }, key), h('span', { class: 'prop-value' }, value));
+  const times = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const since = record.since ? new Date(record.since).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) : null;
+  const last = record.last_shipped;
+  return section('Track record', `What ${agent.name} has done in the tracker${since ? `, since ${since}` : ''}.`,
+    h('div', { class: 'props-list' },
+      prop('Shipped', times(record.shipped, 'issue')),
+      record.sent_to_review ? prop('Sent back', `${record.sent_back} of the ${times(record.sent_to_review, 'time')} it sent work to review`) : null,
+      record.reviewed ? prop('Reviewed', times(record.reviewed, 'time') + ' for others') : null,
+      record.projects.length ? prop('Works in', record.projects.map((p) => `${p.key} · ${p.issues}`).join(', ')) : null,
+      last ? prop('Last shipped', h('a', { class: 'mono issue-link', href: `#/issues/${encodeURIComponent(last.id)}` }, last.id), ` ${last.title} · ${ago(record.last_shipped_at, true)}`) : null));
+}
+
+// What the agent remembers, in its three kinds, each with how full it is. When a kind is full
+// the agent makes room itself; you can change or forget any note here too.
 function memory(agent, ctx) {
-  const notes = allNotes ? agent.memory : agent.memory.slice(0, 3);
-  return section('Memory', `What ${agent.name} remembers about you · ${agent.memoryCount} note${agent.memoryCount === 1 ? '' : 's'}`,
-    notes.length
-      ? h('ul', { class: 'notes' }, notes.map((note) => h('li', { class: 'note' },
-        h('span', {}, note.text),
-        h('button', {
-          type: 'button',
-          class: 'link forget',
-          onclick: async () => {
-            await runtime.forget(agent.name, note.id);
-            toast(`${agent.name} forgot that.`);
-            ctx.reload();
-          },
-        }, 'Forget'))))
+  const kinds = Object.entries(MEMORY_KINDS).map(([kind, { label, cap }]) => ({
+    kind, label, notes: agent.memory.filter((n) => kindOf(n) === kind), room: agent.memoryRoom?.[kind] || { used: 0, cap },
+  })).filter((k) => k.notes.length);
+  const more = kinds.some((k) => k.notes.length > 3);
+  return section('Memory', `What ${agent.name} remembers · ${agent.memoryCount} note${agent.memoryCount === 1 ? '' : 's'}. Each kind has room for so much; when one is full, ${agent.name} makes room itself.`,
+    kinds.length
+      ? kinds.map((k) => h('div', { class: 'note-kind' },
+        h('div', { class: 'note-kind-head' },
+          h('span', { class: 'label' }, k.label),
+          h('span', { class: ['label', 'note-room', k.room.used >= k.room.cap && 'full'] }, `${k.room.used.toLocaleString('en')} / ${k.room.cap.toLocaleString('en')}`)),
+        h('ul', { class: 'notes' }, (allNotes ? k.notes : k.notes.slice(0, 3)).map((note) => noteRow(agent, note, ctx)))))
       : h('p', { class: 'hint' }, 'Nothing yet. Tell it "remember that…" in the conversation.'),
-    agent.memory.length > 3
+    more
       ? h('button', { type: 'button', class: 'link', onclick: () => { allNotes = !allNotes; ctx.rerender(); } }, allNotes ? 'Show fewer' : 'View all')
       : null);
+}
+
+// A note, which turns into a field to change it: Return saves, Escape doesn't.
+function noteRow(agent, note, ctx) {
+  const text = h('span', { class: 'note-text' }, note.text);
+  const row = h('li', { class: 'note' }, text,
+    h('span', { class: 'note-actions' },
+      h('button', {
+        type: 'button',
+        class: 'link forget',
+        onclick: () => {
+          const field = h('input', { class: 'input note-input', value: note.text, 'aria-label': 'Note' });
+          let done = false;
+          const save = async () => {
+            if (done) return;
+            done = true;
+            const value = field.value.trim();
+            if (!value || value === note.text) return ctx.rerender();
+            try {
+              await runtime.changeNote(agent.name, note.id, { text: value });
+              toast('Changed the note.');
+            } catch (err) {
+              toast(err.message, { error: true });
+            }
+            ctx.reload();
+          };
+          field.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') field.blur();
+            if (e.key === 'Escape') {
+              done = true;
+              ctx.rerender();
+            }
+            e.stopPropagation(); // the profile's own keys stay out of the field
+          });
+          field.addEventListener('blur', save);
+          text.replaceWith(field);
+          field.focus();
+        },
+      }, 'Edit'),
+      h('button', {
+        type: 'button',
+        class: 'link forget',
+        onclick: async () => {
+          await runtime.forget(agent.name, note.id);
+          toast(`${agent.name} forgot that.`);
+          ctx.reload();
+        },
+      }, 'Forget')));
+  return row;
 }
 
 function usage(agent, set) {

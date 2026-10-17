@@ -59,6 +59,7 @@ export const api = {
   activity: (params) => get(`/api/activity?${new URLSearchParams(params)}`),
 
   agents: () => get('/api/agents'),
+  agentRecord: (name) => get(`/api/agents/${enc(name)}/record`),
   push: () => get('/api/push'),
   subscribePush: (subscription) => request('POST', '/api/push', { subscription }),
   forgetPush: (endpoint) => request('DELETE', '/api/push', { endpoint }),

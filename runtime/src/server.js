@@ -53,6 +53,7 @@ export function createRuntimeServer(runtime, settings) {
   route('PATCH', '/agents/([^/]+)/routines/([^/]+)', (m, body) => runtime.updateRoutine(enc(m[1]), enc(m[2]), body));
   route('DELETE', '/agents/([^/]+)/routines/([^/]+)', (m) => runtime.deleteRoutine(enc(m[1]), enc(m[2])));
   route('POST', '/agents/([^/]+)/routines/([^/]+)/run', (m) => runtime.runRoutine(enc(m[1]), enc(m[2])));
+  route('PATCH', '/agents/([^/]+)/memory/([^/]+)', (m, body) => runtime.changeNote(enc(m[1]), enc(m[2]), body));
   route('DELETE', '/agents/([^/]+)/memory/([^/]+)', (m) => runtime.forget(enc(m[1]), enc(m[2])));
   route('GET', '/waiting', () => runtime.waiting());
   route('GET', '/issue-costs', (m, body, url) => runtime.issueCosts(url.searchParams.get('issues')?.split(',').filter(Boolean) || null));
