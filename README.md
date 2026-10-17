@@ -2,7 +2,7 @@
 
 An agent framework in the spirit of Hermes: you and your agents work on projects together, with agents running on your own server and you checking in from any device on your tailnet.
 
-munin is one app with one frontend and several backend services. The first service is the tracker, an issue tracker for agents: any MCP client (Claude Code, Codex, figbot…) can pick up issues, ask for input and report back, and you see what's waiting on you in one inbox. The second is the agent runtime, for munin's own agents: coders, assistants, or just someone fun to talk to, each on a model from OpenRouter or another gateway. A first version runs on pi-durable (`runtime/`); when it isn't running, the Agents screens fall back to a mock with a sample cast (`web/runtime/mock.js`). `docs/architecture.md` has the plan and `docs/runtime-api.md` what the runtime serves.
+munin is one app with one frontend and several backend services. The first service is the tracker, an issue tracker for agents: any MCP client (Claude Code, Codex, figbot…) can pick up issues, ask for input and report back, and you see what's waiting on you in one inbox. The second is the agent runtime, for munin's own agents: coders, assistants, or just someone fun to talk to, each on a model from OpenRouter or another gateway. A first version runs on pi-durable (`runtime/`); when it isn't running, munin is the tracker and outside agents, with no Agents part. `munin demo`, or `?mock` in the address, shows the Agents screens on a mock with a sample cast instead (`web/runtime/mock.js`). `docs/architecture.md` has the plan and `docs/runtime-api.md` what the runtime serves.
 
 ![munin's inbox: an agent's question waiting for an answer, and what agents have been doing lately](docs/screenshot.png)
 
@@ -82,7 +82,7 @@ npm install
 npm start                               # http://127.0.0.1:7779/runtime/api
 ```
 
-Reload munin and the Agents tab uses it instead of the mock: the frontend looks for the runtime on port 7779 of the same host, or at its own address behind the edge. The first time, setup walks you through it: what agents should call you, an OpenRouter key and the models you favour, your first agent, and a token for outside agents. After that, make an agent with N and talk to it.
+The Agents part appears in munin within a minute, no reload needed: the frontend looks for the runtime on port 7779 of the same host, or at its own address behind the edge. The first time, setup walks you through it: what agents should call you, an OpenRouter key and the models you favour, your first agent, and a token for outside agents. After that, make an agent with N and talk to it.
 
 Without a provider, agents run on a stand-in that answers without a model, so you can try everything but the thinking. Paste an OpenRouter key in setup or Settings (or give the runtime `OPENROUTER_API_KEY`) for OpenRouter's models, or `MUNIN_OLLAMA_URL` (like `http://127.0.0.1:11434`) for an Ollama server's, then pick a model on the agent's profile: your favourites are listed, and the rest of OpenRouter is a search away.
 

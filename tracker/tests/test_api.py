@@ -69,7 +69,7 @@ def test_other_host_names_are_refused(client):
 
 
 def test_me(client):
-    me = {"name": "me", "you": None, "mcp_url": "http://localhost/mcp", "version": "0.2.0"}
+    me = {"name": "me", "you": None, "mcp_url": "http://localhost/mcp", "version": "0.2.0", "demo": False}
     assert client.get("/api/me").json() == me, "on this machine, nobody says who's looking"
     assert client.get("/api/me", headers={"Host": "127.0.0.1:7777"}).json()["mcp_url"] == "http://127.0.0.1:7777/mcp"
 

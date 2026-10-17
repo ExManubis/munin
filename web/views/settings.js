@@ -12,13 +12,26 @@ let created = null; // { name, token } for the token just created; shown once
 let tab = 'claude';
 let keyFor = null; // the provider whose key is being pasted
 
+// Without the agent runtime, munin is the tracker and outside agents.
+function noRuntime() {
+  return h('section', { class: 'section', id: 'runtime' },
+    h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Agent runtime'), h('span', { class: 'mono muted' }, 'not running')),
+    h('p', { class: 'lead' },
+      "munin's own agents, their models, Google, apps and code live in the agent runtime, and it isn't running. ",
+      'The tracker works without it, with outside agents over MCP. Start the runtime and the Agents part appears here by itself.'));
+}
+
 export const view = {
   title: () => 'Settings',
 
   async load() {
+    if (runtime.kind === 'none') {
+      const [agents, github] = await Promise.all([api.agents(), api.github()]);
+      return { agents, github, me: store.me, runtime: false };
+    }
     const [agents, providers, repos, about, apps, google, github] = await Promise.all([api.agents(), runtime.providers(), runtime.repos(), runtime.me(), runtime.apps(), runtime.google(), api.github()]);
     googleReturned();
-    return { agents, providers, repos, apps, google, github, sandbox: about.sandbox, me: store.me };
+    return { agents, providers, repos, apps, google, github, sandbox: about.sandbox, me: store.me, runtime: true };
   },
 
   leave() {
@@ -27,15 +40,17 @@ export const view = {
     keyFor = null;
   },
 
-  render({ agents, providers, repos, apps, google, github, sandbox, me }, ctx) {
+  render({ agents, providers, repos, apps, google, github, sandbox, me, runtime: withRuntime }, ctx) {
     const live = agents.filter((a) => !a.revoked);
     return h('div', { class: 'page' },
       topbar([h('span', { class: 'title' }, 'Settings')]),
       h('div', { class: 'agents-page' },
-        providerSection(providers, ctx),
-        googleSection(google, ctx),
-        appsSection(apps, ctx),
-        codeSection(repos, sandbox, ctx),
+        ...(withRuntime ? [
+          providerSection(providers, ctx),
+          googleSection(google, ctx),
+          appsSection(apps, ctx),
+          codeSection(repos, sandbox, ctx),
+        ] : [noRuntime()]),
         githubSection(github, ctx),
         h('section', { class: 'section', id: 'outside-agents' },
           h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Outside agents'), h('span', { class: 'mono muted' }, `${live.length} connected`)),
@@ -49,13 +64,13 @@ export const view = {
         table(agents, ctx),
         connect(agents, me, ctx),
         notifications(ctx),
-        h('section', { class: 'section', id: 'setup' },
+        withRuntime ? h('section', { class: 'section', id: 'setup' },
           h('div', { class: 'section-head' }, h('h2', {}, 'Setup')),
           h('div', { class: 'setting' },
             h('div', { class: 'setting-main' },
               h('div', {}, 'Go through setup again'),
               h('div', { class: 'hint' }, 'What agents call you, the model key and your favourite models, a new agent, and outside agents. Nothing you set up is lost.')),
-            h('a', { class: 'btn small', href: '#/setup' }, 'Open setup'))),
+            h('a', { class: 'btn small', href: '#/setup' }, 'Open setup'))) : null,
         runtime.kind === 'mock' ? dummy(ctx) : null));
   },
 };
