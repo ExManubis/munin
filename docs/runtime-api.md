@@ -15,7 +15,7 @@ The runtime serves this under `/runtime/api`, behind the same edge as the tracke
 | `createAgent(fields)` | `POST /runtime/api/agents` | `{name, role, colour, provider, model, brief, tracker}` |
 | `updateAgent(name, patch)` | `PATCH /runtime/api/agents/{name}` | Any of `role, colour, provider, model, thinking, brief, abilities, apps, budget`, `askFirst` as `{rule: on}`, and `tracker` (below) |
 | `deleteAgent(name)` | `DELETE /runtime/api/agents/{name}` | With its conversation, routines and memory |
-| `pause(name)`, `resume(name)` | `POST /runtime/api/agents/{name}/pause`, `/resume` | A paused agent reads and does nothing |
+| `pause(name)`, `resume(name)` | `POST /runtime/api/agents/{name}/pause`, `/resume` | A paused agent reads and does nothing. `resume` is a 409 while the agent is over its budget for the month |
 
 A **summary**, for the sidebar and lists:
 
@@ -41,8 +41,9 @@ A **summary**, for the sidebar and lists:
   "askFirst": [{ "id": "push_main", "label": "Pushing to main", "what": "push to main", "third": "pushes to main", "on": true }],
   "routines": [Routine],
   "memory": [{ "id": "m1", "text": "Mikkel prefers small PRs." }], "memoryCount": 9,
-  "usage": { "today": 1.92, "week": 9.4, "month": 31.2, "tokens": 640000 },  // dollars; tokens today
-  "budget": 60,                                                   // pauses at this much a month, or null
+  "usage": { "today": 1.92, "week": 9.4, "month": 31.2, "tokens": 640000 },  // dollars; week is 7 days, month this calendar month; tokens today
+  "budget": 60,                                                   // pauses at this much a calendar month, or null
+  "pausedFor": null,                                              // while paused: "you", or "budget"
   "worksIn": { "folder": "~/.munin/agents/forge/MUN-46", "branch": "mun-46-stream-tool-output",  // when it can code
                "issue": Issue, "detached": false,                         // detached: reviewing someone's branch
                "sandbox": "docker" },                                     // or null: on the runtime's machine
@@ -144,6 +145,7 @@ The runtime (`runtime/src/`) is a thin layer over pi-durable:
 
 - **A conversation** is a pi-durable conversation, one per agent, in the runtime's SQLite file. The agents' settings are one session document next to them (`munin.agents`).
 - **The prompt** (`prompt.js`) opens with who the agent is, as plain facts: what it is, that it works for you, and that it's talking with you right now in munin, which is private to you. It doesn't explain where messages come from, because agents told that started doubting who they were talking to. Then comes how every munin agent talks, written as behaviour (the way Hermes Agent's SOUL.md does it), then the agent's own brief, then which of its abilities munin can't give it yet. What it remembers follows as "What you know about Mikkel". With no name from setup it says "the person you work for", since `MUNIN_USER`'s default, `me`, isn't a name, and the agent asks once. A brief is the agent's character and job and doesn't repeat any of that. When the runtime starts, briefs made from a role's older words get the new ones.
+- **Budgets.** An agent's budget is dollars per calendar month. The runtime keeps a running total of what its model responses cost this month: it reads the total from the conversation the first time it's needed, then adds each response's cost in a `GenerationTask` `afterResponse` hook. When the total reaches the budget, the agent pauses itself (`pausedFor: "budget"`) and its conversation says "paused at its $10 budget for October". The turn it's in isn't cut off: its next tool calls are blocked, so it answers once more and stops. A bigger budget doesn't resume it by itself, and neither does a new month; `resume` does, once it's under budget.
 - **Messages and runs** come from its entries (`items.js`).
   - `pi.user` and `pi.assistant` text become messages.
   - A run is the tool calls from one input to the answer. Each call is a step, and its result gives the step's detail line: the last line a command printed, or `failed`.
@@ -174,7 +176,6 @@ An agent in the tracker starts work when you tell it to, from its projects in th
 Stored but not acted on yet, next roughly in this order:
 
 1. **Apps and the web** as tools, through MCP servers, with ask-first rules for apps like "send mail". Mail and calendar routines start then.
-2. **A budget that pauses** the agent at its limit.
-3. **Faster reads.** Each read goes through an agent's whole conversation; it should keep items and page them.
-4. **Numbered events** on the stream, and replay on reconnect.
-5. **Tighter containers.** A container sees all of munin's clones, so a coder could change another coder's branch there; one clone per agent, or a mount of only its own worktrees' git data, would stop that.
+2. **Faster reads.** Each read goes through an agent's whole conversation; it should keep items and page them.
+3. **Numbered events** on the stream, and replay on reconnect.
+4. **Tighter containers.** A container sees all of munin's clones, so a coder could change another coder's branch there; one clone per agent, or a mount of only its own worktrees' git data, would stop that.

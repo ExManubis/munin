@@ -341,6 +341,7 @@ function full(agent) {
     worksIn: agent.worksIn,
     tracker: agent.tracker,
     paused: agent.paused,
+    pausedFor: agent.paused ? agent.pausedFor || 'you' : null,
     createdAt: iso(agent.createdAt),
     run: run ? { id: run.id, issue: issueOf(run.issue), startedAt: iso(run.startedAt), step: run.steps[run.steps.length - 1]?.text } : null,
   };
@@ -701,6 +702,7 @@ export const mock = {
   async pause(name) {
     const agent = need(name);
     agent.paused = true;
+    agent.pausedFor = 'you';
     agent.pausedAt = Date.now();
     act(name, 'paused', 'by you');
     changed();
@@ -708,7 +710,11 @@ export const mock = {
 
   async resume(name) {
     const agent = need(name);
+    if (agent.budget && agent.usage.month >= agent.budget) {
+      throw new Error(`${name} has spent $${agent.usage.month.toFixed(2)} of its $${agent.budget} budget this month. Raise the budget on its profile to resume it, or wait for next month.`);
+    }
     agent.paused = false;
+    agent.pausedFor = null;
     act(name, 'resumed', 'by you');
     for (const key of ['forge', 'atlas']) if (key === name && state.script[key]) state.script[key].next = later(5000);
     changed();

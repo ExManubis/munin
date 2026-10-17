@@ -326,6 +326,13 @@ async function stopRun(agent, ctx) {
 
 function composer(agent, openQuestion, ctx) {
   const key = `convo:${agent.name}`;
+  if (agent.paused && agent.pausedFor === 'budget') {
+    return h('footer', { class: 'composer' },
+      h('div', { class: 'composer-box disabled' }, h('span', { class: 'muted' }, `${agent.name} is paused: it reached its $${agent.budget} budget for this month.`)),
+      h('p', { class: 'hint' }, 'It does nothing until you resume it, which takes a bigger budget or a new month. ',
+        h('a', { class: 'link', href: `#/agents/${encodeURIComponent(agent.name)}/profile` }, 'Budget'), ' · ',
+        h('button', { type: 'button', class: 'link', onclick: () => resume(agent, ctx) }, 'Resume')));
+  }
   if (agent.paused) {
     return h('footer', { class: 'composer' },
       h('div', { class: 'composer-box disabled' }, h('span', { class: 'muted' }, `${agent.name} is paused.`)),
@@ -361,7 +368,11 @@ function composer(agent, openQuestion, ctx) {
 }
 
 async function resume(agent, ctx) {
-  await runtime.resume(agent.name);
+  try {
+    await runtime.resume(agent.name);
+  } catch (err) {
+    toast(err.message, { error: true }); // over its budget, say
+  }
   ctx.reload();
 }
 
