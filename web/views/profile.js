@@ -1,6 +1,6 @@
 // An agent's profile: its brief and how it talks, its model, what it can reach, what it asks
-// first, its routines, its skills, what it has done in the tracker, what it remembers, and what
-// it costs.
+// first, its routines and whether it speaks up on its own, its skills, what it has done in the
+// tracker, its journal, what it remembers, and what it costs.
 
 import { api } from '../api.js';
 import { runtime } from '../runtime/index.js';
@@ -28,6 +28,7 @@ export const view = {
 
   leave() {
     allNotes = false;
+    allEntries = false;
     search = searchState();
   },
 
@@ -46,8 +47,10 @@ export const view = {
         abilities(agent, apps, set, ctx),
         askFirst(agent, set),
         routines(agent, ctx),
+        speakingUp(agent, set),
         skills(agent, ctx),
         trackRecord(agent, record),
+        journal(agent, ctx),
         memory(agent, ctx),
         usage(agent, set)));
   },
@@ -370,6 +373,39 @@ async function runNow(agent, routine, ctx) {
   ctx.reload();
 }
 
+// Whether the agent speaks up without being asked (runtime/src/rhythm.js): every couple of hours,
+// in the day, munin checks in, and the agent says something only when it's worth it.
+const PROACTIVITY = [
+  ['off', 'Only when asked', 'It talks when you talk to it, and when its routines run.'],
+  ['matters', 'When it matters', 'Every couple of hours, 08–21, it looks around and tells you what you need to know soon. Usually it says nothing.'],
+  ['chatty', 'Chatty', 'Every couple of hours, 08–21, it shares something when it has something: a thought, a question, a find. It waits for your answer before it does again.'],
+];
+
+function speakingUp(agent, set) {
+  const current = PROACTIVITY.find(([id]) => id === agent.proactivity) || PROACTIVITY[0];
+  return section('Speaking up', `Whether ${agent.name} starts a conversation on its own. It counts towards its budget.`,
+    h('div', { class: 'select-row' },
+      select(PROACTIVITY.map(([id, label]) => [id, label]), current[0], 'Speaking up', (value) => set({ proactivity: value }, value === 'off' ? `${agent.name} only talks when asked.` : `${agent.name} speaks up ${value === 'chatty' ? 'when it has something' : 'when it matters'}.`))),
+    h('p', { class: 'hint' }, current[2]));
+}
+
+// What the agent writes at the end of a day it worked: what it did, what it learned and what's
+// still open (runtime/src/rhythm.js). Newest first.
+let allEntries = false;
+function journal(agent, ctx) {
+  const entries = agent.journal || [];
+  const day = (at) => new Date(at).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  return section('Journal', entries.length ? `What ${agent.name} writes at the end of a day it worked.` : null,
+    entries.length
+      ? h('div', { class: 'journal' }, (allEntries ? entries : entries.slice(0, 3)).map((e) => h('div', { class: 'journal-entry' },
+        h('span', { class: 'mono muted journal-day' }, day(e.at)),
+        h('p', {}, e.text))))
+      : h('p', { class: 'hint' }, `Nothing yet. At the end of a day it worked, ${agent.name} writes what it did, what it learned and what's still open.`),
+    entries.length > 3
+      ? h('button', { type: 'button', class: 'link', onclick: () => { allEntries = !allEntries; ctx.rerender(); } }, allEntries ? 'Show fewer' : 'View all')
+      : null);
+}
+
 // What the agent knows how to do here (runtime/src/skills.js): its own skills, which it saves as
 // it learns and you approve, and the ones other agents share with it. You can write, change,
 // share and delete its own; another agent's are changed on that agent's profile.
@@ -513,7 +549,7 @@ function memory(agent, ctx) {
 
 // A note, which turns into a field to change it: Return saves, Escape doesn't.
 function noteRow(agent, note, ctx) {
-  const text = h('span', { class: 'note-text' }, note.text);
+  const text = h('span', { class: 'note-text' }, note.about ? [h('span', { class: 'mono muted' }, `${note.about} · `), note.text] : note.text);
   const row = h('li', { class: 'note' }, text,
     h('span', { class: 'note-actions' },
       h('button', {

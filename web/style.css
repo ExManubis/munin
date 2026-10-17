@@ -857,6 +857,10 @@ button.option-card:hover { border-color: var(--text); }
 .note-text { flex: 1; }
 .note-input { flex: 1; min-width: 0; }
 .note-actions { display: flex; flex-shrink: 0; gap: 12px; }
+.journal { display: flex; flex-direction: column; gap: 14px; padding: 2px 0 2px 16px; border-left: 1px solid var(--line); }
+.journal-entry { display: flex; flex-direction: column; gap: 4px; }
+.journal-entry p { margin: 0; color: var(--text-2); }
+.select-row { display: flex; gap: 12px; }
 .forget { opacity: 0; }
 .note:hover .forget, .forget:focus-visible { opacity: 1; }
 @media (hover: none) { .forget { opacity: 1; } }

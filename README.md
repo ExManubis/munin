@@ -100,6 +100,8 @@ The web: an agent with the Web ability reads pages, and one on an OpenRouter mod
 
 Routines: agents run them on a schedule ("Weekdays 07:30") or when something happens in the tracker. Set them up on an agent's profile, or just ask the agent: it sets them up itself, and says so in the conversation.
 
+Speaking up and a journal: an agent can start a conversation on its own. Every couple of hours in the day munin checks in, and the agent says something only when it's worth it; set how willing it is on its profile (only when asked, when it matters, or chatty; companions are chatty and assistants speak up when it matters to start with). At the end of a day it worked, it writes in its journal, on its profile, what it did, what it learned and what's still open, and keeps what it learned in its notes.
+
 Skills: when an agent works out how to do something it'll do again, gets out of a dead end or is corrected, it saves a skill, a SKILL.md like Claude Code's, and asks you first with the skill on the card. It reads one when it fits. On its profile you write, change, share and delete them; a skill shared with other agents shows on their profiles too.
 
 Apps: under Apps in Settings, add an MCP server by its URL (and a token, if it needs one), then pick it on an agent's profile; the agent gets its tools. munin keeps the token and never shows it again.

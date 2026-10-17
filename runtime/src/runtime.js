@@ -23,7 +23,8 @@ import { GoogleError, openGoogle } from './google.js';
 import { PushError, openPush } from './push.js';
 import { googleApps } from './googleapps.js';
 import { readPageTool, webSearchTool } from './web.js';
-import { identity, about, capabilities, team } from './prompt.js';
+import { identity, about, capabilities, team, reminder } from './prompt.js';
+import { PROACTIVITY, dayOf, heartbeatDue, heartbeatText, isQuiet, journalDue, journalText, proactivityFor } from './rhythm.js';
 import { MemoryError, addNote, changeNote, forgetNote, kindOf, room } from './memory.js';
 import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
@@ -53,6 +54,7 @@ const NAME = /^[a-z][a-z0-9-]{1,23}$/;
 const COLOURS = ['white', 'ember', 'coral', 'rose', 'iris', 'sky', 'teal', 'moss', 'straw'];
 const THINKING = ['off', 'low', 'medium', 'high'];
 const UNDO_MS = 8000;
+const REMIND_AFTER = 40; // messages in a conversation before who the agent is gets repeated at the end
 const JOURNAL = 1000; // numbered events kept for reconnecting streams
 const DAY = 24 * 60 * 60 * 1000;
 const PROJECT = /^[A-Z][A-Z0-9]{0,9}$/;
@@ -96,6 +98,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   storage ||= settings.db === ':memory:' ? new MemoryStorage() : await openNodeSqliteStorage(settings.db);
   const agents = new Map(); // name → settings
   const skills = new Map(); // id → skill (skills.js), each with its owner and who it's shared with
+  const turns = new Map(); // agent name → 'heartbeat' or 'journal', while munin's own input is being answered (rhythm.js)
   const listeners = new Set();
   let harness = null;
   // From setup: what agents call you, your favourite OpenRouter models, and where setup is:
@@ -138,8 +141,8 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   const say = (text, isError = false) => ({ output: [{ type: 'text', text }], ...(isError ? { isError: true } : {}) });
   // Memory (memory.js): notes in three kinds, each with room for so many characters. When a kind
   // is full, the agent makes room by changing or forgetting notes, one at a time.
-  const KIND = Type.Union([Type.Literal('you'), Type.Literal('work'), Type.Literal('self')], {
-    description: 'you: about the person you work for (a preference, a fact, a habit). work: how the work is done here (commands, conventions, where things live). self: how you work best (what works, what to avoid).',
+  const KIND = Type.Union([Type.Literal('you'), Type.Literal('work'), Type.Literal('self'), Type.Literal('team')], {
+    description: 'you: about the person you work for (a preference, a fact, a habit). work: how the work is done here (commands, conventions, where things live). self: how you work best (what works, what to avoid). team: about one of your teammates (how they work, what to check in their work); say which in about.',
   });
   const memoryCall = (run) => async (args, toolApi) => {
     const agent = agentFor(toolApi.conversationId);
@@ -153,9 +156,12 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   const remember = defineTool({
     name: 'remember',
     description: 'Remember something for every later conversation, as one short sentence. Say it as what works ("Mikkel likes small PRs", "Run the gateway tests with TELEGRAM_TEST_TOKEN set"), not as what went wrong.',
-    parameters: Type.Object({ note: Type.String(), kind: KIND }),
+    parameters: Type.Object({ note: Type.String(), kind: KIND, about: Type.Optional(Type.String({ description: 'For a team note: the teammate it is about' })) }),
     execute: memoryCall(async (agent, args) => {
-      const { notes, note } = addNote(agent.memory, { kind: args.kind, text: args.note });
+      const about = String(args.about || '').trim().toLowerCase();
+      const others = [...agents.keys()].filter((n) => n !== agent.name);
+      if (args.kind === 'team' && !others.includes(about)) throw new MemoryError(others.length ? `Say which teammate the note is about, in about: one of ${others.join(', ')}.` : "You have no teammates to keep notes on yet.");
+      const { notes, note } = addNote(agent.memory, { kind: args.kind, text: args.note, about: args.kind === 'team' ? about : null });
       agent.memory = notes;
       await saveAgents();
       await write(agent, 'munin.action', { verb: 'remembered', object: note.text });
@@ -357,7 +363,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       // Who else is on the team (prompt.js), so the agent can say whose job something is.
       section('team', (input) => {
         const agent = agentFor(input.conversationId);
-        return agent ? team([...agents.values()].filter((a) => a !== agent)) : undefined;
+        return agent ? team([...agents.values()].filter((a) => a !== agent), agent.memory) : undefined;
       }, { tag: false }),
       section('about', (input) => {
         const agent = agentFor(input.conversationId);
@@ -369,7 +375,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       beforeRequest: async (request, api) => {
         const agent = agentFor(api.conversationId);
         if (agent?.budget) await spentThisMonth(agent);
-        return undefined;
+        // In a long conversation, who the agent is gets repeated at the end, for this request
+        // only: a persona drifts as attention leaves the system prompt (prompt.js, reminder).
+        if (!agent || request.messages.filter((m) => m.role !== 'system').length < REMIND_AFTER) return undefined;
+        return { messages: [...request.messages, { role: 'system', content: reminder(agent), timestamp: now() }] };
       },
       afterResponse: async (message, api) => {
         const agent = agentFor(api.conversationId);
@@ -378,8 +387,21 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         spent.total += costOf(message);
         if (agent.onIssue) await countFor(agent.onIssue, agent, message);
         if (agent.budget && spent.total >= agent.budget) await pauseForBudget(agent);
-        // A finished answer (not a step towards one) reaches your devices.
+        // A finished answer (not a step towards one) reaches your devices. A journal entry goes
+        // on the profile instead, and a heartbeat with nothing to say goes nowhere (rhythm.js).
         const text = message.stopReason === 'stop' ? (message.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim() : '';
+        const turn = message.stopReason === 'stop' ? turns.get(agent.name) : null;
+        if (turn) turns.delete(agent.name);
+        if (turn === 'journal' && text) {
+          agent.journal = [{ at: now(), text }, ...(agent.journal || [])].slice(0, 60);
+          await saveAgents();
+          return;
+        }
+        if (turn === 'heartbeat') {
+          if (isQuiet(text)) return;
+          agent.rhythm = { ...agent.rhythm, spoke: now() };
+          await saveAgents();
+        }
         if (text) push.notify(agent, 'message', { text }).catch(() => {});
       },
     }), hook(ToolTask, {
@@ -569,7 +591,11 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     // An agent from before examples gets its role's, while its brief is still the role's soul.
     // Notes from before memory had kinds are about you.
     const memory = (agent.memory || []).map((n) => ({ ...n, kind: kindOf(n) }));
-    agents.set(agent.name, { ...structuredClone(agent), brief, examples: agent.examples ?? examplesFor({ ...agent, brief }), memory });
+    // Agents from before heartbeats don't start speaking up on their own: you switch it on.
+    agents.set(agent.name, {
+      ...structuredClone(agent), brief, examples: agent.examples ?? examplesFor({ ...agent, brief }), memory,
+      proactivity: agent.proactivity || 'off', rhythm: agent.rhythm || {}, journal: agent.journal || [],
+    });
   }
   for (const agent of agents.values()) {
     syncAppRules(agent);
@@ -739,7 +765,8 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     const s = summarize(items, { busy, paused: agent.paused });
     return {
       ...await summaryOf(agent),
-      brief: agent.brief, examples: agent.examples || '', thinking: agent.thinking,
+      brief: agent.brief, examples: agent.examples || '', thinking: agent.thinking, proactivity: agent.proactivity,
+      journal: agent.journal.map((e) => ({ at: new Date(e.at).toISOString(), text: e.text })),
       abilities: { ...agent.abilities }, apps: [...agent.apps],
       askFirst: agent.askFirst.map(({ match, tool, tools, ...rule }) => rule),
       routines: agent.routines.map((r) => routineOut(r, agent)),
@@ -925,7 +952,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       const abilities = { ...ROLES[role].abilities };
       const agent = {
         name: clean, role, colour, provider: provider || 'standin', model: model || 'stand-in', thinking: 'low',
-        brief: String(brief || '').trim() || SOULS[role].brief(), examples: null, abilities, apps: [], askFirst: [...askFirstFor(abilities), { ...ROUTINES_RULE }, { ...SKILLS_RULE }], allowances: [],
+        brief: String(brief || '').trim() || SOULS[role].brief(), examples: null, proactivity: proactivityFor(role), rhythm: {}, journal: [], abilities, apps: [], askFirst: [...askFirstFor(abilities), { ...ROUTINES_RULE }, { ...SKILLS_RULE }], allowances: [],
         routines: [], memory: [], budget: null, paused: false, createdAt: Date.now(), folder: join(settings.agentsDir, clean), conversationId: null,
         tracker: link ? trackerLink(link, null) : null,
       };
@@ -943,8 +970,9 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       const agent = need(name);
       if ('colour' in patch && !COLOURS.includes(patch.colour)) throw invalid(`There's no colour called ${patch.colour}.`);
       if ('thinking' in patch && !THINKING.includes(patch.thinking)) throw invalid(`Thinking is one of ${THINKING.join(', ')}.`);
+      if ('proactivity' in patch && !PROACTIVITY.includes(patch.proactivity)) throw invalid(`Speaking up is one of ${PROACTIVITY.join(', ')}.`);
       if ('role' in patch && !ROLES[patch.role]) throw invalid(`There's no role called ${patch.role}.`);
-      for (const key of ['role', 'colour', 'provider', 'model', 'thinking', 'budget']) if (key in patch) agent[key] = patch[key];
+      for (const key of ['role', 'colour', 'provider', 'model', 'thinking', 'budget', 'proactivity']) if (key in patch) agent[key] = patch[key];
       if ('brief' in patch) agent.brief = String(patch.brief || '').trim() || agent.brief;
       if ('examples' in patch) agent.examples = String(patch.examples || '').trim();
       if (patch.abilities) {
@@ -970,11 +998,12 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       await sandbox?.remove(agent);
       kept.delete(agent.conversationId);
       agents.delete(name);
-      // Its skills go with it, and it's no longer on anyone else's.
+      // Its skills go with it, it's no longer on anyone else's, and nobody keeps notes on it.
       for (const skill of [...skills.values()]) {
         if (skill.owner === name) skills.delete(skill.id);
         else skill.sharedWith = skill.sharedWith.filter((n) => n !== name);
       }
+      for (const other of agents.values()) other.memory = other.memory.filter((n) => !(n.kind === 'team' && n.about === name));
       await saveAgents();
     },
 
@@ -1065,7 +1094,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     },
 
     // Whatever routines are due now; the timer calls this, and tests do.
-    tick: () => scheduler.tick(),
+    tick: async () => {
+      await scheduler.tick();
+      await rhythm();
+    },
 
     async deleteRoutine(name, id) {
       const agent = need(name);
@@ -1311,6 +1343,33 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     save: saveAgents,
     now,
   });
+  // Heartbeats and journals (rhythm.js), for agents that aren't doing anything: munin's own input,
+  // of its own kind so the conversation shows it as itself rather than as a message from you.
+  async function rhythm() {
+    const t = now();
+    for (const agent of agents.values()) {
+      if (agent.paused || turns.has(agent.name)) continue;
+      const { items, busy } = await readItems(agent);
+      if (busy) continue;
+      const said = items.filter((i) => i.kind === 'message');
+      const lastAt = items.length ? Date.parse(items.at(-1).at) : null;
+      const lastHumanAt = Date.parse(said.findLast((i) => i.from === 'human')?.at) || null;
+      const workedToday = said.some((i) => dayOf(Date.parse(i.at)) === dayOf(t));
+      let turn = null;
+      if (journalDue(agent, { now: t, workedToday, lastAt })) {
+        turn = ['journal', journalText(them()), { kind: 'munin.journal', data: { at: t } }];
+        agent.rhythm = { ...agent.rhythm, journal: dayOf(t) };
+      } else if (heartbeatDue(agent, { now: t, lastAt, lastHumanAt })) {
+        turn = ['heartbeat', heartbeatText(agent, them(), t), { kind: 'munin.heartbeat', data: { at: t, proactivity: agent.proactivity } }];
+        agent.rhythm = { ...agent.rhythm, heartbeat: t };
+      }
+      if (!turn) continue;
+      turns.set(agent.name, turn[0]);
+      await saveAgents();
+      await (await conversationOf(agent)).submit({ type: 'input', content: turn[1], whenBusy: 'followUp', entry: turn[2] }, ctx);
+    }
+  }
+
   let closed = false;
   let timer = null;
   const loop = async () => {
@@ -1318,6 +1377,11 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       await scheduler.tick();
     } catch (err) {
       console.error('routines:', err);
+    }
+    try {
+      await rhythm();
+    } catch (err) {
+      console.error('heartbeats:', err);
     }
     if (!closed) {
       timer = setTimeout(loop, scheduler.wait());

@@ -88,7 +88,7 @@ function seed(now) {
   const did = (name, at, verb, object, extra = {}) => item(name, at, { kind: 'action', verb, object, ...extra });
   const agent = (fields) => {
     s.agents[fields.name] = {
-      paused: false, apps: [], routines: [], memory: [], askFirst: [], worksIn: null, tracker: null,
+      paused: false, apps: [], routines: [], memory: [], askFirst: [], worksIn: null, tracker: null, proactivity: 'off', journal: [],
       budget: null, thinking: 'low', ...fields,
     };
   };
@@ -113,7 +113,11 @@ function seed(now) {
       'Dentist: Tandlægerne på Østerbro.', 'Doesn’t take meetings before 09:00.', 'Sara is his partner.',
       'Writes mail in Danish to the clinic, English at work.', 'The design review is every second Thursday.',
     ].map((text, i) => ({ id: `m${i + 1}`, text })),
-    memoryCount: 23, usage: { today: 0.08, week: 0.61, month: 2.4, tokens: 41000 }, budget: 10,
+    memoryCount: 23, usage: { today: 0.08, week: 0.61, month: 2.4, tokens: 41000 }, budget: 10, proactivity: 'matters',
+    journal: [
+      { at: ago(15 * HOUR), text: "Sorted the offsite reply and found Paul's agenda still missing; I'll bring it up Thursday if it hasn't come. Learned that the clinic wants mail in Danish. The dentist clash is still open." },
+      { at: ago(39 * HOUR), text: 'A quiet day: the morning brief, two invites accepted, one declined. Nothing is waiting on me.' },
+    ],
   });
   did('hugin', ago(350 * MIN), 'ran routine', 'Morning briefing');
   say('hugin', ago(350 * MIN), 'Morning. Three things today: Weekly Dev / Eng moved to 11:00, Paul is waiting for your answer about the offsite, and the dentist at 15:00 clashes with the design review.');
@@ -225,7 +229,7 @@ function seed(now) {
 
   agent({
     name: 'pip', role: 'companion', colour: 'straw', provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', createdAt: ago(5 * 24 * HOUR),
-    brief: roleOf('companion').brief('pip'), examples: roleOf('companion').examples('pip'),
+    brief: roleOf('companion').brief('pip'), examples: roleOf('companion').examples('pip'), proactivity: 'chatty',
     abilities: {}, usage: { today: 0, week: 0.04, month: 0.09, tokens: 0 }, memoryCount: 1,
     memory: [{ id: 'm1', text: 'Got the echo riddle right away.' }],
   });
@@ -358,6 +362,8 @@ function full(agent) {
     brief: agent.brief,
     examples: agent.examples || '',
     thinking: agent.thinking,
+    proactivity: agent.proactivity || 'off',
+    journal: (agent.journal || []).map((e) => ({ ...e, at: iso(e.at) })),
     abilities: { ...agent.abilities },
     apps: [...agent.apps],
     askFirst: agent.askFirst.map((rule) => ({ ...rule })),
@@ -712,7 +718,7 @@ export const mock = {
     if (state.agents[clean]) throw new Error(`There's already an agent called ${clean}.`);
     const preset = roleOf(role);
     state.agents[clean] = {
-      name: clean, role: preset.id, colour, provider, model: model || preset.model, thinking: 'low', brief: brief || preset.brief(clean), examples: examples ?? preset.examples(clean),
+      name: clean, role: preset.id, colour, provider, model: model || preset.model, thinking: 'low', brief: brief || preset.brief(clean), examples: examples ?? preset.examples(clean), proactivity: { companion: 'chatty', assistant: 'matters' }[preset.id] || 'off', journal: [],
       abilities: { ...preset.abilities }, apps: [], askFirst: [], routines: [], memory: [], memoryCount: 0, worksIn: preset.abilities.code ? { folder: `~/agents/${clean}`, branch: 'main' } : null,
       tracker: preset.abilities.tracker ? { projects: [], takes: preset.id === 'reviewer' ? 'reviews' : 'issues' } : null,
       usage: { today: 0, week: 0, month: 0, tokens: 0 }, budget: null, paused: false, createdAt: Date.now(),
@@ -726,7 +732,7 @@ export const mock = {
   // budget, askFirst ({ id: on }), and tracker ({ projects }).
   async updateAgent(name, patch) {
     const agent = need(name);
-    for (const key of ['role', 'colour', 'provider', 'model', 'thinking', 'brief', 'examples', 'budget']) if (key in patch) agent[key] = patch[key];
+    for (const key of ['role', 'colour', 'provider', 'model', 'thinking', 'brief', 'examples', 'budget', 'proactivity']) if (key in patch) agent[key] = patch[key];
     if (patch.abilities) Object.assign(agent.abilities, patch.abilities);
     if (patch.apps) {
       // Like the runtime: each app picked gets an ask-first rule for anything that changes something.
