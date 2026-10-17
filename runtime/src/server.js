@@ -29,6 +29,9 @@ export function createRuntimeServer(runtime, settings) {
   route('GET', '/me', () => runtime.me());
   route('PATCH', '/me', (m, body) => runtime.updateMe(body));
   route('GET', '/agents', () => runtime.agents());
+  route('GET', '/push', () => runtime.push());
+  route('POST', '/push', (m, body) => runtime.subscribePush(body.subscription));
+  route('DELETE', '/push', (m, body) => runtime.forgetPush(body.endpoint));
   route('GET', '/apps', () => runtime.apps());
   route('POST', '/apps', (m, body) => runtime.addApp(body));
   route('DELETE', '/apps/([^/]+)', (m) => runtime.removeApp(enc(m[1])));
@@ -178,14 +181,14 @@ export function createRuntimeServer(runtime, settings) {
       if (!m || method !== req.method) continue;
       try {
         let body = {};
-        if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
           const chunks = [];
           for await (const chunk of req) chunks.push(chunk);
           const raw = Buffer.concat(chunks).toString('utf8');
           body = raw ? JSON.parse(raw) : {};
         }
         const result = await handler(m, body, url, req);
-        return send(res, req.method === 'POST' && /\/(agents|routines|apps)$/.test(url.pathname) ? 201 : 200, result ?? {}, cors);
+        return send(res, req.method === 'POST' && /\/(agents|routines|apps|push)$/.test(url.pathname) ? 201 : 200, result ?? {}, cors);
       } catch (err) {
         if (err instanceof SyntaxError) return send(res, 400, { detail: 'That isn’t JSON.' }, cors);
         if (err instanceof RuntimeError) return send(res, err.status, { detail: err.message }, cors);

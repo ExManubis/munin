@@ -12,6 +12,8 @@ from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from munin import agents
+from munin.push import Push
+from munin.push import watching as push_watching
 from munin.api import router
 from munin.config import Settings
 from munin.db import Changes, connect
@@ -31,15 +33,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     mcp_endpoint = next(route.endpoint for route in mcp_app.routes if getattr(route, "path", None) == "/mcp")
 
+    changes = Changes(sessions)
+    # Push notifications (push.py), with keys of the tracker's own next to its database.
+    pusher = Push(settings.db_path.parent / "push.json", subject=f"{settings.public_url or 'mailto:munin@localhost'}")
+
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
-        async with mcp.session_manager.run():
+        async with mcp.session_manager.run(), push_watching(pusher, sessions, changes):
             yield
 
     app = FastAPI(title="munin", lifespan=lifespan)
     app.state.settings = settings
     app.state.sessions = sessions
-    app.state.changes = Changes(sessions)
+    app.state.changes = changes
+    app.state.push = pusher
     if settings.host in LOOPBACK:
         # The API has no login, so refuse other Host names: that stops web pages using DNS rebinding to reach it.
         # Behind the edge, its name is the one other name that reaches munin.

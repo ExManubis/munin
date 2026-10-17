@@ -856,6 +856,11 @@ export const mock = {
     changed();
   },
 
+  // Push: the mock has no keys, so only the tracker's pushes reach a device.
+  async push() {
+    return { key: null, devices: 0 };
+  },
+
   // Google sign-in. The mock signs in at once, without going to Google.
   async google() {
     return { client: state.googleClient ? { configured: true, id: state.googleClient } : { configured: false }, account: state.googleAccount || null, redirect: 'http://localhost:7779/runtime/api/google/callback' };

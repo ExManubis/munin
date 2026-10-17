@@ -6,7 +6,7 @@ import { api } from '../api.js';
 import { runtime } from '../runtime/index.js';
 import { store, isWorking } from '../store.js';
 import { h, agentAvatar, statusIcon, time, topbar, bindDraft, drafts, toast, copyButton, toggle } from '../ui.js';
-import { notificationsSupported, notificationsOn, toggleNotifications } from '../notify.js';
+import { notificationsSupported, notificationsOn, pushSupported, toggleNotifications } from '../notify.js';
 
 let created = null; // { name, token } for the token just created; shown once
 let tab = 'claude';
@@ -383,7 +383,10 @@ function notifications(ctx) {
         h('div', {}, 'Notify me when an agent asks something'),
         h('div', { class: 'hint' }, denied
           ? 'Your browser blocks notifications from munin. Allow them in the site settings first.'
-          : 'A desktop notification for each new question, and when an agent moves work to In review. Only while munin is open in a tab.')),
+          : pushSupported
+            ? ['On this device, even with munin closed: when an agent asks something or waits for your OK, when work is ready for review, and what your assistants say (a morning brief, an answer). ',
+              /iPhone|iPad/.test(navigator.userAgent) && !navigator.standalone ? 'On an iPhone, add munin to your home screen first (Share → Add to Home Screen) and turn this on from there.' : null]
+            : 'A notification for each new question, and when an agent moves work to In review, while munin is open in a tab. This browser can\'t get notifications with munin closed.')),
       toggle(on, 'Notify me when an agent asks something', async () => {
         await toggleNotifications();
         ctx.rerender();

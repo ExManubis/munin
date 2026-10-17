@@ -1,0 +1,2 @@
+// The tracker's push notifications: see ../worker.js.
+importScripts('../worker.js');
