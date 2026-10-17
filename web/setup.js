@@ -18,7 +18,7 @@ import { modelPicker, searchState } from './model-picker.js';
 import { playIntro } from './intro.js';
 
 const STEPS = ['welcome', 'you', 'models', 'agent', 'mcp', 'ready'];
-const RAIL = [['you', 'You'], ['models', 'Models'], ['agent', 'First agent']];
+const RAIL = [['you', 'You'], ['models', 'Models'], ['agent', 'First figbot']];
 const STEP = 'munin:setup-step';
 const MADE = 'munin:setup-agent'; // the agent setup woke up, so a reload still knows it
 // The first agent's name, unless it's taken already (setup run again): the first free one of these.
@@ -46,7 +46,7 @@ const LOGO = () => h('img', { class: 'su-logo', src: 'munin-lockup-dither-on-dar
 
 // Opening and closing ---------------------------------------------------------------------
 
-const agentName = () => S.agent.trim().toLowerCase() || 'your agent';
+const agentName = () => S.agent.trim().toLowerCase() || 'your figbot';
 const openrouter = () => S.providers.find((p) => p.id === 'openrouter');
 const keyed = () => Boolean(openrouter()?.connected);
 const favourites = () => S.catalog.find((p) => p.id === 'openrouter')?.models.filter((m) => m.favourite).map((m) => m.id) || [];
@@ -252,7 +252,7 @@ const PAGES = {
     const provider = openrouter();
     const checks = [
       ['tracker', `munin ${store.me.version || ''}`.trim(), 'up'],
-      runtime.kind === 'runtime' ? ['runtime', 'agents run here', 'up'] : ['runtime', 'not running: a stand-in plays it', 'off', true],
+      runtime.kind === 'runtime' ? ['runtime', 'figbots run here', 'up'] : ['runtime', 'not running: a stand-in plays it', 'off', true],
       edge.protocol === 'https:' ? ['edge', edge.hostname, 'https'] : ['edge', 'this machine only', 'local'],
       store.me.you ? ['people', store.me.you.login, 'you'] : null,
       S.about.sandbox ? ['coders', 'a container each', 'docker'] : ['coders', 'on this machine', 'no sandbox'],
@@ -271,7 +271,7 @@ const PAGES = {
             LOGO(),
             h('h1', { class: 'su-hello' }, S.name.trim() ? `Hello, ${S.name.trim()}.` : 'Hello.'),
             h('p', { class: 'su-lead' }, `munin is up on ${machine()}${store.me.you ? ', and only the people you let in can reach it' : ''}. `
-              + "Three short steps and you'll have an agent at work."),
+              + "Three short steps and you'll have a figbot at work."),
             h('div', { class: 'su-cta' },
               h('button', { type: 'button', class: 'su-go', dataset: { primary: '' }, onclick: () => go('you') }, 'Set up munin', h('kbd', {}, '↵')),
               h('button', { type: 'button', class: 'su-ghost', onclick: skip }, 'Look around first')),
@@ -288,7 +288,7 @@ const PAGES = {
     const fromTailscale = store.me.you && S.name.trim() === store.me.you.name;
     return {
       main: h('div', { class: 'su-body su-screen' },
-        head('Step 1 of 3 · You', 'What should agents call you?', `It's how they talk to you, and the name they ask for when they need you.${store.me.you ? ` Tailscale knows you as ${store.me.you.login}.` : ''}`),
+        head('Step 1 of 3 · You', 'What should figbots call you?', `It's how they talk to you, and the name they ask for when they need you.${store.me.you ? ` Tailscale knows you as ${store.me.you.login}.` : ''}`),
         h('div', { class: 'su-fieldset' },
           h('label', { class: 'su-lab', for: 'su-name' }, 'Your name'),
           field({ id: 'su-name', keep: 'su:name', autofocus: true, value: S.name, placeholder: 'Your name', style: 'max-width: 380px',
@@ -326,7 +326,7 @@ const PAGES = {
     return {
       main: h('div', { class: 'su-body su-screen' },
         head('Step 2 of 3 · Models', 'Give them something to think with',
-          'Agents think through OpenRouter: hundreds of models behind one key, and you pay OpenRouter for what they use. Each agent picks its own model later.'),
+          'Figbots think through OpenRouter: hundreds of models behind one key, and you pay OpenRouter for what they use. Each figbot picks its own model later.'),
         showKey
           ? h('div', { class: 'su-fieldset' },
             h('label', { class: 'su-lab', for: 'su-key' }, 'OpenRouter key'),
@@ -373,7 +373,7 @@ const PAGES = {
     const name = agentName();
     return {
       main: h('div', { class: 'su-body su-screen' },
-        head('Step 3 of 3 · First agent', 'Meet your first agent', 'Pick a role to start from. You can change everything later.'),
+        head('Step 3 of 3 · First figbot', 'Meet your first figbot', 'Pick a role to start from. You can change everything later.'),
         h('div', { class: 'su-mini' }, figbot({ colour: S.colour, state: 'idle', size: 72, seed: S.agent }),
           h('div', { class: 'su-mini-main' }, h('span', { class: 'su-mini-name' }, bound('agent', name)), h('span', { class: 'label' }, `${role.name} · ${facts[0][1]}`))),
         h('div', { class: 'su-roles', role: 'radiogroup', 'aria-label': 'Role' }, ROLES.map((r) => h('button', {
@@ -478,7 +478,7 @@ const PAGES = {
     const items = [
       ['You', S.name.trim() || '—', Boolean(S.name.trim())],
       ['Models', keyed() ? ['OpenRouter', provider.key?.hint ? h('span', { class: 'mono muted' }, ` …${provider.key.hint}`) : null] : 'Stand-in for now', keyed()],
-      ['Agent', agent ? [figbot({ colour: agent.colour, size: 18, state: 'idle', seed: agent.name }), `${agent.name}, ${roleOf(agent.role).name.toLowerCase()}`] : 'Later, under Agents', Boolean(agent)],
+      ['Figbot', agent ? [figbot({ colour: agent.colour, size: 18, state: 'idle', seed: agent.name }), `${agent.name}, ${roleOf(agent.role).name.toLowerCase()}`] : 'Later, under Figbots', Boolean(agent)],
       ['MCP', S.token ? `${S.outside}, ${S.connected ? 'connected' : 'connecting'}` : 'Later, in Settings', Boolean(S.token)],
     ];
     const first = h('textarea', { rows: 2, placeholder: agent ? `Message ${agent.name}…` : '', dataset: { keep: 'su:first' }, 'aria-label': agent ? `Message ${agent.name}` : null }, 'Hello! What can you do?');
