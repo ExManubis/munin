@@ -8,8 +8,7 @@ import { markdown } from '../markdown.js';
 import { optionRow } from '../cards.js';
 import { condense, describe, eventIcon } from '../history.js';
 import {
-  h, kbd, MOD, avatar, agentAvatar, statusIcon, statusLabel, time, topbar, logoMark,
-  bindDraft, drafts, onModEnter, firstLine, toast,
+  h, kbd, avatar, agentAvatar, statusIcon, statusLabel, time, topbar, logoMark, bindDraft, drafts, firstLine, toast, onEnterSend, SEND_KEY,
 } from '../ui.js';
 
 let showContext = false; // narrow layout: is the issue context expanded?
@@ -143,7 +142,7 @@ function detail(data, index, ctx, feed) {
     placeholder: options.length ? 'Or answer in your own words…' : 'Answer in your own words…',
     'aria-label': `Answer ${agent}`,
   }), `answer:${q.id}`);
-  const send = h('button', { type: 'button', class: 'btn primary' }, `Send to ${agent}`, h('span', { class: 'key' }, `${MOD}↵`));
+  const send = h('button', { type: 'button', class: 'btn primary' }, `Send to ${agent}`, h('span', { class: 'key' }, SEND_KEY));
   // What you write wins over the option picked.
   const submit = async () => {
     const body = answer.value.trim() || (picked !== undefined ? options[picked].label : '');
@@ -163,7 +162,7 @@ function detail(data, index, ctx, feed) {
     }
   };
   send.addEventListener('click', submit);
-  onModEnter(answer, submit);
+  onEnterSend(answer, submit);
 
   const before = issue.comments.filter((c) => c.id < q.id);
   const after = issue.comments.filter((c) => c.id > q.id);

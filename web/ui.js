@@ -207,6 +207,23 @@ export function onModEnter(el, fn) {
   return el;
 }
 
+// A message box: Return sends and Shift+Return starts a new line, like a chat. Cmd/Ctrl+Return
+// sends too. Return that finishes an input method's composition (Japanese, Chinese…) doesn't
+// send. On a touch-only device Return adds a line, since its keyboard has no Shift, and the
+// send button sends.
+export const touchOnly = () => matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches;
+export const SEND_KEY = '↵'; // what the send buttons show
+export function onEnterSend(el, fn) {
+  el.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229 || e.altKey) return;
+    if (e.metaKey || e.ctrlKey || (!e.shiftKey && !touchOnly())) {
+      e.preventDefault();
+      fn();
+    }
+  });
+  return el;
+}
+
 // The first meaningful line of some Markdown, for one-line previews.
 export function firstLine(text) {
   const line = String(text || '').split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith('```')) || '';

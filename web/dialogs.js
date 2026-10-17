@@ -264,7 +264,7 @@ const SHORTCUTS = [
   ['Inbox', [[['J', 'K'], 'Next and previous question'], [['↵'], 'Open the issue'], [['R'], 'Write an answer']]],
   ['Issue', [[['E'], 'Edit title and description'], [['R'], 'Write a comment']]],
   ['Project', [[['E'], 'Edit the brief'], [['B'], 'Switch between list and board']]],
-  ['Writing', [[[`${MOD.trim()} ↵`], 'Send or save'], [['Esc'], 'Cancel, or close a dialog']]],
+  ['Writing', [[['↵'], 'Send a message'], [['⇧', '↵'], 'New line in a message'], [[`${MOD.trim()} ↵`], 'Save an edit, like a description'], [['Esc'], 'Cancel, or close a dialog']]],
   ['Lists and search', [[['↑', '↓'], 'Move'], [['↵'], 'Choose'], [['Esc'], 'Close']]],
 ];
 
