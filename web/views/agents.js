@@ -1,5 +1,6 @@
-// The Agents part: its sidebar (every agent, the ones waiting on you first) and #/agents,
-// which opens the top agent on a wide screen and lists them all on a phone.
+// The Agents part: its sidebar (every agent, the ones waiting on you first, and the open
+// agent's Figbot peeking in from its bottom-right corner) and #/agents, which opens the top
+// agent on a wide screen and lists them all on a phone.
 
 import { store } from '../store.js';
 import { h, topbar } from '../ui.js';
@@ -53,13 +54,17 @@ export function agentRow(agent, { selected = false } = {}) {
 
 export function agentsSidebar(route) {
   const agents = sortedAgents();
+  const open = agents.find((a) => a.name === route.params.name);
+  const button = h('a', { class: ['btn', 'new-agent', route.path === '/agents/new' && 'pressed'], href: '#/agents/new' },
+    'New agent', h('span', { class: 'key' }, 'N'));
   return [
     h('div', { class: 'agents-head' }, h('span', { class: 'label' }, 'Agents'), h('span', { class: 'mono muted' }, agents.length)),
     h('nav', { class: 'agent-list', 'aria-label': 'Agents' },
       agents.map((a) => agentRow(a, { selected: route.params.name === a.name }))),
     h('div', { class: 'grow' }),
-    h('a', { class: ['btn', 'new-agent', route.path === '/agents/new' && 'pressed'], href: '#/agents/new' },
-      'New agent', h('span', { class: 'key' }, 'N')),
+    open
+      ? h('div', { class: 'side-foot' }, button, h('div', { class: 'side-bot', 'aria-hidden': 'true' }, figbot({ colour: open.colour, state: open.state, size: 120, seed: open.name })))
+      : button,
   ];
 }
 
