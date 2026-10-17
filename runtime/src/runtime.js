@@ -33,7 +33,7 @@ import { createWorkspace, WorkspaceError } from './workspace.js';
 import { QUIET_GIT, createDockerSandbox, localShellEnv, passedThrough } from './sandbox.js';
 import { KeyError } from './keys.js';
 import { FAVOURITES } from './models.js';
-import { MeetingError, isQuiet as meetingQuiet, speech, speechOf, nextSpeaker, waitingOn, meetingOut, meetingSummary, turnText, parseMeeting, meetingOfTurn } from './meetings.js';
+import { MeetingError, isQuiet as meetingQuiet, speech, speechOf, discussion, nextTurn, hasNews, meetingOut, meetingSummary, turnText, parseMeeting, meetingOfTurn } from './meetings.js';
 
 export class RuntimeError extends Error {
   constructor(status, message) {
@@ -1465,9 +1465,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       if (!parsed.participants.some((p) => p)) throw invalid('Invite at least one agent, or join yourself.');
       const meeting = {
         id: randomUUID().slice(0, 8), title: parsed.title, participants: parsed.participants,
-        status: 'open', speeches: [], createdAt: now(), turns: 0,
+        status: 'open', speeches: [], createdAt: now(),
       };
       if (parsed.first) speech(meeting, { from: null, text: parsed.first, at: now() });
+      meeting.talk = discussion(meeting, agents); // everyone gets a first round
       meetings.set(meeting.id, meeting);
       await saveMeetings();
       changed();
@@ -1475,17 +1476,18 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       return meetingOut(meeting, meetingAgentFor);
     },
 
-    // You speak in a meeting. It also reopens a meeting that was waiting on you.
+    // You speak in a meeting: a new discussion starts from your words, in place of any still
+    // going (a turn already asked finishes, and its speech lands).
     async speakInMeetingAsHuman(id, text) {
       const meeting = needMeeting(id);
       const said = speechOf(text);
       if (!said) throw invalid('Say something, or close the meeting.');
       if (meeting.status !== 'open') throw conflict('That meeting is closed.');
-      meeting.turns = 0;
-      meeting.lastPasses = 0; // your word breaks a silence, as it breaks a run of turns
       // A turn asked long ago whose answer never came (its input was lost) doesn't hold you up.
       if (meeting.asked && now() - meeting.asked.at > STALE_TURN) meeting.asked = null;
       speech(meeting, { from: null, text: said, at: now() });
+      meeting.talk = discussion(meeting, agents);
+      meeting.waiting = null;
       await saveMeetings();
       changed();
       await driveMeeting(meeting.id);
@@ -1497,6 +1499,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       if (meeting.status !== 'open') throw conflict('That meeting is already closed.');
       meeting.status = 'closed';
       meeting.asked = null; // a turn still being answered finishes, and says nothing
+      meeting.talk = null;
       await saveMeetings();
       changed();
       return meetingOut(meeting, meetingAgentFor);
@@ -1535,39 +1538,32 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     if (meeting.asked?.agent === agentName) meeting.asked = null;
     const said = speechOf(text);
     const pass = !said || meetingQuiet(said);
-    meeting.turns = (meeting.turns || 0) + 1;
     speech(meeting, { from: agentName, text: pass ? null : said, at: now(), pass });
-    meeting.lastPasses = pass ? (meeting.lastPasses || 0) + 1 : 0;
+    if (meeting.talk && !pass) Object.assign(meeting.talk, { spoke: true, speeches: meeting.talk.speeches + 1 });
     await saveMeetings();
     changed();
     await driveMeeting(meeting.id);
     return !pass;
   }
 
-  // Ask the next participant to speak, unless the meeting should wait. One turn at a time per
-  // meeting (`asked`, kept with it, so a restart doesn't lose it), and a paused agent's turn is
-  // skipped to the next. An agent in two meetings answers each in turn.
+  // Ask the discussion's next figbot to speak, or let the meeting wait for you when the discussion
+  // is over (meetings.js, nextTurn). One turn at a time per meeting (`asked`, kept with it, so a
+  // restart doesn't lose it). A paused figbot, or one with nothing new to hear, is skipped.
   async function driveMeeting(meetingId) {
     const meeting = needMeeting(meetingId);
     if (meeting.status !== 'open' || closed) return;
     if (meeting.asked && agents.has(meeting.asked.agent)) return; // its answer drives the next turn
     meeting.asked = null; // asked an agent that's gone since
-    const names = meeting.participants.filter(Boolean);
-    const sinceHuman = meeting.turns || 0;
-    const passed = meeting.lastPasses || 0;
-    const wait = waitingOn(meeting, { agentsCount: names.length, sinceHuman, passed });
-    if (wait) return;
-    const next = nextSpeaker(meeting, agents);
-    if (!next) return;
-    const agent = agents.get(next);
-    if (!agent) return;
-    if (agent.paused) {
-      // Skip a paused agent: record a pass so the round-robin moves on and the guards still hold.
-      meeting.lastPasses = (meeting.lastPasses || 0) + 1;
-      speech(meeting, { from: next, text: null, at: now(), pass: true });
+    if (!meeting.talk) return;
+    const turn = nextTurn(meeting.talk, meeting, agents, (name) => !agents.get(name) || agents.get(name).paused || !hasNews(meeting, name));
+    if (turn.stop) {
+      Object.assign(meeting, { talk: null, waiting: turn.stop });
       await saveMeetings();
-      return driveMeeting(meetingId);
+      changed();
+      return;
     }
+    const next = turn.ask;
+    const agent = agents.get(next);
     meeting.asked = { agent: next, at: now(), turn: meeting.speeches.length };
     const text = turnText(meeting, next, them(), meeting.seen?.[next] || 0);
     meeting.seen = { ...meeting.seen, [next]: meeting.speeches.length };

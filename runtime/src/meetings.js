@@ -1,16 +1,17 @@
 // Meetings: figbots talking with each other in turns, with you able to join (MUN-41). A meeting
 // is a list of participants (agents, plus you) and a transcript of short speeches. Meetings live
 // in a session doc of their own (munin.meetings), so they survive restarts, and who has been
-// asked to speak (`asked`) is kept with them. Turns go round-robin: after the meeting is created,
-// or anyone speaks, munin asks the next participant's agent, as an input of munin's own kind in
-// its own conversation, to speak with speak_in_meeting. A turn the agent ends without the tool
-// still counts: what it said is its speech, and nothing is a pass. An agent with nothing to add
-// passes (SILENCE), and guards (a cap on turns in a row without you, and on passes in a row) end
-// a meeting that's going nowhere. A lone agent waits for you after it speaks.
+// asked to speak (`asked`) is kept with them. Creating a meeting, and every speech of yours,
+// starts a discussion (as Hermes Agent's group chats do): up to ROUNDS rounds in which each figbot
+// with something new to hear speaks once, with speak_in_meeting, in its session for the meeting.
+// Whoever starts rotates each round, and nobody speaks twice in a row. A round where nobody says
+// anything settles the discussion; ROUNDS rounds or SPEECHES figbot speeches bound it. Then the
+// meeting waits for you. A turn the agent ends without the tool still counts: what it said is its
+// speech, and nothing is a pass (as is SILENCE).
 
 export const SILENCE = 'NO_REPLY';
-const TURNS = 12; // agent speeches in a row without you before the meeting waits for you
-const PASSES = 2; // passes in a row before the meeting waits for you
+export const ROUNDS = 3; // rounds a discussion goes at most
+export const SPEECHES = 10; // figbot speeches a discussion has at most
 const SPEECH = 4000; // characters of one speech, kept
 const DELTA_LINES = 24; // speeches a turn carries at most
 const DELTA_CHARS = 16000; // and characters, oldest dropped first
@@ -36,21 +37,44 @@ export function speech(meeting, { from, text, at, pass = false }) {
   return line;
 }
 
-// The next agent to speak, from the last speech (round-robin over the participants, in the
-// order they joined). The human is in participants as null: they speak when they like, and munin
-// never asks them for a turn. Nobody speaks twice in a row: when the only agent left is the one
-// that just spoke, it's your turn, so null.
-export function nextSpeaker(meeting, agents) {
-  const names = meeting.participants.filter(Boolean);
-  if (!names.length) return null;
-  const last = meeting.speeches.at(-1);
-  if (!last) return names.find((name) => agents.has(name)) || null;
-  const index = last.from === null ? -1 : names.indexOf(last.from);
-  for (let step = 1; step <= names.length; step++) {
-    const candidate = names[(index + step) % names.length];
-    if (agents.has(candidate)) return candidate === last.from ? null : candidate;
+// Who a round asks, in order: the figbots still here, starting one further along each round, and
+// never the one that spoke last first. The human is in participants as null: they speak when they
+// like, and munin never asks them for a turn.
+export function roundOf(meeting, agents, round) {
+  const names = meeting.participants.filter((name) => name && agents.has(name));
+  if (!names.length) return [];
+  const shift = round % names.length;
+  const order = [...names.slice(shift), ...names.slice(0, shift)];
+  const last = meeting.speeches.at(-1)?.from;
+  if (order.length > 1 && order[0] === last) order.push(order.shift());
+  return order;
+}
+
+// Whether a figbot has something to answer: it hasn't had a turn yet, or someone else has said
+// something since its last one. One that hasn't is skipped, so a lone figbot doesn't answer itself.
+export const hasNews = (meeting, name) => meeting.seen?.[name] === undefined
+  || meeting.speeches.slice(meeting.seen[name]).some((s) => s.from !== name);
+
+// A new discussion, from now: everyone gets a first round.
+export function discussion(meeting, agents) {
+  return { round: 0, queue: roundOf(meeting, agents, 0), spoke: false, speeches: 0 };
+}
+
+// What a discussion does next: ask a figbot (`ask`), or stop and say why (`settled` when a round
+// went silent, `bounded` at the caps). Moves the discussion along as it decides; `skip(name)` says
+// whether a figbot can't take a turn now (gone, or nothing new for it).
+export function nextTurn(talk, meeting, agents, skip) {
+  for (;;) {
+    if (talk.speeches >= SPEECHES) return { stop: 'bounded' };
+    const name = talk.queue.shift();
+    if (name === undefined) {
+      if (!talk.spoke) return { stop: 'settled' };
+      if (talk.round + 1 >= ROUNDS) return { stop: 'bounded' };
+      Object.assign(talk, { round: talk.round + 1, spoke: false, queue: roundOf(meeting, agents, talk.round + 1) });
+      continue;
+    }
+    if (!skip(name)) return { ask: name };
   }
-  return null;
 }
 
 // Which meeting and which turn a turn input is for, from its text (turnText's first line), or null.
@@ -60,22 +84,15 @@ export function meetingOfTurn(text) {
   return m ? { id: m[1], turn: Number(m[2]) } : null;
 }
 
-// Where the meeting stands after a speech: whether the next turn may be asked of an agent, and
-// why not. Agents spoke `sinceHuman` times in a row, the last `passed` in a row.
-export function waitingOn(meeting, { agentsCount, sinceHuman, passed }) {
-  if (meeting.status !== 'open') return 'closed';
-  if (!agentsCount) return 'agents'; // no agent left to ask: you or nothing
-  if (sinceHuman >= TURNS) return 'you'; // they've gone round enough: your word next
-  if (passed >= PASSES) return 'quiet'; // nobody has anything to add
-  return null;
-}
-
 // A meeting as the frontend sees it. `agentFor` maps a participant name to its settings, for
 // each speaker's colour and role.
 export function meetingOut(meeting, agentFor) {
   const participants = meeting.participants.map((name) => (name ? agentFor(name) : { name: null, human: true }));
   return {
     id: meeting.id, title: meeting.title, status: meeting.status,
+    // talking: figbots are taking turns; settled: a round went by with nothing new; bounded: it
+    // reached its rounds or speeches. The last two wait for you.
+    state: meeting.status === 'closed' ? 'closed' : meeting.talk || meeting.asked ? 'talking' : meeting.waiting || 'settled',
     participants,
     speeches: meeting.speeches.map((s) => ({ ...s, at: new Date(s.at).toISOString() })),
     createdAt: new Date(meeting.createdAt).toISOString(),
