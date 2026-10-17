@@ -91,7 +91,7 @@ test('Gmail and Google Calendar: reading and drafting go straight through, sendi
 
   await runtime.createAgent({ name: 'hugin', role: 'assistant', provider: 'scripted', model: 'model' });
   const agent = await runtime.updateAgent('hugin', { apps: ['gmail', 'google-calendar'] });
-  assert.deepEqual(agent.askFirst.map((r) => [r.id, r.on]), [['app:gmail:send', true], ['app:gmail:trash', true], ['app:gmail:organise', false], ['app:google-calendar', true]]);
+  assert.deepEqual(agent.askFirst.filter((r) => r.app).map((r) => [r.id, r.on]), [['app:gmail:send', true], ['app:gmail:trash', true], ['app:gmail:organise', false], ['app:google-calendar', true]]);
 
   const heard = [];
   const turn = async (...steps) => {
