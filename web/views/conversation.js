@@ -14,14 +14,18 @@ import { workMessage } from '../runtime/tracker-link.js';
 
 const picks = new Map(); // question id → the option picked, before sending
 const runs = new Map(); // run id → 'open', 'closed' or 'all'
+// How many of each agent's newest items the thread shows; "Show earlier" adds a page. Reading by
+// count rather than by page keeps live updates simple: every reload reads the newest this many.
+const PAGE = 100;
+const shown = new Map(); // agent name → items shown
 
 export const view = {
   title: (data) => data.agent.name,
   scope: (params) => `/agents/${params.name}`,
 
   async load({ name }) {
-    const { agent, items } = await runtime.conversation(name);
-    return { name, agent, items };
+    const { agent, items, more } = await runtime.conversation(name, { limit: shown.get(name) || PAGE });
+    return { name, agent, items, more };
   },
 
   render(data, ctx) {
@@ -38,6 +42,7 @@ export const view = {
         workStrip(agent, items, ctx),
         h('div', { class: 'thread-scroll', dataset: { scroll: 'thread', stick: '' } },
           h('div', { class: 'thread-items' },
+            data.more ? h('button', { type: 'button', class: 'link show-earlier', onclick: () => showEarlier(agent, ctx) }, 'Show earlier') : null,
             thread(agent, items, ctx),
             agent.typing ? h('div', { class: 'writing' }, agentFace(agent, 18, { state: 'working' }), h('span', {}, `${agent.name} is writing…`)) : null)),
         composer(agent, open[open.length - 1], ctx)),
@@ -365,6 +370,16 @@ function composer(agent, openQuestion, ctx) {
       box,
       h('button', { type: 'button', class: 'send', onclick: send, 'aria-label': 'Send' }, h('span', { class: 'wide-only' }, kbd(`${MOD}↵`)), h('span', { class: 'phone-only send-up' }, '↑'))),
     hint ? h('p', { class: 'hint' }, hint) : null);
+}
+
+// Older items arrive above, so keep what was in view where it was.
+async function showEarlier(agent, ctx) {
+  const before = document.querySelector('[data-scroll="thread"]');
+  const fromBottom = before ? before.scrollHeight - before.scrollTop : 0;
+  shown.set(agent.name, (shown.get(agent.name) || PAGE) + PAGE);
+  await ctx.reload();
+  const after = document.querySelector('[data-scroll="thread"]');
+  if (after) after.scrollTop = after.scrollHeight - fromBottom;
 }
 
 async function resume(agent, ctx) {

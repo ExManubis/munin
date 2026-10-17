@@ -321,18 +321,31 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
   // Reading ------------------------------------------------------------------------------
 
+  // Each conversation's entries, kept as they're read: a read asks pi-durable only for entries
+  // after the last one it has (entries never change once written), and one agent's reads go one
+  // at a time so two can't both append the same new entries. Its items are rebuilt only when
+  // there's something new.
+  const kept = new Map(); // conversationId → { entries, items, key, queue }
   async function readItems(agent) {
-    const conversation = await conversationOf(agent);
-    const entries = [];
-    let cursor;
-    do {
-      const page = await conversation.entries({ order: 'ascending' }, 500, cursor, ctx);
-      entries.push(...page.items);
-      cursor = page.next;
-    } while (cursor);
-    const live = await harness.snapshot(LiveDoc, agent.conversationId, ctx);
-    const busy = Boolean(live?.run);
-    return { entries, items: toItems(entries, { busy }), busy };
+    let held = kept.get(agent.conversationId);
+    if (!held) kept.set(agent.conversationId, held = { entries: [], items: [], key: null, queue: Promise.resolve() });
+    const read = held.queue.then(async () => {
+      const conversation = await conversationOf(agent);
+      const last = held.entries.at(-1)?.id;
+      let cursor;
+      do {
+        const page = await conversation.entries({ order: 'ascending', ...(last ? { minEntryId: last } : {}) }, 500, cursor, ctx);
+        for (const entry of page.items) if (entry.id !== last) held.entries.push(entry); // the bound is inclusive
+        cursor = page.next;
+      } while (cursor);
+      const live = await harness.snapshot(LiveDoc, agent.conversationId, ctx);
+      const busy = Boolean(live?.run);
+      const key = `${held.entries.length}/${busy}`;
+      if (held.key !== key) Object.assign(held, { items: toItems(held.entries, { busy }), key });
+      return { entries: held.entries, items: held.items, busy };
+    });
+    held.queue = read.catch(() => {});
+    return read;
   }
 
   // `month` is this calendar month, the period a budget covers.
@@ -470,10 +483,19 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       return fullOf(need(name));
     },
 
-    async conversation(name) {
+    // A page of the conversation: the newest `limit` items, or those just before the item
+    // `before`. `more` says whether there are older ones.
+    async conversation(name, { before = null, limit = 100 } = {}) {
       const agent = need(name);
       const read = await readItems(agent);
-      return { agent: await fullOf(agent, read), items: read.items };
+      const size = Math.max(1, Math.min(Number(limit) || 100, 500));
+      let end = read.items.length;
+      if (before) {
+        end = read.items.findIndex((item) => item.id === before);
+        if (end < 0) throw invalid(`There's no item ${before} in ${name}'s conversation.`);
+      }
+      const start = Math.max(0, end - size);
+      return { agent: await fullOf(agent, read), items: read.items.slice(start, end), more: start > 0 };
     },
 
     async waiting() {
@@ -588,6 +610,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       const agent = need(name);
       await (await conversationOf(agent)).abort(ctx);
       await sandbox?.remove(agent);
+      kept.delete(agent.conversationId);
       agents.delete(name);
       await saveAgents();
     },

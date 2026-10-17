@@ -35,7 +35,9 @@ export function createRuntimeServer(runtime, settings) {
   route('DELETE', '/agents/([^/]+)', (m) => runtime.deleteAgent(enc(m[1])));
   route('POST', '/agents/([^/]+)/pause', (m) => runtime.pause(enc(m[1])));
   route('POST', '/agents/([^/]+)/resume', (m) => runtime.resume(enc(m[1])));
-  route('GET', '/agents/([^/]+)/conversation', (m) => runtime.conversation(enc(m[1])));
+  route('GET', '/agents/([^/]+)/conversation', (m, body, url) => runtime.conversation(enc(m[1]), {
+    before: url.searchParams.get('before'), limit: url.searchParams.get('limit') || undefined,
+  }));
   route('POST', '/agents/([^/]+)/messages', (m, body) => runtime.send(enc(m[1]), body.text));
   route('POST', '/agents/([^/]+)/items/([^/]+)/answer', (m, body) => runtime.answer(enc(m[1]), enc(m[2]), body));
   route('POST', '/agents/([^/]+)/items/([^/]+)/decide', (m, body) => runtime.decide(enc(m[1]), enc(m[2]), body.decision));

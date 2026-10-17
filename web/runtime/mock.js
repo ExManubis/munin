@@ -584,9 +584,13 @@ export const mock = {
     return full(need(name));
   },
 
-  async conversation(name) {
+  async conversation(name, { before = null, limit = 100 } = {}) {
     const agent = need(name);
-    return { agent: full(agent), items: itemsOf(name).map(outward) };
+    const items = itemsOf(name).map(outward);
+    const end = before ? items.findIndex((item) => item.id === before) : items.length;
+    if (end < 0) throw new Error(`There's no item ${before} in ${name}'s conversation.`);
+    const start = Math.max(0, end - limit);
+    return { agent: full(agent), items: items.slice(start, end), more: start > 0 };
   },
 
   // Everything waiting on the human, oldest first: { agent, item }.
