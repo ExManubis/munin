@@ -7,8 +7,7 @@ import { markdown } from '../markdown.js';
 import { condense, describe, eventIcon } from '../history.js';
 import { issuePicker } from '../search.js';
 import {
-  h, kbd, MOD, avatar, agentAvatar, personAvatar, statusIcon, statusLabel, STATUSES, time, parseTime, topbar,
-  bindDraft, drafts, onModEnter, toast, changeIssue, agentPrompts,
+  h, kbd, MOD, avatar, agentAvatar, personAvatar, statusIcon, statusLabel, STATUSES, time, parseTime, topbar, bindDraft, drafts, onModEnter, toast, changeIssue, agentPrompts, onEnterSend, SEND_KEY,
 } from '../ui.js';
 
 let editing = null; // id of the issue whose title and description are being edited
@@ -281,7 +280,7 @@ function reply(issue, asker, ctx) {
     placeholder: asker ? `Answer ${asker}…` : 'Leave a comment…',
     'aria-label': 'Comment',
   }), `reply:${issue.id}`);
-  const send = h('button', { type: 'button', class: 'btn primary' }, asker ? `Send to ${asker}` : 'Comment', h('span', { class: 'key' }, `${MOD}↵`));
+  const send = h('button', { type: 'button', class: 'btn primary' }, asker ? `Send to ${asker}` : 'Comment', h('span', { class: 'key' }, SEND_KEY));
   const submit = async () => {
     const body = box.value.trim();
     if (!body) return box.focus();
@@ -296,7 +295,7 @@ function reply(issue, asker, ctx) {
     }
   };
   send.addEventListener('click', submit);
-  onModEnter(box, submit);
+  onEnterSend(box, submit);
   return h('div', { class: 'reply' },
     box,
     h('div', { class: 'reply-actions' },

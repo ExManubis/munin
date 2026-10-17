@@ -6,7 +6,7 @@
 import { api } from '../api.js';
 import { runtime } from '../runtime/index.js';
 import { store } from '../store.js';
-import { h, kbd, MOD, statusIcon, svg, avatar, bindDraft, drafts, onModEnter, toast, topbar } from '../ui.js';
+import { h, kbd, statusIcon, svg, avatar, bindDraft, drafts, toast, topbar, onEnterSend, SEND_KEY } from '../ui.js';
 import { markdown } from '../markdown.js';
 import { optionRow } from '../cards.js';
 import { agentFace, roleTag, hhmm } from './agents.js';
@@ -217,7 +217,7 @@ function question(agent, item, ctx) {
         class: 'btn primary',
         disabled: picked === undefined,
         onclick: () => answerOption(agent, item, ctx),
-      }, `Send to ${agent.name}`, h('span', { class: 'key' }, `${MOD}↵`)),
+      }, `Send to ${agent.name}`, h('span', { class: 'key' }, SEND_KEY)),
       h('span', { class: 'hint' }, live
         ? "Also in the tracker's inbox. Answering here answers there."
         : 'Pick an option, or answer in your own words below.')));
@@ -361,14 +361,14 @@ function composer(agent, openQuestion, ctx) {
     }
     ctx.reload();
   };
-  onModEnter(box, send);
+  onEnterSend(box, send);
   const hint = openQuestion
     ? `Your message answers ${agent.name}'s question.`
     : agent.run ? `${agent.name} reads your message before its next step.` : null;
   return h('footer', { class: 'composer' },
     h('div', { class: 'composer-box' },
       box,
-      h('button', { type: 'button', class: 'send', onclick: send, 'aria-label': 'Send' }, h('span', { class: 'wide-only' }, kbd(`${MOD}↵`)), h('span', { class: 'phone-only send-up' }, '↑'))),
+      h('button', { type: 'button', class: 'send', onclick: send, 'aria-label': 'Send' }, h('span', { class: 'wide-only' }, kbd(SEND_KEY)), h('span', { class: 'phone-only send-up' }, '↑'))),
     hint ? h('p', { class: 'hint' }, hint) : null);
 }
 
