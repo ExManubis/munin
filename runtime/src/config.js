@@ -16,6 +16,8 @@ export function settingsFromEnv(env = process.env) {
     db,
     // Model keys pasted in Settings (keys.js), next to the database.
     keysFile: db === ':memory:' ? null : join(dirname(db), 'keys.json'),
+    // Apps added in Settings (apps.js), their tokens included, next to the database too.
+    appsFile: db === ':memory:' ? null : join(dirname(db), 'apps.json'),
     host: env.MUNIN_RUNTIME_HOST || '127.0.0.1',
     port: Number(env.MUNIN_RUNTIME_PORT || 7779),
     // Each agent that can code gets a folder of its own under here.

@@ -1,5 +1,6 @@
 """Talks to a real munin over HTTP with the MCP SDK's client, the way an agent would."""
 
+import json
 import time
 
 import anyio
@@ -8,7 +9,7 @@ import pytest
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-from munin import agents
+from munin import agents, api
 from munin import issues as svc
 from munin.db import connect
 
@@ -165,15 +166,51 @@ def test_prompts(server):
     assert text.startswith("Continue the munin project (MUN) in munin.")
 
 
-def test_the_web_ui_hears_about_changes(server):
-    url, tokens, _ = server
+def sse(lines, count: int) -> list[dict]:
+    """The next `count` server-sent events as {id, event, data}, skipping comments and the retry line."""
+    found, current = [], {}
+    while len(found) < count:
+        line = next(lines)
+        if not line:
+            if current:
+                found.append(current)
+            current = {}
+        elif not line.startswith((":", "retry:")):
+            field, _, value = line.partition(": ")
+            current[field] = value
+    return found
+
+
+def test_the_web_ui_hears_about_changes_numbered_and_catches_up(server, monkeypatch):
+    url, tokens, settings = server
     base = url.removesuffix("/mcp")
+    with connect(settings.db_path)() as s:
+        start = max(e.id for e in svc.events_after(s, None, 200))
 
     with httpx2.stream("GET", f"{base}/api/stream", timeout=5) as response:
         lines = response.iter_lines()
         assert next(lines) == "retry: 3000"
+        assert sse(lines, 1) == [{"id": str(start)}], "numbered from the newest event"
         run(url, tokens["claude-code"], ("add_comment", {"issue": "MUN-1", "body": "Hello"}))
-        assert [next(lines) for _ in range(3)][1] == "event: changed"
+        (event,) = sse(lines, 1)
+    assert (event["id"], event["event"]) == (str(start + 1), "changed")
+    said = json.loads(event["data"])
+    assert (said["id"], said["kind"], said["actor"], said["issue"]["id"], said["project"]) == (
+        start + 1, "comment", "claude-code", "MUN-1", "MUN")
+
+    # Missed while away: a reconnect that says where it was gets them, in order.
+    run(url, tokens["codex"], ("update_issue", {"issue": "MUN-2", "status": "in_progress"}))
+    headers = {"Last-Event-ID": event["id"]}
+    with httpx2.stream("GET", f"{base}/api/stream", headers=headers, timeout=5) as response:
+        missed = sse(response.iter_lines(), 2)
+    assert [(e["id"], json.loads(e["data"])["kind"]) for e in missed] == [
+        (str(start + 2), "status"), (str(start + 3), "assignee")]
+
+    # Missed too much to send: reload everything.
+    monkeypatch.setattr(api, "REPLAY_LIMIT", 1)
+    with httpx2.stream("GET", f"{base}/api/stream", headers=headers, timeout=5) as response:
+        (reset,) = sse(response.iter_lines(), 1)
+    assert (reset["event"], reset["id"]) == ("reset", str(start + 3))
 
 
 def test_wait_for_work(server):

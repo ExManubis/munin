@@ -2,7 +2,7 @@
 // what it remembers about you, and what it costs.
 
 import { runtime } from '../runtime/index.js';
-import { ABILITIES, APPS, THINKING, costHint } from '../runtime/roles.js';
+import { ABILITIES, THINKING, costHint } from '../runtime/roles.js';
 import { connectToTracker, disconnectFromTracker, revokeTrackerToken, linkable } from '../runtime/tracker-link.js';
 import { store } from '../store.js';
 import { h, bindDraft, drafts, onModEnter, toast, toggle, topbar } from '../ui.js';
@@ -19,8 +19,8 @@ export const view = {
   scope: (params) => `/agents/${params.name}/profile`,
 
   async load({ name }) {
-    const [agent, models] = await Promise.all([runtime.agent(name), runtime.models()]);
-    return { agent, models };
+    const [agent, models, apps] = await Promise.all([runtime.agent(name), runtime.models(), runtime.apps()]);
+    return { agent, models, apps };
   },
 
   leave() {
@@ -28,7 +28,7 @@ export const view = {
     search = searchState();
   },
 
-  render({ agent, models }, ctx) {
+  render({ agent, models, apps }, ctx) {
     const set = (patch, message) => update(agent, patch, message, ctx);
     return h('div', { class: 'page' },
       topbar([
@@ -39,7 +39,7 @@ export const view = {
         header(agent, ctx),
         brief(agent, set),
         model(agent, models, set, ctx),
-        abilities(agent, set, ctx),
+        abilities(agent, apps, set, ctx),
         askFirst(agent, set),
         routines(agent, ctx),
         memory(agent, ctx),
@@ -154,14 +154,16 @@ function settingRow(title, detail, on, label, onchange, extra) {
     toggle(on, label, onchange));
 }
 
-function abilities(agent, set, ctx) {
+function abilities(agent, apps, set, ctx) {
   return section('Abilities', `What ${agent.name} can reach.`,
     ABILITIES.map(([id, title, detail]) => {
       const on = Boolean(agent.abilities[id]);
       let line = detail;
       let extra = null;
       if (id === 'apps') {
-        line = agent.apps.length ? `${list(agent.apps)} ${agent.apps.length === 1 ? 'is' : 'are'} connected. ` : 'Nothing connected yet. ';
+        // Its picks by name: they're app ids, or names from before apps were real.
+        const names = agent.apps.map((pick) => apps.find((app) => app.id === pick || app.name.toLowerCase() === pick.toLowerCase())?.name || pick);
+        line = names.length ? `${list(names)} ${names.length === 1 ? 'is' : 'are'} connected. ` : 'Nothing connected yet. ';
         extra = h('button', { type: 'button', class: 'link', onclick: () => connectApps(agent, ctx) }, 'Connect an app');
       }
       if (id === 'code' && on && agent.worksIn) {
@@ -231,14 +233,17 @@ async function toggleTracker(agent, on, ctx) {
 
 const list = (items) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`);
 
-function connectApps(agent, ctx) {
-  const chosen = new Set(agent.apps);
-  const rows = APPS.map((app) => h('label', { class: 'app-pick' },
-    h('input', { type: 'checkbox', checked: chosen.has(app), onchange: (e) => (e.target.checked ? chosen.add(app) : chosen.delete(app)) }),
-    h('span', {}, app)));
+// Picks from the apps added in Settings. An agent's picks are app ids; older ones were names.
+async function connectApps(agent, ctx) {
+  const apps = await runtime.apps();
+  const mine = (app) => agent.apps.some((pick) => pick === app.id || pick.toLowerCase() === app.name.toLowerCase());
+  const chosen = new Set(apps.filter(mine).map((app) => app.id));
+  const rows = apps.map((app) => h('label', { class: 'app-pick' },
+    h('input', { type: 'checkbox', checked: chosen.has(app.id), onchange: (e) => (e.target.checked ? chosen.add(app.id) : chosen.delete(app.id)) }),
+    h('span', {}, app.name, app.connected ? null : h('span', { class: 'muted' }, ` · ${app.detail}`))));
   const save = async (e) => {
     e.preventDefault();
-    await runtime.updateAgent(agent.name, { apps: APPS.filter((a) => chosen.has(a)), abilities: { apps: chosen.size > 0 } });
+    await runtime.updateAgent(agent.name, { apps: apps.filter((a) => chosen.has(a.id)).map((a) => a.id), abilities: { apps: chosen.size > 0 } });
     closeDialog();
     ctx.reload();
   };
@@ -246,7 +251,9 @@ function connectApps(agent, ctx) {
     h('header', { class: 'sheet-head' }, h('div', { class: 'sheet-title' }, h('span', { class: 'label' }, `Apps for ${agent.name}`)),
       h('button', { type: 'button', class: 'close link', onclick: closeDialog }, 'Close')),
     h('div', { class: 'sheet-body' },
-      h('p', { class: 'hint' }, 'Apps are MCP servers the agent can use. In the dummy, picking one just marks it connected.'),
+      apps.length
+        ? h('p', { class: 'hint' }, `Apps are MCP servers. ${agent.name} gets the tools of the ones you pick.`)
+        : h('p', { class: 'hint' }, 'No apps yet. Add one under ', h('a', { class: 'link', href: '#/settings', onclick: closeDialog }, 'Apps in Settings'), ' first.'),
       h('div', { class: 'app-picks' }, rows)),
     h('footer', { class: 'sheet-foot' }, h('span'), h('button', { type: 'submit', class: 'btn primary' }, 'Save'))), null, 'small');
 }

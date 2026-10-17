@@ -37,7 +37,7 @@ A **summary**, for the sidebar and lists:
 {
   "brief": "You're forge, a coder on munin…", "thinking": "medium",
   "abilities": { "code": true, "tracker": true, "web": true },   // apps, web, code, tracker, images
-  "apps": ["GitHub"],                                            // MCP servers it can use
+  "apps": ["calendar"],                                          // ids of the apps it uses (apps())
   "askFirst": [{ "id": "push_main", "label": "Pushing to main", "what": "push to main", "third": "pushes to main", "on": true }],
   "routines": [Routine],
   "memory": [{ "id": "m1", "text": "Mikkel prefers small PRs." }], "memoryCount": 9,
@@ -105,6 +105,9 @@ An **item** is one of:
 | `recommendedModels()` | `GET /runtime/api/models/recommended` | What setup recommends from OpenRouter, key or not: `{cheap: [model], frontier: [model]}` |
 | `searchModels(q)` | `GET /runtime/api/models/search?q=` | OpenRouter's models with every word of `q` in their id or name, from its whole catalog, leaving out batch-only ones: `{total, models}`, twenty at most |
 | `setFavourites(models)` | `PUT /runtime/api/favourites` | `{models: [id]}`: the OpenRouter models agents pick from, in your order (Claude Haiku 5.5 and Claude Opus 5.5 until you choose). A model OpenRouter doesn't have is a 422. Returns `models()` |
+| `apps()` | `GET /runtime/api/apps` | The apps added in Settings: `[{id, name, url, token: {hint} \| null, connected, tools, detail}]`. `detail` is "2 tools", or why it doesn't answer. Tokens never come back |
+| `addApp(fields)` | `POST /runtime/api/apps` | `{name, url, token?}`: an MCP server reached over HTTP. 201 with the app, connected or not; a missing name, a URL that isn't http(s), or a name that's taken is a 422 |
+| `removeApp(id)` | `DELETE /runtime/api/apps/{id}` | Agents that had it lose its tools; an unknown id is a 404 |
 | `repos()` | `GET /runtime/api/repos` | Where each project's code is: `[{project, source, base}]` |
 | `setRepo(key, fields)` | `PUT /runtime/api/repos/{KEY}` | `{source, base}`: a git URL or a folder with a repository, and the branch new branches start from (the repository's default when left out). Clones it the first time |
 | `removeRepo(key)` | `DELETE /runtime/api/repos/{KEY}` | Forgets it; the clone and agents' worktrees stay |
@@ -129,7 +132,7 @@ The runtime serves the models, so a new provider's show up without a frontend ch
 
 ## Live updates
 
-`GET /runtime/api/stream` is a server-sent event stream that says `changed`, like the tracker's `/api/stream`, at most ten times a second; the mock calls `subscribe(fn)` instead. The client reloads after a reconnect, since it can't tell what it missed. The stream should number its events so a reconnecting client can ask for what it missed (`Last-Event-ID`). The Claudewitz daemon does this, and it matters on a phone that keeps dropping off.
+`GET /runtime/api/stream` is a server-sent event stream, at most ten events a second; the mock calls `subscribe(fn)` instead. Every commit in the runtime is a numbered event, `<boot>.<n>`, and changes within 100ms go out as one `changed` event with the newest id and the agents they were about: `data: {"agents": ["pip"]}`. A fresh stream starts with the newest id. A client that reconnects with `Last-Event-ID` gets what it missed as one `changed` event. If the id is from before the runtime restarted, or older than the last 1,000 events, it gets `reset` instead: reload everything. The tracker's `/api/stream` works the same way, numbered by its event ids, with each event as JSON (what `/api/activity` lists), up to 500 missed events. The frontend reloads on `changed` and `reset`, and when a stream comes back.
 
 ## What the tracker added for this
 
@@ -145,6 +148,7 @@ The runtime (`runtime/src/`) is a thin layer over pi-durable:
 
 - **A conversation** is a pi-durable conversation, one per agent, in the runtime's SQLite file. The agents' settings are one session document next to them (`munin.agents`).
 - **The prompt** (`prompt.js`) opens with who the agent is, as plain facts: what it is, that it works for you, and that it's talking with you right now in munin, which is private to you. It doesn't explain where messages come from, because agents told that started doubting who they were talking to. Then comes how every munin agent talks, written as behaviour (the way Hermes Agent's SOUL.md does it), then the agent's own brief, then which of its abilities munin can't give it yet. What it remembers follows as "What you know about Mikkel". With no name from setup it says "the person you work for", since `MUNIN_USER`'s default, `me`, isn't a name, and the agent asks once. A brief is the agent's character and job and doesn't repeat any of that. When the runtime starts, briefs made from a role's older words get the new ones.
+- **Apps** (`apps.js`, `mcp.js`). An app is an MCP server reached over HTTP (streamable HTTP, JSON or server-sent answers, with its session kept and started again when the server forgets it), with an optional bearer token. The runtime keeps them in `apps.json` next to its database, readable by its own user only, and connects to each in the background, trying again every minute when one doesn't answer. An agent with the Apps ability gets the tools of its apps that answer, named `<app>__<tool>` (`calendar__list_events`), and its prompt names them. Calls go out from the runtime with the app's token, so agents never see it, and show in the conversation as steps ("calendar: list events"). The tracker's tools go through the same client.
 - **Reading a conversation** goes through the entries the runtime keeps in memory: each read asks pi-durable only for the entries after the last one it has (`minEntryId`), since entries never change once written, and one agent's reads go one at a time. Its items are rebuilt only when something's new.
 - **Budgets.** An agent's budget is dollars per calendar month. The runtime keeps a running total of what its model responses cost this month: it reads the total from the conversation the first time it's needed, then adds each response's cost in a `GenerationTask` `afterResponse` hook. When the total reaches the budget, the agent pauses itself (`pausedFor: "budget"`) and its conversation says "paused at its $10 budget for October". The turn it's in isn't cut off: its next tool calls are blocked, so it answers once more and stops. A bigger budget doesn't resume it by itself, and neither does a new month; `resume` does, once it's under budget.
 - **Messages and runs** come from its entries (`items.js`).
@@ -154,7 +158,7 @@ The runtime (`runtime/src/`) is a thin layer over pi-durable:
 - **Questions, answers, approvals, decisions and actions** are entries of munin's own kinds (`munin.question`, `munin.answer`, `munin.approval`, `munin.decision`, `munin.action`).
   - Agents ask with an `ask_human` tool, with options or without.
   - An answer goes to the agent as an input, so it steers a running agent.
-- **Ask-first rules** are a `beforeTool` hook. A call a rule covers is blocked and an approval written. The decision goes to the agent as a message, and "once" lets the next such call through. "Always" switches the rule off; undo switches it back on.
+- **Ask-first rules** are a `beforeTool` hook. A call a rule covers is blocked and an approval written. The decision goes to the agent as a message, and "once" lets the next such call through. "Always" switches the rule off; undo switches it back on. Each app an agent has gets a rule of its own (`app:<id>`, "Calendar: sending, changing or deleting"), on until you turn it off, which covers the app's tools that change something: those the server doesn't mark `readOnlyHint`, or, without annotations, those whose names don't start like `list_`, `get_` or `search_`. Its approval says the call in plain words: "add event · title: Lunch with Ann · when: 12:00". Taking the app away takes its rule with it.
 - **Steering:** `send` while a run is going is `submit({ whenBusy: "steer" })`.
 - **Brief, model and abilities** are the conversation's agent settings: instructions, model and extensions. Coders get pi-durable's coding tools (read, write, edit, bash) in their own folder.
 - **Memory** is a `remember` tool. Notes go into the agent's system prompt.
@@ -176,5 +180,4 @@ An agent in the tracker starts work when you tell it to, from its projects in th
 
 Stored but not acted on yet, next roughly in this order:
 
-1. **Apps and the web** as tools, through MCP servers, with ask-first rules for apps like "send mail". Mail and calendar routines start then.
-2. **Numbered events** on the stream, and replay on reconnect.
+1. **Mail and calendar routines** (MUN-9). **The web** as a tool (MUN-8). **Apps that run as a local command** (stdio MCP servers, MUN-27), not only over HTTP.

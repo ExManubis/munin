@@ -689,7 +689,17 @@ export const mock = {
     const agent = need(name);
     for (const key of ['role', 'colour', 'provider', 'model', 'thinking', 'brief', 'budget']) if (key in patch) agent[key] = patch[key];
     if (patch.abilities) Object.assign(agent.abilities, patch.abilities);
-    if (patch.apps) agent.apps = [...patch.apps];
+    if (patch.apps) {
+      // Like the runtime: each app picked gets an ask-first rule for anything that changes something.
+      agent.apps = [...patch.apps];
+      const names = Object.fromEntries((state.apps || []).map((app) => [app.id, app.name]));
+      agent.askFirst = agent.askFirst.filter((rule) => !rule.app || agent.apps.includes(rule.app));
+      for (const id of agent.apps) {
+        if (names[id] && !agent.askFirst.some((rule) => rule.app === id)) {
+          agent.askFirst.push({ id: `app:${id}`, app: id, label: `${names[id]}: sending, changing or deleting`, what: `do something in ${names[id]}`, third: `does things in ${names[id]}`, on: true });
+        }
+      }
+    }
     if (patch.askFirst) for (const rule of agent.askFirst) if (rule.id in patch.askFirst) rule.on = patch.askFirst[rule.id];
     if (patch.tracker?.projects && agent.tracker) agent.tracker.projects = [...patch.tracker.projects];
     changed();
@@ -843,6 +853,33 @@ export const mock = {
 
   async removeRepo(key) {
     delete state.repos?.[key];
+    changed();
+  },
+
+  // Apps: MCP servers agents use. The mock pretends every app answers with a few tools.
+  async apps() {
+    state.apps ||= [
+      { id: 'calendar', name: 'Calendar', url: 'https://calendar.example.com/mcp', token: { hint: 'k3y9' } },
+      { id: 'gmail', name: 'Gmail', url: 'https://mail.example.com/mcp', token: { hint: 'm41l' } },
+    ];
+    return state.apps.map((app) => ({ ...app, connected: true, tools: 4, detail: '4 tools' }));
+  },
+
+  async addApp({ name, url, token } = {}) {
+    const title = String(name || '').trim();
+    if (!title) throw new Error('An app needs a name, like Calendar.');
+    if (!/^https?:\/\//.test(String(url || '').trim())) throw new Error("That isn't a URL. An app is an MCP server's address, like https://mcp.example.com/mcp.");
+    const id = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    await mock.apps();
+    if (state.apps.some((app) => app.id === id)) throw new Error(`There's already an app called ${title}.`);
+    state.apps.push({ id, name: title, url: url.trim(), token: token ? { hint: token.slice(-4) } : null });
+    changed();
+    return (await mock.apps()).find((app) => app.id === id);
+  },
+
+  async removeApp(id) {
+    await mock.apps();
+    state.apps = state.apps.filter((app) => app.id !== id);
     changed();
   },
 

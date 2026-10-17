@@ -10,6 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import AfterValidator, BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from munin import agents as agent_svc
@@ -323,29 +324,73 @@ def inbox(s: DB) -> list[InboxItemOut]:
 @router.get("/activity")
 def activity(s: DB, project: str | None = None, limit: Annotated[int, Query(ge=1, le=200)] = 50) -> list[ActivityOut]:
     """What happened lately, newest first."""
-    return [
-        ActivityOut(
-            **_event_out(event).model_dump(),
-            issue=_brief_out(event.issue),
-            project=event.issue.project.key,
-            text=svc.describe_event(event),
-        )
-        for event in svc.recent_events(s, limit, project)
-    ]
+    return [_activity_out(s, event) for event in svc.recent_events(s, limit, project)]
+
+
+# How many missed events a reconnecting client is sent before it's told to reload instead.
+REPLAY_LIMIT = 500
+
+
+def _activity_out(s: Session, event: Event) -> ActivityOut:
+    return ActivityOut(
+        **_event_out(event).model_dump(),
+        issue=_brief_out(event.issue),
+        project=event.issue.project.key,
+        text=svc.describe_event(event),
+    )
+
+
+def _sse(kind: str, data: str, id: int | None = None) -> str:
+    return (f"id: {id}\n" if id is not None else "") + f"event: {kind}\ndata: {data}\n\n"
 
 
 @router.get("/stream")
 async def stream(request: Request) -> StreamingResponse:
-    """Server-sent events: a "changed" event whenever anything in munin changes."""
+    """Server-sent events, numbered by the tracker's event ids: a "changed" event for each event (an
+    issue created, moved, assigned, edited or commented on), with what happened as JSON, and one
+    without an id for any other change. A client that reconnects with Last-Event-ID gets the events it
+    missed, or a "reset" when it missed too many to send, which means: reload everything."""
     changes = request.app.state.changes
+    sessions = request.app.state.sessions
+
+    def newest() -> int:
+        with sessions() as s:
+            return s.scalar(select(func.max(Event.id))) or 0
+
+    def after(last: int, limit: int) -> list[tuple[int, str]]:
+        with sessions() as s:
+            return [
+                (event.id, _sse("changed", _activity_out(s, event).model_dump_json(), event.id))
+                for event in svc.events_after(s, last, limit)
+            ]
+
+    header = request.headers.get("last-event-id", "")
+    resumed = int(header) if header.isdigit() else None
 
     async def events():
         seen, quiet = changes.revision, 0.0
         yield "retry: 3000\n\n"
+        if resumed is None:
+            last = await asyncio.to_thread(newest)
+            yield f"id: {last}\n\n"  # numbered from here, so a reconnect can say where it was
+        else:
+            missed = await asyncio.to_thread(after, resumed, REPLAY_LIMIT + 1)
+            last = await asyncio.to_thread(newest)
+            if len(missed) > REPLAY_LIMIT:
+                yield _sse("reset", "{}", last)
+            else:
+                for _, line in missed:
+                    yield line
+                if not missed:
+                    yield f"id: {last}\n\n"
         while not await request.is_disconnected():
             if changes.revision != seen:
                 seen, quiet = changes.revision, 0.0
-                yield f"event: changed\ndata: {seen}\n\n"
+                fresh = await asyncio.to_thread(after, last, REPLAY_LIMIT)
+                for last, line in fresh:
+                    yield line
+                if not fresh:
+                    yield _sse("changed", "{}")  # a change that isn't an issue's: a project, a token
             elif quiet >= 15:
                 quiet = 0.0
                 yield ": still here\n\n"

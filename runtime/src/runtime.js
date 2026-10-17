@@ -17,6 +17,7 @@ import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { ROLES, roleName, askFirstFor, ruleMatches, upgradeBrief } from './roles.js';
 import { toItems, summarize } from './items.js';
+import { AppError, describeAppCall, openApps } from './apps.js';
 import { identity, about } from './prompt.js';
 import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
@@ -44,6 +45,7 @@ const NAME = /^[a-z][a-z0-9-]{1,23}$/;
 const COLOURS = ['white', 'ember', 'coral', 'rose', 'iris', 'sky', 'teal', 'moss', 'straw'];
 const THINKING = ['off', 'low', 'medium', 'high'];
 const UNDO_MS = 8000;
+const JOURNAL = 1000; // numbered events kept for reconnecting streams
 const DAY = 24 * 60 * 60 * 1000;
 const PROJECT = /^[A-Z][A-Z0-9]{0,9}$/;
 const HOME = homedir();
@@ -136,7 +138,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       // (prompt.js). The brief is part of the first section, so it comes before munin's own notes.
       section('munin', (input) => {
         const agent = agentFor(input.conversationId);
-        return agent ? identity(agent, named()) : undefined;
+        return agent ? identity(agent, named(), { apps: apps.namesFor(agent) }) : undefined;
       }, { tag: false }),
       section('about', (input) => {
         const agent = agentFor(input.conversationId);
@@ -163,7 +165,8 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         if (agent?.pausedFor === 'budget' && agent.paused) {
           return { block: "You've reached your budget for this month, so munin has paused you. Don't call any more tools: say in a line or two where you got to, and stop." };
         }
-        const rule = agent?.askFirst.find((r) => r.on && ruleMatches(r, call.name, call.arguments));
+        // An app's rule covers its tools that change something; the others match by tool and command.
+        const rule = agent?.askFirst.find((r) => r.on && (r.app ? apps.changing(r.app, call.name) : ruleMatches(r, call.name, call.arguments)));
         if (!rule) return undefined;
         const allowed = agent.allowances.indexOf(rule.id);
         if (allowed >= 0) {
@@ -171,7 +174,8 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
           await saveAgents();
           return undefined;
         }
-        const target = call.name === 'bash' ? String(call.arguments.command || '').slice(0, 160) : String(call.arguments.path || call.name);
+        const target = rule.app ? describeAppCall(apps.changing(rule.app, call.name).name, call.arguments)
+          : call.name === 'bash' ? String(call.arguments.command || '').slice(0, 160) : String(call.arguments.path || call.name);
         await write(agent, 'munin.approval', { rule: rule.id, label: rule.label, what: rule.what, third: rule.third, target });
         return { block: `${them({ start: true })} hasn't allowed this yet (${rule.label.toLowerCase()}). They've been asked; their answer comes as a message. Don't try again before it does.` };
       },
@@ -277,6 +281,12 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   registry.install(Munin);
   registry.install(Workspace);
   const tracker = createTracker({ registry, agents: () => agents.values(), agentFor, write, user: who, onTake, mcpUrl: settings.trackerMcp || null });
+  // When apps change, or one starts or stops answering, every agent's conversation gets its tools.
+  const reconfigure = async () => {
+    if (!harness) return;
+    for (const agent of agents.values()) await (await conversationOf(agent)).configure(change(agent), ctx).catch(() => {});
+  };
+  const apps = await openApps({ file: settings.appsFile || null, registry, onChange: () => { reconfigure(); } });
   harness = await Harness.open(storage, {
     models: models.models,
     registry,
@@ -289,10 +299,19 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
   const saved = await harness.snapshot(AgentsDoc, ctx);
   for (const agent of Object.values(saved?.agents || {})) agents.set(agent.name, { ...structuredClone(agent), brief: upgradeBrief(agent.brief) });
+  for (const agent of agents.values()) syncAppRules(agent);
   Object.assign(repos, structuredClone(saved?.repos || {}));
   Object.assign(prefs, structuredClone(saved?.prefs || {}));
   workspace = createWorkspace({ dir: reposDir, agentsDir: settings.agentsDir, repos });
   tracker.connect(); // in the background: until the tracker answers, agents are told it's away
+
+  // Each app an agent has gets an ask-first rule (apps.ruleFor), on until you turn it off; an
+  // app it no longer has, or that's gone, takes its rule with it.
+  function syncAppRules(agent) {
+    const ids = apps.idsFor(agent);
+    agent.askFirst = agent.askFirst.filter((rule) => !rule.app || ids.includes(rule.app));
+    for (const id of ids) if (!agent.askFirst.some((rule) => rule.app === id)) agent.askFirst.push(apps.ruleFor(id));
+  }
 
   async function saveAgents() {
     await harness.commit(async (tx) => {
@@ -309,13 +328,29 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     return {
       model: { provider, modelId: model },
       thinkingLevel: agent.thinking,
-      extensions: [Munin, ...(agent.abilities.code ? [CodingTools, Workspace] : []), ...(agent.abilities.tracker ? [tracker.extension()] : [])],
+      extensions: [Munin, ...(agent.abilities.code ? [CodingTools, Workspace] : []), ...(agent.abilities.tracker ? [tracker.extension()] : []), ...apps.extensionsFor(agent)],
       cwd: agent.abilities.code ? (agent.work?.folder || agent.folder) : null,
     };
   };
 
-  const changed = () => {
-    for (const fn of listeners) fn();
+  // Every commit is a numbered event for the stream, naming the agents it was about. Ids are
+  // "<boot>.<n>": a client that reconnects with one from before a restart, or one older than the
+  // last JOURNAL events, is told to reload everything instead of being sent what it missed.
+  const boot = randomUUID().slice(0, 8);
+  const journal = []; // { id, n, agents }, oldest first
+  let numbered = 0;
+  const changed = (publication) => {
+    const names = new Set();
+    for (const change of publication?.changes || []) {
+      const conversation = change.conversationId ?? change.entry?.conversationId ?? change.record?.conversationId;
+      const agent = conversation && agentFor(conversation);
+      if (agent) names.add(agent.name);
+    }
+    numbered += 1;
+    const event = { id: `${boot}.${numbered}`, n: numbered, agents: [...names] };
+    journal.push(event);
+    if (journal.length > JOURNAL) journal.shift();
+    for (const fn of listeners) fn(event);
   };
   harness.subscribeCommits(changed);
   harness.resume(); // carry on with anything the last process left unfinished
@@ -598,7 +633,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         if (agent.abilities.code && !agent.askFirst.length) agent.askFirst = askFirstFor(agent.abilities);
         if (agent.abilities.code) await mkdir(agent.folder, { recursive: true });
       }
-      if (patch.apps) agent.apps = [...patch.apps];
+      if (patch.apps) {
+        agent.apps = [...patch.apps];
+        syncAppRules(agent);
+      }
       if (patch.askFirst) for (const rule of agent.askFirst) if (rule.id in patch.askFirst) rule.on = Boolean(patch.askFirst[rule.id]);
       if ('tracker' in patch) agent.tracker = trackerLink(patch.tracker, agent.tracker);
       await (await conversationOf(agent)).configure(change(agent), ctx);
@@ -730,6 +768,29 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       await saveAgents();
     },
 
+    // Apps (apps.js): MCP servers agents use, which you add in Settings.
+    apps: () => apps.list(),
+
+    async addApp(fields) {
+      try {
+        return await apps.add(fields);
+      } catch (err) {
+        if (err instanceof AppError) throw invalid(err.message);
+        throw err;
+      }
+    },
+
+    async removeApp(id) {
+      try {
+        await apps.remove(id);
+        for (const agent of agents.values()) syncAppRules(agent);
+        await saveAgents();
+      } catch (err) {
+        if (err instanceof AppError) throw new RuntimeError(404, err.message);
+        throw err;
+      }
+    },
+
     async models() {
       const inUse = [...agents.values()].filter((a) => a.provider === 'openrouter').map((a) => a.model);
       return models.catalog({ favourites: favourites(), inUse });
@@ -762,6 +823,18 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       return () => listeners.delete(fn);
     },
 
+    // The newest event's id, to number a fresh stream from.
+    lastEventId: () => `${boot}.${numbered}`,
+
+    // What a stream that last saw `id` missed: the events since, or reset when they're gone.
+    eventsSince(id) {
+      const [from, at] = String(id || '').split('.');
+      const n = Number(at);
+      if (from !== boot || !Number.isInteger(n) || n > numbered) return { reset: true, events: [] };
+      if (n < numbered && (journal[0]?.n ?? Infinity) > n + 1) return { reset: true, events: [] };
+      return { reset: false, events: journal.filter((event) => event.n > n) };
+    },
+
     async waitForIdle() {
       await harness.waitForIdle(ctx);
     },
@@ -772,6 +845,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       clearTimeout(timer);
       listeners.clear();
       tracker.close();
+      apps.close();
       await harness.close(ctx);
     },
   };

@@ -56,8 +56,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(router)
     app.router.routes.append(Route("/mcp", endpoint=AgentAuth(mcp_endpoint, sessions)))
     if settings.web_dir and (settings.web_dir / "index.html").is_file():
-        app.mount("/", StaticFiles(directory=settings.web_dir, html=True), name="web")
+        app.mount("/", Revalidated(directory=settings.web_dir, html=True), name="web")
     return app
+
+
+class Revalidated(StaticFiles):
+    """The frontend, which browsers check with the server each time they load it (a 304 when it
+    hasn't changed), so a page never keeps running an old module after munin is updated."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 def _mcp_security(settings: Settings) -> TransportSecuritySettings | None:

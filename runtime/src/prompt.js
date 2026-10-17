@@ -14,20 +14,23 @@ export const VOICE = [
 ].join(' ');
 
 // Abilities an agent can have that munin can't give it yet, said the way the prompt says them.
-// MUN-6 (apps) and MUN-8 (the web) take theirs off this list.
+// Apps count as not yet while none of the agent's apps answer. MUN-8 (the web) takes its off.
 const NOT_YET = {
   apps: (owner) => `${owner} calendar, mail and other apps aren't connected to munin yet`,
   web: () => "you can't search or read the web yet",
   images: () => "you can't make pictures yet",
 };
 const capital = (text) => text[0].toUpperCase() + text.slice(1);
+const list = (items) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
 const article = (word) => `${/^[aeiou]/i.test(word) ? 'an' : 'a'} ${word}`;
 
 // The section that opens the prompt. `name` is what the agent calls you, or null while munin
-// has no name for you.
-export function identity(agent, name) {
+// has no name for you; `apps` the names of the agent's apps that answer (apps.js).
+export function identity(agent, name, { apps = [] } = {}) {
   const you = name || 'the person you work for';
-  const missing = Object.entries(NOT_YET).filter(([ability]) => agent.abilities?.[ability]).map(([, says]) => says(name ? `${name}'s` : 'their'));
+  const missing = Object.entries(NOT_YET)
+    .filter(([ability]) => agent.abilities?.[ability] && !(ability === 'apps' && apps.length))
+    .map(([, says]) => says(name ? `${name}'s` : 'their'));
   // "Mikkel's assistant" read as a third person again ("I'm tosk, his assistant"), so the
   // person is who you work for and who you're talking with, and is talked to as "you".
   const role = article(roleName(agent.role).toLowerCase());
@@ -41,6 +44,7 @@ export function identity(agent, name) {
     agent.brief,
     '',
     [
+      apps.length ? `You can use ${list(apps)} through their tools (named after the app). munin asks ${name || 'them'} before anything that sends, posts, accepts or deletes, and tells you the answer; reading needs no asking.` : null,
       missing.length ? `${capital(missing.join('; '))}. Only mention that when you're asked for something that needs them, and then help with what you're given.` : null,
       `${name || 'They'} may be away for hours. When you need a decision, use ask_human. When you learn something about ${you} that will still be true next week, use remember.`,
     ].filter(Boolean).join(' '),
