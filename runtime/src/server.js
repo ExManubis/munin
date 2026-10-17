@@ -7,6 +7,7 @@
 
 import { createServer } from 'node:http';
 import { RuntimeError } from './runtime.js';
+import { MeetingError } from './meetings.js';
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 const hostOf = (value) => {
@@ -92,6 +93,13 @@ export function createRuntimeServer(runtime, settings) {
   route('GET', '/repos', () => runtime.repos());
   route('PUT', '/repos/([^/]+)', (m, body) => runtime.setRepo(enc(m[1]), body));
   route('DELETE', '/repos/([^/]+)', (m) => runtime.removeRepo(enc(m[1])));
+
+  // Meetings (meetings.js): figbots talking in turns, with you able to join.
+  route('GET', '/meetings', () => runtime.meetings());
+  route('POST', '/meetings', (m, body) => runtime.createMeeting(body));
+  route('GET', '/meetings/([^/]+)', (m) => runtime.meeting(enc(m[1])));
+  route('POST', '/meetings/([^/]+)/speech', (m, body) => runtime.speakInMeetingAsHuman(enc(m[1]), body.text));
+  route('POST', '/meetings/([^/]+)/close', (m) => runtime.closeMeeting(enc(m[1])));
 
   const send = (res, status, body, headers = {}) => {
     res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers });
@@ -196,7 +204,7 @@ export function createRuntimeServer(runtime, settings) {
         return send(res, req.method === 'POST' && /\/(agents|routines|apps|push)$/.test(url.pathname) ? 201 : 200, result ?? {}, cors);
       } catch (err) {
         if (err instanceof SyntaxError) return send(res, 400, { detail: 'That isn’t JSON.' }, cors);
-        if (err instanceof RuntimeError) return send(res, err.status, { detail: err.message }, cors);
+        if (err instanceof RuntimeError || err instanceof MeetingError) return send(res, err.status, { detail: err.message }, cors);
         console.error(err);
         return send(res, 500, { detail: 'Something went wrong in the runtime.' }, cors);
       }

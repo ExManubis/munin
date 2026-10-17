@@ -75,7 +75,7 @@ const later = (ms) => Date.now() + ms;
 
 function seed(now) {
   const ago = (ms) => now - ms;
-  const s = { version: 1, seq: 0, agents: {}, items: {}, script: {}, pip: { riddle: null } };
+  const s = { version: 1, seq: 0, agents: {}, items: {}, script: {}, pip: { riddle: null }, meetings: {} };
   // Issues the cast talks about. linkTracker() swaps in the real ids when the tracker has them.
   s.issues = {
     gateway: { id: 'MUN-45', title: 'Retry rate-limited calls with jitter' },
@@ -405,6 +405,26 @@ function need(name) {
   const agent = state.agents[name];
   if (!agent) throw new Error(`There's no agent called ${name}.`);
   return agent;
+}
+
+// Meetings (meetings.js), as the mock keeps them.
+function meetingsInOrder() {
+  return Object.values(state.meetings || {}).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+function needMeeting(id) {
+  const meeting = (state.meetings || {})[id];
+  if (!meeting) throw new Error(`There's no meeting with the id ${id}.`);
+  return meeting;
+}
+function meetingOut(meeting) {
+  return {
+    ...meeting,
+    participants: meeting.participants.map((name) => (name ? { name, colour: state.agents[name]?.colour, role: state.agents[name]?.role, roleName: roleOf(state.agents[name]?.role)?.name } : { name: null, human: true })),
+  };
+}
+function meetingSummary(meeting) {
+  const last = meeting.speeches.at(-1) || null;
+  return { ...meetingOut({ ...meeting, speeches: [] }), last: last ? { from: last.from, pass: last.pass, at: last.at } : null };
 }
 
 function findItem(name, id) {
@@ -1038,6 +1058,47 @@ export const mock = {
   reset() {
     state = seed(Date.now());
     changed();
+  },
+
+  // Meetings (meetings.js): a dummy transcript in the mock, so the screens work without a runtime.
+  async meetings() {
+    return meetingsInOrder().map((m) => meetingSummary(m));
+  },
+
+  async meeting(id) {
+    return meetingOut(needMeeting(id));
+  },
+
+  async createMeeting(fields = {}) {
+    const title = String(fields.title || '').trim();
+    if (!title) throw new Error('A meeting needs a title.');
+    const participants = [...new Set((fields.participants || []).map((p) => (p == null ? null : String(p).toLowerCase())))];
+    if (!participants.length) throw new Error('Invite at least one agent, or join yourself.');
+    for (const p of participants) if (p && !state.agents[p]) throw new Error(`There's no agent called ${p}.`);
+    const meeting = { id: `m${Date.now().toString(36)}`, title, participants, status: 'open', speeches: [], createdAt: new Date().toISOString() };
+    if (String(fields.first || '').trim()) meeting.speeches.push({ id: `${meeting.id}-s1`, from: null, at: new Date().toISOString(), pass: false, text: String(fields.first).trim() });
+    state.meetings ||= {};
+    state.meetings[meeting.id] = meeting;
+    changed();
+    return meetingOut(meeting);
+  },
+
+  async speakInMeeting(id, text) {
+    const meeting = needMeeting(id);
+    const said = String(text || '').trim();
+    if (!said) throw new Error('Say something, or close the meeting.');
+    if (meeting.status !== 'open') throw new Error('That meeting is closed.');
+    meeting.speeches.push({ id: `${meeting.id}-s${meeting.speeches.length + 1}`, from: null, at: new Date().toISOString(), pass: false, text: said });
+    changed();
+    return meetingOut(meeting);
+  },
+
+  async closeMeeting(id) {
+    const meeting = needMeeting(id);
+    if (meeting.status !== 'open') throw new Error('That meeting is already closed.');
+    meeting.status = 'closed';
+    changed();
+    return meetingOut(meeting);
   },
 };
 

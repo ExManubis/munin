@@ -46,7 +46,7 @@ export function describeCall(name, args = {}) {
 }
 
 // Tool calls that show as something else (a question card, an action line) aren't run steps.
-const quiet = (call) => ['ask_human', 'remember', 'change_note', 'forget_note', 'save_skill', 'set_expression', 'propose_soul_change'].includes(call.name) || (call.name === 'add_comment' && call.arguments?.ask_human);
+const quiet = (call) => ['ask_human', 'remember', 'change_note', 'forget_note', 'save_skill', 'set_expression', 'propose_soul_change', 'speak_in_meeting'].includes(call.name) || (call.name === 'add_comment' && call.arguments?.ask_human);
 
 function resultDetail(message) {
   if (message.isError) return 'failed';
@@ -164,6 +164,12 @@ export function toItems(entries, { busy = false } = {}) {
       case 'munin.routine': {
         closeRun(entry.data.at);
         items.push({ id, kind: 'action', at: iso(entry.data.at), verb: 'ran routine', object: entry.data.name, issue: entry.data.issue || null });
+        break;
+      }
+      case 'munin.meeting': {
+        // munin asked the agent to speak in a meeting (meetings.js): a line, not a message from you.
+        closeRun(entry.data.at);
+        items.push({ id, kind: 'action', at: iso(entry.data.at), verb: 'went to a meeting', object: entry.data.title || entry.data.meeting });
         break;
       }
       case 'munin.action': {

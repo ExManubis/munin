@@ -98,6 +98,20 @@ An **item** is one of:
 
 `Issue` is `{id, title}`. Time rules ("TODAY · 09:15") and grouping are the frontend's job; the runtime only sends items.
 
+## Meetings
+
+Figbots talk in turns, with you able to join (meetings.js). A meeting has a title, participants (agent names, plus `null` for you), a transcript of speeches, and a status `open` or `closed`. After it's created, or after anyone speaks, the participants speak in round-robin: munin asks each agent's turn as an input of its own kind, and the agent answers with `speak_in_meeting` (its text; calling it with none passes). Guards end a meeting that goes nowhere: after 12 agent speeches in a row without you it waits for you, and after 2 passes in a row it waits too. You speaking keeps it going.
+
+| Mock | HTTP | Does |
+|---|---|---|
+| `meetings()` | `GET /runtime/api/meetings` | Every meeting, newest first, each without its transcript, with `last`: `{from, pass, at}` of its last speech |
+| `createMeeting(fields)` | `POST /runtime/api/meetings` | `{title, participants, first?}`; `participants` are agent names plus `null` for you; `first` is your opening speech. 422 without a title or without anyone to speak |
+| `meeting(id)` | `GET /runtime/api/meetings/{id}` | One in full, transcript included |
+| `speakInMeeting(id, text)` | `POST /runtime/api/meetings/{id}/speech` | Your speech; the round goes on afterwards. A closed meeting is a 409 |
+| `closeMeeting(id)` | `POST /runtime/api/meetings/{id}/close` | Ends it; turns already asked finish, no new ones start |
+
+A speech is `{id, from, at, pass, text}`, `from` an agent's name or `null` for you, `text` null on a pass. In the mock the transcript is stored but agents don't discuss: it's for the screens.
+
 ## Routines, memory and providers
 
 | Mock | HTTP | Does |
@@ -216,7 +230,7 @@ The runtime (`runtime/src/`) is a thin layer over pi-durable:
 
 ## What this version does
 
-Real: agents and their settings, conversations with runs, questions with options, ask-first approvals with undo, coding tools, a worktree and a branch per issue, the tracker for coders and reviewers, routines on a schedule or a tracker trigger, memory, pause and resume, usage and cost per issue, models, the live stream, and everything surviving a restart.
+Real: agents and their settings, conversations with runs, questions with options, ask-first approvals with undo, coding tools, a worktree and a branch per issue, the tracker for coders and reviewers, routines on a schedule or a tracker trigger, memory, meetings (MUN-43), pause and resume, usage and cost per issue, models, the live stream, and everything surviving a restart.
 
 An agent in the tracker starts work when you tell it to, from its projects in the ABOUT panel, or when a routine says so: "Weekdays 09:00: continue the MUN project" keeps a coder on the pile, and "When an issue moves to In review" puts a reviewer on what lands. It keeps going until `wait_for_work` says there's nothing left.
 
