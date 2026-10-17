@@ -12,7 +12,7 @@ const go = (hash) => () => (location.hash = hash);
 
 function fixedItems() {
   return [
-    { group: 'Actions', label: 'New agent', icon: icon('plus'), key: 'N', run: go('#/agents/new') },
+    { group: 'Actions', label: 'New figbot', icon: icon('plus'), key: 'N', run: go('#/agents/new') },
     { group: 'Actions', label: 'New issue', icon: icon('plus'), key: 'C', run: openNewIssue },
     { group: 'Actions', label: 'New project', icon: icon('plus'), run: openNewProject },
     notificationsSupported && {
@@ -23,7 +23,7 @@ function fixedItems() {
     },
     { group: 'Actions', label: 'Keyboard shortcuts', icon: icon('list'), key: '?', run: openShortcuts },
     ...store.runtimeAgents.map((a) => ({
-      group: 'Agents',
+      group: 'Figbots',
       label: a.name,
       icon: figbot({ colour: a.colour, size: 12, state: 'idle', animate: false }),
       hint: a.waiting ? 'asks you' : a.roleName,

@@ -201,7 +201,7 @@ function errorPage(err) {
     h('header', { class: 'topbar' }, h('div', { class: 'topbar-left' }, h('span', { class: 'title' }, err.status === 404 ? 'Not found' : 'Something went wrong'))),
     h('div', { class: 'empty-state small' },
       h('h2', {}, err.message),
-      h('p', {}, h('a', { class: 'link', href: home() }, hasAgents() ? 'Back to your agents' : 'Back to the inbox'))));
+      h('p', {}, h('a', { class: 'link', href: home() }, hasAgents() ? 'Back to your figbots' : 'Back to the inbox'))));
 }
 
 function setOnline(ok) {
@@ -249,7 +249,7 @@ function renderAppbar(route, waiting) {
   appbar.replaceChildren(...[
     h('a', { class: 'logo', href: home(), 'aria-label': 'munin' },
       h('img', { src: 'munin-lockup-dither-on-dark.svg', alt: 'munin', width: 122, height: 26 })),
-    hasAgents() ? h('nav', { class: 'section-tabs', 'aria-label': 'Parts of munin' }, tab('agents', 'Agents'), tab('tracker', 'Tracker')) : null,
+    hasAgents() ? h('nav', { class: 'section-tabs', 'aria-label': 'Parts of munin' }, tab('agents', 'Figbots'), tab('tracker', 'Tracker')) : null,
     h('div', { class: 'grow' }),
     h('button', { type: 'button', class: 'quick', onclick: openPalette }, icon('search'), h('span', {}, 'Search or jump to…'), kbd(`${MOD}K`)),
     waiting.length
@@ -331,7 +331,7 @@ function renderTabbar(route) {
   const action = (iconName, label, onclick) => h('button', { type: 'button', class: 'tab', onclick }, icon(iconName, { size: 16 }), h('span', {}, label));
   const agentsWaiting = store.waiting.length;
   tabbar.replaceChildren(...[
-    hasAgents() ? tab(sectionHref('agents'), figbot({ size: 18, state: 'idle', animate: false, cls: onAgents ? null : 'dim' }), 'Agents', onAgents, agentsWaiting) : null,
+    hasAgents() ? tab(sectionHref('agents'), figbot({ size: 18, state: 'idle', animate: false, cls: onAgents ? null : 'dim' }), 'Figbots', onAgents, agentsWaiting) : null,
     tab(sectionHref('tracker'), icon('inbox', { size: 16, color: onTracker ? '#EDEDED' : '#7A7A7A' }), 'Tracker', onTracker, store.inbox.length),
     action('plus', 'New', () => (onAgents ? (location.hash = '#/agents/new') : openNewIssue())),
     action('search', 'Search', openPalette),
@@ -358,11 +358,11 @@ document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (dialogOpen()) return;
   if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]')) return;
-  // G then A or T: go to Agents or the Tracker.
-  if (Date.now() - pendingG < 1200 && (hasAgents() ? /^[at]$/i : /^t$/i).test(e.key)) {
+  // G then F (or A, as it was) or T: go to Figbots or the Tracker.
+  if (Date.now() - pendingG < 1200 && (hasAgents() ? /^[aft]$/i : /^t$/i).test(e.key)) {
     e.preventDefault();
     pendingG = 0;
-    location.hash = sectionHref(e.key.toLowerCase() === 'a' ? 'agents' : 'tracker');
+    location.hash = sectionHref(e.key.toLowerCase() === 't' ? 'tracker' : 'agents');
     return;
   }
   if (e.key === 'g' || e.key === 'G') {

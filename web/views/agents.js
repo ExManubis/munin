@@ -54,17 +54,17 @@ export function agentRow(agent, { selected = false } = {}) {
 export function agentsSidebar(route) {
   const agents = sortedAgents();
   return [
-    h('div', { class: 'agents-head' }, h('span', { class: 'label' }, 'Agents'), h('span', { class: 'mono muted' }, agents.length)),
-    h('nav', { class: 'agent-list', 'aria-label': 'Agents' },
+    h('div', { class: 'agents-head' }, h('span', { class: 'label' }, 'Figbots'), h('span', { class: 'mono muted' }, agents.length)),
+    h('nav', { class: 'agent-list', 'aria-label': 'Figbots' },
       agents.map((a) => agentRow(a, { selected: route.params.name === a.name }))),
     h('div', { class: 'grow' }),
     h('a', { class: ['btn', 'new-agent', route.path === '/agents/new' && 'pressed'], href: '#/agents/new' },
-      'New agent', h('span', { class: 'key' }, 'N')),
+      'New figbot', h('span', { class: 'key' }, 'N')),
   ];
 }
 
 export const indexView = {
-  title: () => 'Agents',
+  title: () => 'Figbots',
 
   async load() {
     const agents = sortedAgents();
@@ -76,14 +76,14 @@ export const indexView = {
     const agents = sortedAgents();
     const waiting = waitingItems().length;
     return h('div', { class: 'page agents-index' },
-      topbar([h('span', { class: 'title' }, 'Agents'),
+      topbar([h('span', { class: 'title' }, 'Figbots'),
         waiting ? h('button', { type: 'button', class: 'mono muted', onclick: openWaiting }, `${waiting} waiting`) : null]),
       agents.length
-        ? h('nav', { class: 'agent-list phone-list', 'aria-label': 'Agents' }, agents.map((a) => agentRow(a)))
+        ? h('nav', { class: 'agent-list phone-list', 'aria-label': 'Figbots' }, agents.map((a) => agentRow(a)))
         : h('div', { class: 'empty-state' },
           figbot({ size: 72, state: 'curious' }),
-          h('h2', {}, 'No agents yet'),
+          h('h2', {}, 'No figbots yet'),
           h('p', {}, 'Make one: a coder for your projects, an assistant for your calendar, or someone fun to talk to.'),
-          h('a', { class: 'btn primary', href: '#/agents/new' }, 'New agent', h('span', { class: 'key' }, 'N'))));
+          h('a', { class: 'btn primary', href: '#/agents/new' }, 'New figbot', h('span', { class: 'key' }, 'N'))));
   },
 };

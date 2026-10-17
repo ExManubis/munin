@@ -330,8 +330,8 @@ function askFirst(agent, set) {
 // Each trigger: its label, an example for the When field, and what munin understands there.
 const TRIGGERS = [
   ['schedule', 'On a schedule', 'Weekdays 07:30', "Like 'Weekdays 07:30', 'Mondays at 9', 'Every night 02:00' or 'Every 2 hours, 08–18', in the runtime's time zone."],
-  ['mail', 'When mail arrives', 'When mail from Paul Eriksen arrives', "Like 'When new mail arrives', 'When mail from ann@example.com arrives', 'When mail about invoices arrives' or 'When mail matching is:important arrives'. Needs Gmail on this agent; munin looks about once a minute."],
-  ['calendar', 'From the calendar', 'Before each meeting', "Like 'Before each meeting', '15 minutes before each event' or 'When an invitation arrives'. Needs Google Calendar on this agent; munin looks about once a minute."],
+  ['mail', 'When mail arrives', 'When mail from Paul Eriksen arrives', "Like 'When new mail arrives', 'When mail from ann@example.com arrives', 'When mail about invoices arrives' or 'When mail matching is:important arrives'. Needs Gmail on this figbot; munin looks about once a minute."],
+  ['calendar', 'From the calendar', 'Before each meeting', "Like 'Before each meeting', '15 minutes before each event' or 'When an invitation arrives'. Needs Google Calendar on this figbot; munin looks about once a minute."],
   ['tracker', 'When an issue moves', 'When an issue moves to In review', "Like 'When an issue moves to In review', 'When vera sends my work back' or 'When an issue in MUN is created'."],
 ];
 
@@ -497,7 +497,7 @@ function editSkill(agent, skill, ctx) {
     }
   };
   const remove = async () => {
-    if (!confirm(`Delete the skill ${skill.name}?${skill.sharedWith.length ? ' The agents it\'s shared with lose it too.' : ''}`)) return;
+    if (!confirm(`Delete the skill ${skill.name}?${skill.sharedWith.length ? ' The figbots it\'s shared with lose it too.' : ''}`)) return;
     await runtime.deleteSkill(agent.name, skill.id);
     closeDialog();
     ctx.reload();
@@ -530,7 +530,7 @@ function shareSkill(agent, skill, ctx) {
         for (const box of rows.map((r) => r.querySelector('input'))) Object.assign(box, { disabled: everyone, checked: everyone || chosen.has(box.nextSibling.textContent) });
       },
     }),
-    h('span', {}, 'Every agent, now and later'));
+    h('span', {}, 'Every figbot, now and later'));
   const save = async (e) => {
     e.preventDefault();
     await runtime.updateSkill(agent.name, skill.id, { sharedWith: everyone ? ['*'] : [...chosen] });
@@ -541,7 +541,7 @@ function shareSkill(agent, skill, ctx) {
     h('header', { class: 'sheet-head' }, h('div', { class: 'sheet-title' }, h('span', { class: 'label' }, `Share ${skill.name}`)),
       h('button', { type: 'button', class: 'close link', onclick: closeDialog }, 'Close')),
     h('div', { class: 'sheet-body' },
-      h('p', { class: 'hint' }, `Agents you share it with see it among their skills and read it when it fits. Only ${agent.name} changes it.`),
+      h('p', { class: 'hint' }, `Figbots you share it with see it among their skills and read it when it fits. Only ${agent.name} changes it.`),
       h('div', { class: 'app-picks' }, all, rows)),
     h('footer', { class: 'sheet-foot' }, h('span'), h('button', { type: 'submit', class: 'btn primary' }, 'Save'))), null, 'small');
 }
