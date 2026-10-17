@@ -29,7 +29,7 @@ Everything else (reviewing someone else's work, unassigning yourself when you gi
 - **Project**: a key (like `MUN`, which prefixes issue ids like `MUN-12`), a name and a description agents can read as the brief.
 - **Issue**: title, description (Markdown), status (`todo`, `in_progress`, `in_review`, `done`, `cancelled`), priority (`urgent`, `high`, `normal` or `low`; an agent takes an urgent issue first, wherever it is in the pile, and urgent and high show as a chip), assignee, position in the pile, the issues it waits for, who created it, timestamps.
 - **Event**: one line of an issue's history: created, moved, assigned, renamed, edited, what it waits for. Every comment is an event too, so the event feed has them in order.
-- **Pull request**: a pull request on GitHub that carries an issue's work, with its title and whether it's open, merged or closed. munin asks GitHub every two minutes (`MUNIN_GITHUB_POLL`) about the pull requests of issues that aren't finished. Public repositories need no token; for private ones, add a fine-grained token with read access to pull requests in Settings. It's kept in `github.json` next to the database, readable by the tracker's user only, and never shown again.
+- **Pull request**: a pull request on GitHub that carries an issue's work, with its title and whether it's open, merged or closed. munin asks GitHub every two minutes (`MUNIN_GITHUB_POLL`) about the pull requests of issues that aren't finished. Public repositories need no token; for private ones, add a fine-grained token with read access to pull requests in Settings. It's kept in `github.json` next to the database, readable by the tracker's user only, and never shown again. Once none of an issue's pull requests is open and at least one merged, munin moves the issue to **Done** (as "GitHub"), so what waits for it can start. A pull request closed without merging gets a comment instead. Polling rather than webhooks, since munin sits on your tailnet where GitHub can't reach it.
 - **Comment**: author, whether it's from an agent or you, body, whether it's a question for you, and the options it offers.
 - **Agent**: a name and a hashed token. Tokens are shown once and can be revoked.
 
@@ -70,4 +70,4 @@ From a terminal:
 
 ## Not yet
 
-Moving an issue when its pull requests merge, permission settings, snooze, and multiple human users.
+Permission settings, snooze, and multiple human users.

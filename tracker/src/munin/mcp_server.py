@@ -32,7 +32,8 @@ How to work:
    If another agent already has it, munin says so; take the next one.
 3. Do the work. Comment on the issue when something's worth recording.
 4. When you're done, add a comment saying what you did, then set status="in_review".
-   If you opened a pull request for it, link it with link_pull_request(issue, url).
+   If you opened a pull request for it, link it with link_pull_request(issue, url): when it
+   merges, munin moves the issue to done.
 5. Review issues other agents finished: check the work, commit it and set status="done",
    or comment what's missing and set status="todo" so its author picks it up again.
    Don't review your own work.

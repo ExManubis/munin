@@ -121,3 +121,45 @@ def test_agents_link_their_pull_requests_over_mcp(tmp_path, fake_github):
     finally:
         uv.should_exit = True
         thread.join()
+
+
+def test_an_issue_is_done_once_its_pull_requests_merge(settings, fake_github):
+    pulls, _ = fake_github
+    pulls["a/b#1"] = {"title": "Part one", "state": "open", "merged_at": None}
+    pulls["a/b#2"] = {"title": "Part two", "state": "open", "merged_at": None}
+    pulls["a/b#3"] = {"title": "Abandoned", "state": "open", "merged_at": None}
+    sessions = connect(settings.db_path)
+    github = GitHub(None)
+    with sessions() as s:
+        svc.create_project(s, "MUN", "munin", "")
+        svc.create_issue(s, HUMAN, "MUN", "Two parts")
+        svc.create_issue(s, HUMAN, "MUN", "After it", blocked_by=["MUN-1"])
+        svc.create_issue(s, HUMAN, "MUN", "Given up")
+        for ref, number in [("MUN-1", 1), ("MUN-1", 2), ("MUN-3", 3)]:
+            svc.link_pull_request(s, HUMAN, ref, f"https://github.com/a/b/pull/{number}", github.pull("a/b", number))
+        svc.update_issue(s, HUMAN, "MUN-1", status="in_review")
+
+    # One merged, one still open: not yet.
+    pulls["a/b#1"] = {**pulls["a/b#1"], "state": "closed", "merged_at": "2026-10-17T12:00:00Z"}
+    refresh(github, sessions)
+    with sessions() as s:
+        assert svc.get_issue(s, "MUN-1").status == "in_review"
+
+    # The other closed without merging: a comment, and with one merged the work is in.
+    pulls["a/b#2"] = {**pulls["a/b#2"], "state": "closed"}
+    pulls["a/b#3"] = {**pulls["a/b#3"], "state": "closed"}
+    refresh(github, sessions)
+    with sessions() as s:
+        issue = svc.get_issue(s, "MUN-1")
+        assert issue.status == "done"
+        assert [(c.author, c.body) for c in issue.comments] == [("GitHub", "a/b#2 was closed without merging: https://github.com/a/b/pull/2")]
+        assert svc.describe_event(issue.events[-1]) == "GitHub moved it from in_review to done"
+        assert svc.open_blockers(svc.get_issue(s, "MUN-2")) == [], "what waited for it can start"
+
+        given_up = svc.get_issue(s, "MUN-3")
+        assert given_up.status == "todo", "nothing merged: nothing done"
+        assert len(given_up.comments) == 1
+
+    refresh(github, sessions)
+    with sessions() as s:
+        assert len(svc.get_issue(s, "MUN-3").comments) == 1, "said once"
