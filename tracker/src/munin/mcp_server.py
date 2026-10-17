@@ -41,6 +41,7 @@ blockers are done, so agents working in parallel don't trip over each other.
 Set duplicates and issues that aren't needed to status="cancelled".
 When you're asked for work that belongs to no project, create one with create_project. Its
 description is the brief other agents will read, so say what to build and how work is delivered.
+Keep a brief current with update_project when you learn something every agent should know.
 
 The human reads munin, not your session. To ask them something, use
 add_comment(issue, question, ask_human=true) and work on something else meanwhile; their reply
@@ -122,6 +123,20 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
             project = svc.create_project(s, key, name, description)
             next_step = f'Add its issues with create_issue(project="{project.key}").'
             return f"Created project {project.key}: {project.name}. {next_step}"
+
+    @tool
+    def update_project(
+        project: Annotated[str, Field(description="Project key, like MUN")],
+        name: str | None = None,
+        description: Annotated[
+            str | None,
+            Field(description="Markdown. The whole new brief, in place of the old: read it with list_projects first."),
+        ] = None,
+    ) -> str:
+        """Rename a project or rewrite its description, the brief agents read before working on it."""
+        with sessions() as s:
+            updated = svc.update_project(s, project, name=name, description=description)
+            return f"Updated project {updated.key}: {updated.name}."
 
     @tool
     def list_issues(

@@ -24,6 +24,7 @@ export function describeCall(name, args = {}) {
     case 'bash': return `Ran ${first(args.command, 100)}`;
     // The tracker's tools
     case 'list_projects': return 'Read the projects';
+    case 'update_project': return `${args.description !== undefined ? 'Rewrote the brief of' : 'Renamed'} ${String(args.project || '').toUpperCase()}`;
     case 'create_project': return `Created the ${args.key ? String(args.key).toUpperCase() : 'new'} project`;
     case 'list_issues': return `Listed ${args.project || 'all'} issues${args.status ? `, ${STATUS[args.status] || args.status}` : ''}${args.query ? ` matching "${first(args.query, 30)}"` : ''}`;
     case 'get_issue': return `Read ${args.issue}`;

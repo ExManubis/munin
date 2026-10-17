@@ -48,6 +48,7 @@ def test_tools_and_instructions(server):
     assert names == [
         "list_projects",
         "create_project",
+        "update_project",
         "list_issues",
         "get_issue",
         "create_issue",
@@ -313,7 +314,7 @@ def test_the_event_feed_has_changes_and_comments_in_order(server):
     assert new.splitlines()[-1] == f"Next time: events(after={cursor + 1})"
 
 
-def test_agents_create_projects(server):
+def test_agents_create_projects_and_keep_their_briefs(server):
     url, tokens, _ = server
     results = run(
         url,
@@ -323,11 +324,20 @@ def test_agents_create_projects(server):
         ("list_projects", {}),
         ("create_project", {"key": "WEB", "name": "Again"}),
         ("create_project", {"key": "1x", "name": "Bad key"}),
+        ("update_project", {"project": "web", "description": "The marketing site. Open a pull request per issue."}),
+        ("update_project", {"project": "WEB", "name": "Site"}),
+        ("list_projects", {}),
+        ("update_project", {"project": "NOPE", "name": "x"}),
+        ("update_project", {"project": "WEB", "name": " "}),
     )
     texts = [text for _, text in results]
-    assert [is_error for is_error, _ in results] == [False, False, False, True, True], results
+    errors = [is_error for is_error, _ in results]
+    assert errors == [False, False, False, True, True, False, False, False, True, True], results
     assert texts[0] == 'Created project WEB: Website. Add its issues with create_issue(project="WEB").'
     assert texts[1].startswith("Created WEB-1: A landing page")
     assert "WEB: Website\nThe marketing site. Commit to main." in texts[2]
     assert "already exists" in texts[3]
     assert "starts with a letter" in texts[4]
+    assert texts[5] == "Updated project WEB: Website."
+    assert "WEB: Site\nThe marketing site. Open a pull request per issue." in texts[7], "a new name keeps the brief"
+    assert "needs a name" in texts[9]
