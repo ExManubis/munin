@@ -352,9 +352,40 @@ function properties(issue, project, ctx) {
       issue.assignee ? h('button', { type: 'button', class: 'link unassign', onclick: () => changeIssue(issue, { assignee: '' }, ctx.reload) }, 'Clear') : null,
       h('datalist', { id: 'assignee-options' }, names.map((n) => h('option', { value: n })))),
     prop('Project', h('a', { href: `#/projects/${encodeURIComponent(issue.project)}` }, project ? project.name : issue.project)),
+    pullRequests(issue, ctx),
     prop('Created', h('span', {}, `${displayName(issue.created_by)}, `, time(issue.created_at, { long: true }))),
     prop('Updated', time(issue.updated_at, { long: true })),
     prompts(issue, 'props-prompts'));
+}
+
+// Pull requests on GitHub that carry the issue's work, with what GitHub last said about them.
+function pullRequests(issue, ctx) {
+  const key = `pull:${issue.id}`;
+  const input = bindDraft(h('input', { class: 'input bare', placeholder: 'Paste a pull request URL', autocomplete: 'off', spellcheck: false, 'aria-label': 'Link a pull request' }), key);
+  const link = async () => {
+    if (!input.value.trim()) return;
+    try {
+      await api.linkPullRequest(issue.id, input.value.trim());
+      drafts.delete(key);
+      ctx.reload();
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  };
+  input.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), link()));
+  const unlink = async (pull) => {
+    await api.unlinkPullRequest(issue.id, pull.id);
+    ctx.reload();
+  };
+  const STATE = { open: 'Open', merged: 'Merged', closed: 'Closed' };
+  return h('div', { class: 'prop prop-pulls' },
+    h('span', { class: 'prop-key' }, 'Pull requests'),
+    h('span', { class: 'prop-value pulls' },
+      (issue.pull_requests || []).map((pull) => h('span', { class: 'pull' },
+        h('a', { href: pull.url, target: '_blank', rel: 'noopener noreferrer', title: pull.url }, pull.title || `${pull.repo}#${pull.number}`, ` #${pull.number}`),
+        h('span', { class: ['chip', pull.state === 'merged' && 'prio-urgent', pull.state === 'open' && 'prio-high'], title: pull.state ? `GitHub says it's ${pull.state}` : "GitHub hasn't been asked yet" }, STATE[pull.state] || 'Unchecked'),
+        h('button', { type: 'button', class: 'link', onclick: () => unlink(pull) }, 'Unlink'))),
+      input));
 }
 
 // Shown in the side panel when there's room, and after the thread when there isn't.

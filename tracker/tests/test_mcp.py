@@ -54,6 +54,7 @@ def test_tools_and_instructions(server):
         "get_issue",
         "create_issue",
         "update_issue",
+        "link_pull_request",
         "add_comment",
         "events",
         "wait_for_work",

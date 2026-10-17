@@ -1,5 +1,6 @@
 """The MCP server agents connect to. Tools return short plain text, to keep agents' context small."""
 
+import contextlib
 import functools
 import inspect
 import time
@@ -31,6 +32,7 @@ How to work:
    If another agent already has it, munin says so; take the next one.
 3. Do the work. Comment on the issue when something's worth recording.
 4. When you're done, add a comment saying what you did, then set status="in_review".
+   If you opened a pull request for it, link it with link_pull_request(issue, url).
 5. Review issues other agents finished: check the work, commit it and set status="done",
    or comment what's missing and set status="todo" so its author picks it up again.
    Don't review your own work.
@@ -71,7 +73,7 @@ class QuestionOption(BaseModel):
     detail: str = Field("", description="One line on what picking it means")
 
 
-def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
+def build_mcp(sessions: sessionmaker[Session], github=None) -> MCPServer:
     mcp = MCPServer(name="munin", instructions=INSTRUCTIONS)
 
     def tool(fn: Callable) -> Callable:
@@ -221,6 +223,25 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         with sessions() as s:
             updated = svc.update_issue(s, _actor(ctx), issue, **changes)
             return f"Updated {_issue_line(updated)}"
+
+    @tool
+    def link_pull_request(
+        ctx: Context,
+        issue: IssueRef,
+        url: Annotated[str, Field(description="The pull request on GitHub, like https://github.com/owner/repo/pull/12")],
+    ) -> str:
+        """Link a pull request you opened to the issue it's for, so its state shows on the issue."""
+        from munin.github import GitHubError, parse_pull_url
+
+        found = None
+        if github is not None:
+            with contextlib.suppress(GitHubError):
+                repo, number, _ = parse_pull_url(url)
+                found = github.pull(repo, number)
+        with sessions() as s:
+            pull = svc.link_pull_request(s, _actor(ctx), issue, url, found)
+            state = f" ({pull.state})" if pull.state else ""
+            return f"Linked {pull.repo}#{pull.number}{state}{f': {pull.title}' if pull.title else ''} to {pull.issue.ref}."
 
     @tool
     def add_comment(
@@ -381,6 +402,10 @@ def _issue_text(issue: Issue) -> str:
         lines += ["", "Waits for:"] + [_issue_line(blocker) for blocker in issue.blocked_by]
     if issue.blocks:
         lines += ["", "Blocks:"] + [_issue_line(blocked) for blocked in issue.blocks]
+    if issue.pull_requests:
+        lines += ["", "Pull requests:"] + [
+            f"{pr.url}{f' {pr.title}' if pr.title else ''} ({pr.state or 'not checked yet'})" for pr in issue.pull_requests
+        ]
     if issue.events:
         lines += ["", "History:"]
         lines += [f"{_when(event.created_at)}  {line}" for event, line in svc.history(issue.events)[-12:]]

@@ -12,6 +12,8 @@ from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from munin import agents
+from munin.github import GitHub
+from munin.github import watching as github_watching
 from munin.push import Push
 from munin.push import watching as push_watching
 from munin.api import router
@@ -27,7 +29,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.check()
     sessions = connect(settings.db_path)
-    mcp = build_mcp(sessions)
+    # GitHub (github.py): what linked pull requests are called and whether they've merged.
+    github = GitHub(settings.db_path.parent / "github.json")
+    mcp = build_mcp(sessions, github)
     mcp_app = mcp.streamable_http_app(
         stateless_http=True, json_response=True, host=settings.host, transport_security=_mcp_security(settings)
     )
@@ -39,7 +43,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
-        async with mcp.session_manager.run(), push_watching(pusher, sessions, changes):
+        async with mcp.session_manager.run(), push_watching(pusher, sessions, changes), github_watching(github, sessions):
             yield
 
     app = FastAPI(title="munin", lifespan=lifespan)
@@ -47,6 +51,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.sessions = sessions
     app.state.changes = changes
     app.state.push = pusher
+    app.state.github = github
     if settings.host in LOOPBACK:
         # The API has no login, so refuse other Host names: that stops web pages using DNS rebinding to reach it.
         # Behind the edge, its name is the one other name that reaches munin.

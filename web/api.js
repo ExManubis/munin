@@ -47,6 +47,10 @@ export const api = {
   issue: (id) => get(`/api/issues/${enc(id)}`),
   createIssue: (fields) => request('POST', '/api/issues', fields),
   updateIssue: (id, fields) => request('PATCH', `/api/issues/${enc(id)}`, fields),
+  linkPullRequest: (id, url) => request('POST', `/api/issues/${enc(id)}/pull-requests`, { url }),
+  unlinkPullRequest: (id, pullId) => request('DELETE', `/api/issues/${enc(id)}/pull-requests/${pullId}`),
+  github: () => get('/api/github'),
+  setGithubToken: (token) => request('PUT', '/api/github', { token }),
   comment: (id, body) => request('POST', `/api/issues/${enc(id)}/comments`, { body }),
 
   inbox: () => get('/api/inbox'),

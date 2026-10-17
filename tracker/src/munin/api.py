@@ -100,7 +100,17 @@ class IssueOut(BaseModel):
     blocked_by: list[str]
 
 
+class PullRequestOut(BaseModel):
+    id: int
+    url: str
+    repo: str
+    number: int
+    title: str | None
+    state: str | None  # open, merged, closed, or None until GitHub has been asked
+
+
 class IssueDetailOut(IssueOut):
+    pull_requests: list[PullRequestOut] = []
     waits_for: list[IssueBriefOut]
     blocks: list[IssueBriefOut]
     comments: list[CommentOut]
@@ -167,9 +177,14 @@ def _issue_out(issue: Issue) -> IssueOut:
     )
 
 
+def _pull_out(pull) -> PullRequestOut:
+    return PullRequestOut(id=pull.id, url=pull.url, repo=pull.repo, number=pull.number, title=pull.title, state=pull.state)
+
+
 def _issue_detail_out(issue: Issue) -> IssueDetailOut:
     return IssueDetailOut(
         **_issue_out(issue).model_dump(),
+        pull_requests=[_pull_out(pull) for pull in issue.pull_requests],
         waits_for=[_brief_out(blocker) for blocker in issue.blocked_by],
         blocks=[_brief_out(blocked) for blocked in issue.blocks],
         comments=[_comment_out(c) for c in issue.comments],
@@ -403,6 +418,48 @@ async def stream(request: Request) -> StreamingResponse:
             quiet += 0.25
 
     return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+class PullRequestIn(BaseModel):
+    url: str
+
+
+class GitHubTokenIn(BaseModel):
+    token: str | None = None
+
+
+@router.post("/issues/{ref}/pull-requests", status_code=201)
+def link_pull_request(ref: str, body: PullRequestIn, request: Request, s: DB, actor: Human) -> IssueDetailOut:
+    """Link a pull request on GitHub to the issue, asking GitHub what it's called and whether it's open."""
+    from munin.github import GitHubError, parse_pull_url
+
+    found = None
+    try:
+        repo, number, _ = parse_pull_url(body.url)
+        found = request.app.state.github.pull(repo, number)
+    except GitHubError:
+        pass  # a bad URL is refused below; GitHub being away just leaves it unchecked
+    svc.link_pull_request(s, actor, ref, body.url, found)
+    return _issue_detail_out(svc.get_issue(s, ref))
+
+
+@router.delete("/issues/{ref}/pull-requests/{pull_id}")
+def unlink_pull_request(ref: str, pull_id: int, s: DB, actor: Human) -> IssueDetailOut:
+    svc.unlink_pull_request(s, actor, ref, pull_id)
+    return _issue_detail_out(svc.get_issue(s, ref))
+
+
+@router.get("/github")
+def github_status(request: Request) -> dict:
+    """Whether there's a GitHub token, by its last four characters. It's never sent back."""
+    hint = request.app.state.github.hint
+    return {"token": {"hint": hint} if hint else None}
+
+
+@router.put("/github")
+def github_token(request: Request, body: GitHubTokenIn) -> dict:
+    request.app.state.github.set_token(body.token)
+    return github_status(request)
 
 
 class PushSubscriptionIn(BaseModel):
