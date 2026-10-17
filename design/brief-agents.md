@@ -459,3 +459,7 @@ forge  13:57
 - **A change an agent proposes to its brief or examples** is an approval card, `JUNO WANTS TO CHANGE WHO IT IS`, with what changes as the target (`its brief`, `how it talks`). Its reason is quoted, then the change word by word, under a `BRIEF` or `HOW IT TALKS` label: words taken out are struck through in `#7A7A7A`, and words put in are `#EDEDED` with a `#7A7A7A` underline. It has two rows, `Change it` and `Keep it as it is`, and no "always", because every change goes through you.
 - **HISTORY, under the brief on the profile:** a label with how many versions there are, then the newest four. Each shows when, who (`You`, the agent, munin), the reason in quotes, tertiary `WHAT CHANGED` (the diff from the version before) and `GO BACK`; the current version says `now`.
 
+## Changed while telling agents apart (MUN-40)
+
+- **New agent starts every role but the coder on a maker the team doesn't use yet,** from your favourites, at no more than twice the price. When it does, the model's hint says "On another maker's model than your other agents', so it sounds less like them." followed by the cost. In the line-up, agents on different makers' models were the easiest to tell apart (4 of 5 against 2.3 to 3 for one model).
+
