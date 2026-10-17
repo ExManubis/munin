@@ -247,8 +247,32 @@ function seed(now) {
   s.script.hugin = { paulFirst: now + 45 * 1000 };
   for (const list of Object.values(s.items)) list.sort((a, b) => a.at - b.at);
   s.seq = seq;
+  s.skills = [
+    {
+      id: 's1', owner: 'forge', name: 'run-gateway-tests', sharedWith: [], uses: 6, lastUsed: ago(14 * MIN), createdAt: ago(9 * 24 * HOUR),
+      description: "Run and read the gateway's tests: before sending gateway work to review, or when a gateway test fails.",
+      body: "## When to use\nBefore sending anything under gateway/ to review, and whenever a gateway test fails.\n\n## Steps\n1. Set TELEGRAM_TEST_TOKEN; the Telegram tests skip without it, and skipped looks like passed.\n2. Run `pytest gateway/ -q`.\n3. For a failure, run that one test with `-x -vv` before changing anything.\n\n## Pitfalls\n- The rate-limit tests sleep; don't shorten the sleeps to make them faster.\n\n## How to check\nThe count of passed tests matches the count collected, with none skipped.",
+    },
+    {
+      id: 's2', owner: 'vera', name: 'review-a-change', sharedWith: ['*'], uses: 11, lastUsed: ago(14 * MIN), createdAt: ago(16 * 24 * HOUR),
+      description: 'How to review work sent to review: what to run, what to read, and when to send it back.',
+      body: "## When to use\nWhen an issue moves to In review.\n\n## Steps\n1. Read the issue, then the diff.\n2. Run the tests, and try the change the way the issue describes.\n3. Merge what's good; send back what isn't, saying exactly what's missing and where.\n\n## Pitfalls\n- Passing tests can miss the case the issue is about; check there's a test for it.\n\n## How to check\nYou ran it yourself, and your note says what you ran.",
+    },
+  ];
   return s;
 }
+
+// A skill as the runtime sends it (runtime/src/skills.js has the real one).
+const skillText = (s) => `---\nname: ${s.name}\ndescription: ${s.description}\n---\n\n${s.body}\n`;
+function parseSkill(text) {
+  const m = /^\s*---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/.exec(String(text || ''));
+  if (!m) throw new Error('A skill starts with its name and description between --- lines, like a SKILL.md.');
+  const fields = Object.fromEntries([...m[1].matchAll(/^(\w+):\s*(.*)$/gm)].map(([, k, v]) => [k, v.trim()]));
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(fields.name || '')) throw new Error("A skill's name is lowercase words joined by dashes, like run-gateway-tests.");
+  if (!fields.description) throw new Error('Say in the description what the skill does and when to use it.');
+  return { name: fields.name, description: fields.description, body: m[2].trim() };
+}
+const hasSkill = (agent, s) => s.owner === agent.name || s.sharedWith.includes('*') || s.sharedWith.includes(agent.name);
 
 function runItem(number, issue, at, steps, status, endedAt = null) {
   return { kind: 'run', number, issue, at, startedAt: at, steps, status, endedAt };
@@ -342,6 +366,10 @@ function full(agent) {
     memoryCount: Math.max(agent.memoryCount || 0, agent.memory.length),
     memoryRoom: Object.fromEntries(Object.entries(MEMORY_KINDS).map(([kind, { cap }]) => [kind,
       { used: agent.memory.filter((n) => kindOf(n) === kind).reduce((sum, n) => sum + n.text.length, 0), cap }])),
+    skills: (state.skills || []).filter((s) => hasSkill(agent, s)).toSorted((a, b) => a.name.localeCompare(b.name)).map((s) => ({
+      ...s, text: skillText(s), mine: s.owner === agent.name, sharedWith: [...s.sharedWith],
+      lastUsed: s.lastUsed ? iso(s.lastUsed) : null, stale: Date.now() - (s.lastUsed || s.createdAt) > 30 * 24 * 3600 * 1000,
+    })),
     usage: { ...agent.usage },
     budget: agent.budget,
     worksIn: agent.worksIn,
@@ -778,6 +806,34 @@ export const mock = {
     const agent = need(name);
     agent.routines = agent.routines.filter((r) => r.id !== id);
     changed();
+  },
+
+  async addSkill(name, text) {
+    const agent = need(name);
+    const skill = parseSkill(text);
+    state.skills ||= [];
+    if (state.skills.some((s) => s.owner === name && s.name === skill.name)) throw new Error(`${name} already has a skill called ${skill.name}.`);
+    state.skills.push({ id: `s${Date.now()}`, owner: name, ...skill, sharedWith: [], uses: 0, lastUsed: null, createdAt: Date.now() });
+    act(name, 'saved skill', skill.name);
+    changed();
+    return full(agent);
+  },
+
+  async updateSkill(name, id, { text, sharedWith } = {}) {
+    const agent = need(name);
+    const skill = (state.skills || []).find((s) => s.id === id && s.owner === name);
+    if (!skill) throw new Error(`${name} has no skill ${id}.`);
+    if (text !== undefined) Object.assign(skill, parseSkill(text));
+    if (sharedWith !== undefined) skill.sharedWith = sharedWith.includes('*') ? ['*'] : sharedWith.filter((n) => n !== name);
+    changed();
+    return full(agent);
+  },
+
+  async deleteSkill(name, id) {
+    const agent = need(name);
+    state.skills = (state.skills || []).filter((s) => !(s.id === id && s.owner === name));
+    changed();
+    return full(agent);
   },
 
   async changeNote(name, noteId, { text, kind } = {}) {

@@ -98,7 +98,7 @@ test('a coder works in its own folder, its tool calls make a run, and pushing as
   const { runtime, faux, dir } = await setup();
   const forge = await runtime.createAgent({ name: 'forge', role: 'coder', colour: 'ember', provider: 'scripted', model: 'model' });
   assert.equal(forge.worksIn.folder, join(dir, 'agents', 'forge'));
-  assert.deepEqual(forge.askFirst.filter((r) => r.on).map((r) => r.id), ['push', 'delete']);
+  assert.deepEqual(forge.askFirst.filter((r) => r.on).map((r) => r.id), ['push', 'delete', 'skills']);
 
   faux.setResponses([
     reply(fauxText('On it.'), fauxToolCall('bash', { command: 'echo hello > notes.txt && cat notes.txt' })),
@@ -120,13 +120,18 @@ test('a coder works in its own folder, its tool calls make a run, and pushing as
   assert.equal(agent.state, 'asks');
 
   // Always allow switches the rule off, and can be undone for a moment.
-  faux.setResponses([reply(fauxToolCall('bash', { command: 'echo pushed' })), reply(fauxText('Pushed.'))]);
+  let told = '';
+  faux.setResponses([(context) => {
+    told = JSON.stringify(context.messages.findLast((m) => m.role !== 'system'));
+    return reply(fauxToolCall('bash', { command: 'echo pushed' }));
+  }, reply(fauxText('Pushed.'))]);
   await runtime.decide('forge', approval.id, 'always');
   await runtime.waitForIdle();
   ({ items, agent } = await runtime.conversation('forge'));
   assert.equal(items.find((i) => i.kind === 'approval').status, 'always');
   assert.equal(agent.askFirst.find((r) => r.id === 'push').on, false);
-  assert.match(items.findLast((i) => i.from === 'human').text, /allowed you to push to git .*from now on/);
+  assert.match(told, /allowed you to push to git .*from now on/);
+  assert.equal(items.findLast((i) => i.from === 'human').text, 'Write a note and push it.', "the card shows the decision, not a message from you");
   await runtime.undo('forge', approval.id);
   ({ agent } = await runtime.conversation('forge'));
   assert.equal(agent.askFirst.find((r) => r.id === 'push').on, true);

@@ -186,7 +186,7 @@ test('an agent sets up, changes and removes its own routines when asked, without
   const faux = fauxProvider({ provider: 'scripted', models: [{ id: 'model' }] });
   const runtime = await openRuntime(settings, { models: await buildModels(settings, { extra: [faux.provider], env: {} }), timers: false, now: () => at(16, 12) });
   await runtime.createAgent({ name: 'hugin', role: 'assistant', provider: 'scripted', model: 'model' });
-  assert.deepEqual((await runtime.agent('hugin')).askFirst.map((r) => [r.id, r.on]), [['routines', false]], "every agent has the rule, and it's off");
+  assert.deepEqual((await runtime.agent('hugin')).askFirst.map((r) => [r.id, r.on]), [['routines', false], ['skills', true]], "every agent has the rule, and it's off; saving skills asks");
 
   let heard = '';
   const turn = async (name, args) => {

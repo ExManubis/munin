@@ -134,6 +134,11 @@ export function askFirstFor(abilities) {
 // since agents do it when asked, and on for an agent you'd rather approve each one for.
 export const ROUTINES_RULE = { id: 'routines', label: 'Setting up its own routines', what: 'change its routines', third: 'changes its routines', tools: ['add_routine', 'change_routine', 'remove_routine'], on: false };
 
+// Every agent's rule for saving its own skills (skills.js): on, since you approve each one. It
+// matches no tool, because save_skill asks by itself, with the skill on the card, and saves it
+// when you allow it rather than having the agent send it again.
+export const SKILLS_RULE = { id: 'skills', label: 'Saving its own skills', what: 'save a skill', third: 'saves skills', tools: [], on: true };
+
 export function ruleMatches(rule, name, args) {
   const tools = rule.tools || [rule.tool];
   if (!tools.includes(name)) return false;

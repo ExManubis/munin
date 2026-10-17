@@ -104,6 +104,7 @@ export function capabilities(agent, name, { search = false, apps = { mine: [], o
   if (has('apps')) {
     for (const app of apps.mine.filter((a) => a.answering)) can.push(`${app.name}${app.detail ? ` (${app.detail.replace(/^As /, 'as ')})` : ''}: ${app.does}.`);
   }
+  can.push('Skills: how you do things here, from experience, listed below. Read one with read_skill when it fits, and save one with save_skill when you learn something you\'ll do again.');
   if (has('code')) can.push(`Code: a folder of your own with a shell, files and git${repos.length ? `; munin keeps the code of ${list(repos)}, and taking one of their issues gives you a worktree on its own branch` : ''}.`);
   if (has('tracker')) {
     can.push(tracker?.reachable
@@ -114,7 +115,8 @@ export function capabilities(agent, name, { search = false, apps = { mine: [], o
   // "Gmail: sending mail" → "sending mail (Gmail)"; "Pushing to git" → "pushing to git".
   const asks = (agent.askFirst || []).filter((rule) => rule.on).map((rule) => {
     const [, app, what] = /^([^:]+): (.+)$/.exec(rule.label) || [];
-    return app ? `${what} (${app})` : rule.label[0].toLowerCase() + rule.label.slice(1);
+    const label = rule.label.replace(/\bits own\b/, 'your own'); // "Saving its own skills", from your side
+    return app ? `${what} (${app})` : label[0].toLowerCase() + label.slice(1);
   });
   const could = [];
   for (const [ability, [title, does]] of Object.entries(ABILITIES)) {

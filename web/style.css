@@ -421,7 +421,10 @@ select option { background: var(--ink); color: var(--text); }
 /* Markdown ------------------------------------------------------------------- */
 
 .md { color: var(--text-2); font: 14px/22px var(--sans); }
-.md p, .md ul, .md pre { margin: 0 0 10px; }
+.md p, .md ul, .md ol, .md pre { margin: 0 0 10px; }
+.md .md-h { margin: 14px 0 4px; color: var(--text); font-weight: 600; }
+.md .md-h:first-child { margin-top: 0; }
+.md ol { padding-left: 22px; }
 .md > :last-child { margin-bottom: 0; }
 .md ul { padding-left: 18px; list-style: square; }
 .md li::marker { color: var(--muted); }
@@ -840,6 +843,9 @@ button.option-card:hover { border-color: var(--text); }
 .routine-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; color: var(--text); }
 .routine-when { flex-shrink: 0; }
 .routine-when.routine-note { flex-shrink: 1; max-width: 260px; text-align: right; }
+.routine.stale .routine-name > .mono:first-child { color: var(--text-2); }
+.skill-text { min-height: 320px; font: 13px/20px var(--mono); }
+.skill-card { max-height: 280px; overflow: auto; }
 .profile-section > .btn.small { align-self: flex-start; }
 .notes { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 2px 0 2px 16px; border-left: 1px solid var(--line); list-style: none; }
 .note { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; color: var(--text-2); }
