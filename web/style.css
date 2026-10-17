@@ -723,6 +723,7 @@ a.toast:hover { border-color: var(--muted); color: var(--text); }
 .issue-link:hover { color: var(--text); }
 .thread-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .thread-items { display: flex; flex-direction: column; gap: 14px; max-width: 860px; padding: 8px 28px 28px; }
+.show-earlier { align-self: center; margin-top: 8px; }
 .time-rule { display: flex; align-items: center; gap: 14px; padding-top: 18px; }
 .time-rule::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .msg { display: flex; flex-direction: column; gap: 4px; }

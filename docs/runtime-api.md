@@ -62,7 +62,7 @@ An agent's name is also its name in the tracker. That's how the frontend joins t
 
 | Mock | HTTP | Does |
 |---|---|---|
-| `conversation(name)` | `GET /runtime/api/agents/{name}/conversation` | `{agent, items}`, oldest first. It should page with `?before=`; it doesn't yet |
+| `conversation(name, {before, limit})` | `GET /runtime/api/agents/{name}/conversation?before=&limit=` | `{agent, items, more}`: the newest `limit` items (100 by default, at most 500), oldest first, or those just before the item `before`. `more` says whether there are older ones; an unknown `before` is a 422. The thread shows the newest 100 and "Show earlier" adds 100 more |
 | `send(name, text)` | `POST /runtime/api/agents/{name}/messages` | A message from you. While a question is open, it answers the newest one instead. While the agent works, it steers |
 | `answer(name, id, {option} or {text})` | `POST /runtime/api/agents/{name}/items/{id}/answer` | Answers a question |
 | `decide(name, id, decision)` | `POST /runtime/api/agents/{name}/items/{id}/decide` | `once`, `always` or `deny` on an approval. `always` switches the matching ask-first rule off |
@@ -145,6 +145,7 @@ The runtime (`runtime/src/`) is a thin layer over pi-durable:
 
 - **A conversation** is a pi-durable conversation, one per agent, in the runtime's SQLite file. The agents' settings are one session document next to them (`munin.agents`).
 - **The prompt** (`prompt.js`) opens with who the agent is, as plain facts: what it is, that it works for you, and that it's talking with you right now in munin, which is private to you. It doesn't explain where messages come from, because agents told that started doubting who they were talking to. Then comes how every munin agent talks, written as behaviour (the way Hermes Agent's SOUL.md does it), then the agent's own brief, then which of its abilities munin can't give it yet. What it remembers follows as "What you know about Mikkel". With no name from setup it says "the person you work for", since `MUNIN_USER`'s default, `me`, isn't a name, and the agent asks once. A brief is the agent's character and job and doesn't repeat any of that. When the runtime starts, briefs made from a role's older words get the new ones.
+- **Reading a conversation** goes through the entries the runtime keeps in memory: each read asks pi-durable only for the entries after the last one it has (`minEntryId`), since entries never change once written, and one agent's reads go one at a time. Its items are rebuilt only when something's new.
 - **Budgets.** An agent's budget is dollars per calendar month. The runtime keeps a running total of what its model responses cost this month: it reads the total from the conversation the first time it's needed, then adds each response's cost in a `GenerationTask` `afterResponse` hook. When the total reaches the budget, the agent pauses itself (`pausedFor: "budget"`) and its conversation says "paused at its $10 budget for October". The turn it's in isn't cut off: its next tool calls are blocked, so it answers once more and stops. A bigger budget doesn't resume it by itself, and neither does a new month; `resume` does, once it's under budget.
 - **Messages and runs** come from its entries (`items.js`).
   - `pi.user` and `pi.assistant` text become messages.
@@ -176,6 +177,5 @@ An agent in the tracker starts work when you tell it to, from its projects in th
 Stored but not acted on yet, next roughly in this order:
 
 1. **Apps and the web** as tools, through MCP servers, with ask-first rules for apps like "send mail". Mail and calendar routines start then.
-2. **Faster reads.** Each read goes through an agent's whole conversation; it should keep items and page them.
-3. **Numbered events** on the stream, and replay on reconnect.
-4. **Tighter containers.** A container sees all of munin's clones, so a coder could change another coder's branch there; one clone per agent, or a mount of only its own worktrees' git data, would stop that.
+2. **Numbered events** on the stream, and replay on reconnect.
+3. **Tighter containers.** A container sees all of munin's clones, so a coder could change another coder's branch there; one clone per agent, or a mount of only its own worktrees' git data, would stop that.

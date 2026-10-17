@@ -242,3 +242,36 @@ test('an agent with no budget never pauses itself', async () => {
   assert.equal((await runtime.agent('pip')).paused, false);
   await runtime.close();
 });
+
+test('a conversation reads in pages, newest first, and keeps up with new messages', async () => {
+  const { runtime, faux } = await setup();
+  await runtime.createAgent({ name: 'pip', role: 'companion', provider: 'scripted', model: 'model' });
+  for (let n = 1; n <= 6; n++) {
+    faux.setResponses([reply(fauxText(`Answer ${n}.`))]);
+    await runtime.send('pip', `Question ${n}?`);
+    await runtime.waitForIdle();
+  }
+  const texts = (page) => page.items.map((i) => i.text);
+
+  let page = await runtime.conversation('pip', { limit: 5 });
+  assert.deepEqual(texts(page), ['Answer 4.', 'Question 5?', 'Answer 5.', 'Question 6?', 'Answer 6.']);
+  assert.equal(page.more, true);
+  page = await runtime.conversation('pip', { before: page.items[0].id, limit: 5 });
+  assert.deepEqual(texts(page), ['Question 2?', 'Answer 2.', 'Question 3?', 'Answer 3.', 'Question 4?']);
+  assert.equal(page.more, true);
+  page = await runtime.conversation('pip', { before: page.items[0].id, limit: 5 });
+  assert.deepEqual(texts(page), ['Question 1?', 'Answer 1.']);
+  assert.equal(page.more, false);
+  assert.equal((await runtime.conversation('pip')).items.length, 12, 'a hundred by default');
+  await assert.rejects(runtime.conversation('pip', { before: 'nope' }), /no item nope/);
+
+  faux.setResponses([reply(fauxText('Answer 7.'))]);
+  await runtime.send('pip', 'Question 7?');
+  await runtime.waitForIdle();
+  assert.deepEqual(texts(await runtime.conversation('pip', { limit: 2 })), ['Question 7?', 'Answer 7.'], 'new messages show up');
+
+  await runtime.deleteAgent('pip');
+  await runtime.createAgent({ name: 'pip', role: 'companion', provider: 'scripted', model: 'model' });
+  assert.deepEqual((await runtime.conversation('pip')).items, [], 'a new pip starts a new conversation');
+  await runtime.close();
+});

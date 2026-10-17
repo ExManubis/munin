@@ -95,6 +95,12 @@ test('agents and their conversations survive a restart', async () => {
   assert.equal(body.agent.colour, 'sky');
   assert.equal(body.agent.brief, "You're hugin.");
   assert.deepEqual(body.items.map((i) => i.text?.slice(0, 12)), ['Remember me?', "I'm on munin"]);
+  assert.equal(body.more, false);
+  const newest = (await served.call('GET', '/agents/hugin/conversation?limit=1')).body;
+  assert.deepEqual([newest.items.map((i) => i.text?.slice(0, 12)), newest.more], [["I'm on munin"], true]);
+  const before = (await served.call('GET', `/agents/hugin/conversation?before=${encodeURIComponent(newest.items[0].id)}`)).body;
+  assert.deepEqual([before.items.map((i) => i.text), before.more], [['Remember me?'], false]);
+  assert.equal((await served.call('GET', '/agents/hugin/conversation?before=nope')).status, 422);
   await served.close();
 });
 
