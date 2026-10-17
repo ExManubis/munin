@@ -95,7 +95,7 @@ function seed(now) {
 
   agent({
     name: 'hugin', role: 'assistant', colour: 'sky', provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', createdAt: ago(22 * 24 * HOUR),
-    brief: "You're hugin, Mikkel's assistant. Keep their calendar and inbox in order, and say things once, briefly. Ask before you send mail or accept invites for them. Start weekdays with a briefing; after that, only interrupt for things that can't wait.",
+    brief: "You're hugin, the assistant of the person you work for. Keep their calendar and inbox in order, and say things once, briefly. Ask before you send mail or accept invites for them. Start weekdays with a briefing; after that, only interrupt for things that can't wait.",
     abilities: { apps: true, web: true }, apps: ['Calendar', 'Gmail'],
     askFirst: [
       { id: 'send_mail', label: 'Sending mail', what: 'send mail', third: 'sends mail', on: true },

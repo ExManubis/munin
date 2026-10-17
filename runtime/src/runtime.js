@@ -15,7 +15,7 @@ import {
 import { createBashTool, createCodingTools } from '@earendil-works/pi-durable/tools';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
-import { ROLES, roleName, askFirstFor, ruleMatches } from './roles.js';
+import { ROLES, roleName, askFirstFor, ruleMatches, upgradeBrief } from './roles.js';
 import { toItems, summarize } from './items.js';
 import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
@@ -87,6 +87,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   // 'started', 'done', or null when it hasn't asked.
   const prefs = { name: null, favourites: null, setup: null };
   const who = () => prefs.name || settings.user;
+  // What agents call you: your name, or "the person you work for" while munin has none.
+  // MUNIN_USER's default, "me", is no name: "me answered your question" reads as nonsense.
+  const named = () => prefs.name || (settings.user && settings.user !== 'me' ? settings.user : null);
+  const them = ({ start = false } = {}) => named() || (start ? 'The person you work for' : 'the person you work for');
   const favourites = () => prefs.favourites || FAVOURITES;
 
   const agentFor = (conversationId) => [...agents.values()].find((a) => a.conversationId === conversationId) || null;
@@ -106,7 +110,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       const agent = agentFor(api.conversationId);
       const options = (args.options || []).map((o) => ({ label: o.label, detail: o.detail || '' }));
       await write(agent, 'munin.question', { text: args.question, options });
-      return { output: [{ type: 'text', text: `Asked ${who()}. Their answer comes as a message.` }] };
+      return { output: [{ type: 'text', text: `Asked ${them()}. Their answer comes as a message.` }] };
     },
   });
   const remember = defineTool({
@@ -128,10 +132,18 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       section('munin', (input) => {
         const agent = agentFor(input.conversationId);
         if (!agent) return undefined;
-        const user = who();
-        return `You are ${agent.name}, one of ${user}'s agents in munin, an app where ${user} works with agents. `
-          + `${user} talks to you here, and may be away for hours. Keep replies short. When you need a decision, use ask_human; `
-          + `when you learn something about ${user} worth keeping, use remember.`;
+        const name = named();
+        const user = name || 'the person you work for';
+        return [
+          name
+            ? `You are ${agent.name}, one of ${name}'s agents in munin, an app where ${name} works with agents.`
+            : `You are ${agent.name}, an agent in munin, an app where the person you work for works with agents.`,
+          name
+            ? `The messages in this conversation are from ${name}, the person you work for: talk to ${name} as "you", and read "I", "me" and "my" in them as ${name}.`
+            : `The messages in this conversation are from the person you work for: talk to them as "you", and read "I", "me" and "my" in them as that person. You don't know their name yet; when it would help, ask what to call them.`,
+          `Messages munin writes for you, like a routine starting or an answer to your question, say so.`,
+          `${name || 'They'} may be away for hours. Keep replies short. When you need a decision, use ask_human; when you learn something about ${user} worth keeping, use remember.`,
+        ].join(' ');
       }, { tag: false }),
       section('memory', (input) => {
         const notes = agentFor(input.conversationId)?.memory || [];
@@ -151,7 +163,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         }
         const target = call.name === 'bash' ? String(call.arguments.command || '').slice(0, 160) : String(call.arguments.path || call.name);
         await write(agent, 'munin.approval', { rule: rule.id, label: rule.label, what: rule.what, third: rule.third, target });
-        return { block: `${who()} hasn't allowed this yet (${rule.label.toLowerCase()}). They've been asked; their answer comes as a message. Don't try again before it does.` };
+        return { block: `${them({ start: true })} hasn't allowed this yet (${rule.label.toLowerCase()}). They've been asked; their answer comes as a message. Don't try again before it does.` };
       },
     })],
   });
@@ -265,7 +277,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   }, ctx);
 
   const saved = await harness.snapshot(AgentsDoc, ctx);
-  for (const agent of Object.values(saved?.agents || {})) agents.set(agent.name, structuredClone(agent));
+  for (const agent of Object.values(saved?.agents || {})) agents.set(agent.name, { ...structuredClone(agent), brief: upgradeBrief(agent.brief) });
   Object.assign(repos, structuredClone(saved?.repos || {}));
   Object.assign(prefs, structuredClone(saved?.prefs || {}));
   workspace = createWorkspace({ dir: reposDir, repos });
@@ -454,7 +466,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       if (question.status !== 'open') throw conflict('That question is already answered.');
       const answer = option || String(text || '').trim();
       if (!answer) throw invalid('Pick an option or write an answer.');
-      await input(agent, `${who()} answered your question "${question.text}": ${answer}`,
+      await input(agent, `${them({ start: true })} answered your question "${question.text}": ${answer}`,
         { kind: 'munin.answer', data: { question: id, option: option || null, text: option ? null : answer, at: now() } });
     },
 
@@ -466,13 +478,13 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       await write(agent, 'munin.decision', { approval: id, decision });
       const rule = agent.askFirst.find((r) => r.id === approval.permission);
       if (decision === 'deny') {
-        await input(agent, `${who()} doesn't want you to ${approval.what} (${approval.target}). Don't; find another way or ask.`);
+        await input(agent, `${them({ start: true })} doesn't want you to ${approval.what} (${approval.target}). Don't; find another way or ask.`);
         return;
       }
       if (decision === 'always' && rule) rule.on = false;
       else agent.allowances.push(approval.permission);
       await saveAgents();
-      await input(agent, `${who()} allowed you to ${approval.what} (${approval.target})${decision === 'always' ? ', from now on without asking' : ', this once'}. Go ahead.`);
+      await input(agent, `${them({ start: true })} allowed you to ${approval.what} (${approval.target})${decision === 'always' ? ', from now on without asking' : ', this once'}. Go ahead.`);
     },
 
     async undo(name, id) {
