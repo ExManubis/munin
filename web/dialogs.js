@@ -258,7 +258,7 @@ export function openNewProject() {
 // Keyboard shortcuts ------------------------------------------------------------------
 
 const SHORTCUTS = [
-  ['Anywhere', [[[`${MOD.trim()} K`], 'Search or jump to anything'], [['G', 'F'], 'Go to Figbots'], [['G', 'T'], 'Go to the Tracker'], [['?'], 'This list']]],
+  ['Anywhere', [[[`${MOD.trim()} K`], 'Search or jump to anything'], [['G', 'F'], 'Go to Figbots'], [['G', 'M'], 'Go to Meetings'], [['G', 'T'], 'Go to the Tracker'], [['?'], 'This list']]],
   ['Figbots', [[['N'], 'New figbot'], [['1', '…', '9'], "Pick an option on the figbot's question"], [['P'], 'Profile'], [['R'], 'View the run'], [['S'], 'Stop the run']]],
   ['Tracker', [[['C'], 'New issue']]],
   ['Inbox', [[['J', 'K'], 'Next and previous question'], [['↵'], 'Open the issue'], [['R'], 'Write an answer']]],

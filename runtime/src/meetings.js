@@ -129,6 +129,7 @@ export function meetingOut(meeting, agentFor) {
     // talking: figbots are taking turns; settled: a round went by with nothing new; bounded: it
     // reached its rounds or speeches. The last two wait for you.
     state: meeting.status === 'closed' ? 'closed' : meeting.talk || meeting.asked ? 'talking' : meeting.waiting || 'settled',
+    speaking: meeting.status === 'open' ? meeting.asked?.agent || null : null, // whose turn it is now
     // A figbot called you in with @you, until you speak: { from, text, at }.
     needsYou: meeting.needsYou ? { ...meeting.needsYou, at: new Date(meeting.needsYou.at).toISOString() } : null,
     participants,
@@ -142,7 +143,7 @@ export function meetingSummary(meeting, agentFor) {
   const last = meeting.speeches.at(-1) || null;
   return {
     ...meetingOut({ ...meeting, speeches: [] }, agentFor),
-    last: last ? { from: last.from, pass: last.pass, at: new Date(last.at).toISOString() } : null,
+    last: last ? { from: last.from, pass: last.pass, text: last.text ? last.text.slice(0, 140) : null, at: new Date(last.at).toISOString() } : null,
   };
 }
 
