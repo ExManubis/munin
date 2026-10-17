@@ -11,28 +11,32 @@ import { roleOf } from './roles.js';
 
 const KEY = 'munin:mock-runtime:v2';
 
-// What runtime.models() gives: each provider and the models it offers, with a rough cost
-// per day of steady use.
-const MODELS = [
-  {
-    id: 'openrouter',
-    name: 'OpenRouter',
-    models: [
-      { id: 'anthropic/claude-haiku-5.5', name: 'Claude Haiku 5.5', day: 0.1 },
-      { id: 'anthropic/claude-sonnet-5.5', name: 'Claude Sonnet 5.5', day: 0.6 },
-      { id: 'anthropic/claude-opus-5.5', name: 'Claude Opus 5.5', day: 2 },
-      { id: '~google/gemini-flash-latest', name: 'Gemini Flash', day: 0.15 },
-    ],
-  },
-  {
-    id: 'ollama',
-    name: 'Ollama, on the server',
-    models: [
-      { id: 'llama3.3', name: 'llama3.3', day: 0 },
-      { id: 'qwen3-coder', name: 'qwen3-coder', day: 0 },
-    ],
-  },
-];
+// Some of OpenRouter's catalog, as the runtime describes it: dollars per million tokens in and
+// out, and a rough cost per day of steady use (two million tokens in, a hundred thousand out).
+const OPENROUTER = [
+  ['anthropic/claude-haiku-5.5', 'Claude Haiku 5.5', 'Anthropic', 0.1, 0.5],
+  ['anthropic/claude-sonnet-5.5', 'Claude Sonnet 5.5', 'Anthropic', 2, 10],
+  ['anthropic/claude-opus-5.5', 'Claude Opus 5.5', 'Anthropic', 4, 20],
+  ['anthropic/claude-opus-5', 'Claude Opus 5', 'Anthropic', 5, 25],
+  ['deepseek/deepseek-v4-flash', 'DeepSeek V4 Flash 0423', 'DeepSeek', 0.091, 0.182],
+  ['deepseek/deepseek-v4-pro', 'DeepSeek V4 Pro 0423', 'DeepSeek', 0.392, 0.784],
+  ['z-ai/glm-5.3-flash', 'GLM 5.3 Flash', 'Z.ai', 0.15, 0.5],
+  ['z-ai/glm-5.3-flashx', 'GLM 5.3 FlashX', 'Z.ai', 0.37, 1.25],
+  ['z-ai/glm-5.3', 'GLM 5.3', 'Z.ai', 0.11, 6],
+  ['meta/muse-wonder', 'Muse Wonder', 'Meta', 4, 20],
+  ['meta/muse-spark-1.3', 'Muse Spark 1.3', 'Meta', 1.25, 4.25],
+  ['google/gemini-4-argon', 'Gemini 4 Argon', 'Google', 2, 10],
+  ['~google/gemini-flash-latest', 'Gemini Flash Latest', 'Google', 0.75, 3.75],
+  ['~moonshotai/kimi-latest', 'Kimi Latest', 'MoonshotAI', 0.4, 14],
+  ['~x-ai/grok-latest', 'Grok Latest', 'xAI', 2, 6],
+].map(([id, name, maker, input, output]) => ({ id, name, maker, input, output, day: Math.round((input * 2 + output * 0.1) * 100) / 100 }));
+const known = (id) => OPENROUTER.find((m) => m.id === id);
+const FAVOURITES = ['anthropic/claude-haiku-5.5', 'anthropic/claude-opus-5.5'];
+const RECOMMENDED = {
+  cheap: ['anthropic/claude-haiku-5.5', 'deepseek/deepseek-v4-flash', 'z-ai/glm-5.3-flash'],
+  frontier: ['anthropic/claude-opus-5.5', 'meta/muse-wonder', 'google/gemini-4-argon'],
+};
+const OLLAMA = ['llama3.3', 'qwen3-coder'].map((id) => ({ id, name: id, maker: '', input: 0, output: 0, day: 0 }));
 
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
@@ -91,7 +95,7 @@ function seed(now) {
 
   agent({
     name: 'hugin', role: 'assistant', colour: 'sky', provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', createdAt: ago(22 * 24 * HOUR),
-    brief: "You're hugin, Mikkel's assistant. Keep his calendar and inbox in order, and say things once, briefly. Ask before you send mail or accept invites for him. Start weekdays with a briefing; after that, only interrupt for things that can't wait.",
+    brief: "You're hugin, Mikkel's assistant. Keep their calendar and inbox in order, and say things once, briefly. Ask before you send mail or accept invites for them. Start weekdays with a briefing; after that, only interrupt for things that can't wait.",
     abilities: { apps: true, web: true }, apps: ['Calendar', 'Gmail'],
     askFirst: [
       { id: 'send_mail', label: 'Sending mail', what: 'send mail', third: 'sends mail', on: true },
@@ -219,7 +223,7 @@ function seed(now) {
 
   agent({
     name: 'pip', role: 'companion', colour: 'straw', provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', createdAt: ago(5 * 24 * HOUR),
-    brief: "You're pip. You're curious and cheerful, and you like riddles, word games and odd facts. Keep replies short. When Mikkel seems busy, let him be.",
+    brief: "You're pip. You're curious and cheerful, and you like riddles, word games and odd facts. Keep replies short. When Mikkel seems busy, let them be.",
     abilities: {}, usage: { today: 0, week: 0.04, month: 0.09, tokens: 0 }, memoryCount: 1,
     memory: [{ id: 'm1', text: 'Got the echo riddle right away.' }],
   });
@@ -560,7 +564,15 @@ export const mock = {
   kind: 'mock',
 
   async me() {
-    return { kind: 'mock', version: 'dummy', providers: MODELS.map((p) => ({ id: p.id, name: p.name, connected: true })) };
+    const providers = (await mock.providers()).map(({ id, name, connected }) => ({ id, name, connected }));
+    return { kind: 'mock', version: 'dummy', providers, sandbox: null, name: state.name || 'me', setup: state.setup || (agentsInOrder().length ? 'done' : null) };
+  },
+
+  async updateMe(patch = {}) {
+    if ('name' in patch) state.name = String(patch.name ?? '').trim().replace(/\s+/g, ' ') || null;
+    if ('setup' in patch) state.setup = patch.setup;
+    changed();
+    return mock.me();
   },
 
   async agents() {
@@ -776,7 +788,35 @@ export const mock = {
   },
 
   async models() {
-    return MODELS;
+    const favourites = state.favourites || FAVOURITES;
+    const inUse = agentsInOrder().filter((a) => a.provider === 'openrouter').map((a) => a.model);
+    const key = (await mock.providers())[0].connected;
+    return [
+      ...(key ? [{
+        id: 'openrouter', name: 'OpenRouter',
+        models: [...new Set([...favourites, ...inUse])].map(known).filter(Boolean).map((m) => ({ ...m, favourite: favourites.includes(m.id) })),
+      }] : []),
+      { id: 'ollama', name: 'Ollama, on the server', models: OLLAMA },
+      { id: 'standin', name: 'Stand-in, no model', models: [{ id: 'stand-in', name: 'Stand-in', maker: '', input: 0, output: 0, day: 0 }] },
+    ];
+  },
+
+  async recommendedModels() {
+    return Object.fromEntries(Object.entries(RECOMMENDED).map(([tier, ids]) => [tier, ids.map(known)]));
+  },
+
+  async searchModels(q) {
+    const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+    const found = words.length ? OPENROUTER.filter((m) => words.every((w) => `${m.id} ${m.maker}: ${m.name}`.toLowerCase().includes(w))) : [];
+    return { total: found.length, models: found.slice(0, 20) };
+  },
+
+  async setFavourites(ids) {
+    const unknown = ids.find((id) => !known(id));
+    if (unknown) throw new Error(`OpenRouter has no model called ${unknown}.`);
+    state.favourites = [...new Set(ids)];
+    changed();
+    return mock.models();
   },
 
   // Where each project's code is. The mock only keeps what you say.

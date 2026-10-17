@@ -82,9 +82,9 @@ npm install
 npm start                               # http://127.0.0.1:7779/runtime/api
 ```
 
-Reload munin and the Agents tab uses it instead of the mock: the frontend looks for the runtime on port 7779 of the same host, or at its own address behind the edge. Make an agent with N and talk to it.
+Reload munin and the Agents tab uses it instead of the mock: the frontend looks for the runtime on port 7779 of the same host, or at its own address behind the edge. The first time, setup walks you through it: what agents should call you, an OpenRouter key and the models you favour, your first agent, and a token for outside agents. After that, make an agent with N and talk to it.
 
-Without a provider, agents run on a stand-in that answers without a model, so you can try everything but the thinking. Paste an OpenRouter key in Settings (or give the runtime `OPENROUTER_API_KEY`) for OpenRouter's models, or `MUNIN_OLLAMA_URL` (like `http://127.0.0.1:11434`) for an Ollama server's, then pick a model on the agent's profile.
+Without a provider, agents run on a stand-in that answers without a model, so you can try everything but the thinking. Paste an OpenRouter key in setup or Settings (or give the runtime `OPENROUTER_API_KEY`) for OpenRouter's models, or `MUNIN_OLLAMA_URL` (like `http://127.0.0.1:11434`) for an Ollama server's, then pick a model on the agent's profile: your favourites are listed, and the rest of OpenRouter is a search away.
 
 Coders get a folder of their own under `~/.munin/agents/<name>`, with a shell and file tools. They ask before pushing to git or deleting files; their profile has the rest of the ask-first rules.
 
@@ -96,7 +96,7 @@ Routines, on an agent's profile, start it by themselves: on a schedule ("Weekday
 
 Where coders run: by default on this machine, as the user running the runtime. Their shells don't get the runtime's environment (just `PATH`, `HOME`, locale and the like, plus any variables you list in `MUNIN_AGENT_ENV`, such as `GH_TOKEN` for pushing), but they can read your files, so treat them as you'd treat Claude Code in your own terminal. On a server, start the runtime with `MUNIN_AGENT_SANDBOX=docker` and each coder gets a container of its own, through [pi-env](https://www.npmjs.com/package/@earendil-works/pi-env): its shell and file tools see its own folder and munin's clones, and not munin's databases, keys or anything on the server's 127.0.0.1. `MUNIN_AGENT_IMAGE` picks the image (`buildpack-deps:bookworm-scm`, with git, by default; use one with your project's tools) and `MUNIN_AGENT_NETWORK` its Docker network (`none` for no network at all).
 
-Settings come from environment variables: `MUNIN_RUNTIME_DB`, `MUNIN_RUNTIME_HOST`, `MUNIN_RUNTIME_PORT`, `MUNIN_AGENTS_DIR`, `MUNIN_REPOS_DIR` (munin's clones, `~/.munin/repos` by default), `MUNIN_OLLAMA_URL`, `MUNIN_USER` (your name, as agents call you) and the `MUNIN_AGENT_*` ones above. Like the tracker, it has no login: it listens on 127.0.0.1 and only lets in pages from this machine.
+Settings come from environment variables: `MUNIN_RUNTIME_DB`, `MUNIN_RUNTIME_HOST`, `MUNIN_RUNTIME_PORT`, `MUNIN_AGENTS_DIR`, `MUNIN_REPOS_DIR` (munin's clones, `~/.munin/repos` by default), `MUNIN_OLLAMA_URL`, `MUNIN_USER` (your name, as agents call you, until setup asks) and the `MUNIN_AGENT_*` ones above. Like the tracker, it has no login: it listens on 127.0.0.1 and only lets in pages from this machine.
 
 `npm test` runs its tests.
 

@@ -55,7 +55,8 @@ The web UI updates live as agents work.
 - **Projects**: the brief agents read, then issues grouped by status with the Todo pile in order (reorder it by dragging), or as a board. "Put an agent on it" has the commands to start one.
 - **Issue**: title, description, status, assignee, what it waits for and blocks, and one timeline of comments and history. An issue whose agent has gone quiet can be released.
 - **Agents**: tokens (created once, revocable), and what each agent is working on.
-- **Everywhere**: Ctrl/Cmd+K to jump to anything, `?` for shortcuts, the number of questions in the tab title, opt-in desktop notifications, and a checklist that walks you through the first setup. It works on a phone and can be installed there.
+- **Everywhere**: Ctrl/Cmd+K to jump to anything, `?` for shortcuts, the number of questions in the tab title, and opt-in desktop notifications. It works on a phone and can be installed there.
+- **Setup**: the first time munin opens, an intro and then four short steps: what agents call you, an OpenRouter key and your favourite models, your first agent, and a token for outside agents over MCP. It ends on your agent, waiting for its first message. Settings opens it again.
 
 From a terminal:
 

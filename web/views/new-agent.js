@@ -9,9 +9,11 @@ import { store } from '../store.js';
 import { h, MOD, onModEnter, toast, topbar } from '../ui.js';
 import { check } from '../cards.js';
 import { figbot, COLOURS } from '../figbot.js';
+import { modelPicker as picker, searchState } from '../model-picker.js';
 
 let form = blank();
 let catalog = []; // runtime.models(), loaded with the screen
+let search = searchState(); // the model picker's search of OpenRouter
 
 function blank() {
   return { role: null, name: '', colour: 'white', provider: 'openrouter', model: null, projects: null, brief: '', briefEdited: false };
@@ -27,6 +29,7 @@ export const view = {
 
   leave() {
     form = blank();
+    search = searchState();
   },
 
   render(_data, ctx) {
@@ -55,7 +58,7 @@ export const view = {
             dataset: { keep: 'new-agent:name' },
             oninput: (e) => {
               form.name = e.target.value;
-              if (form.role && !form.briefEdited) form.brief = roleOf(form.role).brief(form.name.trim() || 'it');
+              if (form.role && !form.briefEdited) form.brief = roleOf(form.role).brief(form.name.trim() || 'it', store.human);
               ctx.rerender();
             },
           }), () => create(ctx))),
@@ -66,7 +69,18 @@ export const view = {
         role?.abilities.tracker && store.projects.length ? projectPicker(name, ctx) : null,
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Model'),
-          modelPicker(ctx),
+          picker({
+            catalog,
+            ...chosen(),
+            state: search,
+            keep: 'new-agent:model',
+            rerender: ctx.rerender,
+            onPick: (provider, model, next) => {
+              if (next) catalog = next;
+              Object.assign(form, { provider, model });
+              ctx.rerender();
+            },
+          }),
           h('p', { class: 'hint' }, role && chosen().model === role.model ? role.hint : costHint(catalog, chosen().provider, chosen().model))),
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Brief'),
@@ -109,7 +123,7 @@ function pickRole(id, ctx) {
   const role = roleOf(id);
   form.model = role.model;
   form.provider = 'openrouter';
-  if (!form.briefEdited) form.brief = role.brief(form.name.trim() || 'it');
+  if (!form.briefEdited) form.brief = role.brief(form.name.trim() || 'it', store.human);
   ctx.rerender();
 }
 
@@ -165,23 +179,6 @@ function projectPicker(name, ctx) {
     })));
 }
 
-function modelPicker(ctx) {
-  const { provider, model } = chosen();
-  const models = catalog.find((p) => p.id === provider)?.models || [];
-  const pick = (options, value, label, onchange) => h('label', { class: 'select-box' },
-    h('select', { 'aria-label': label, onchange: (e) => { onchange(e.target.value); ctx.rerender(); } },
-      options.map(([v, text]) => h('option', { value: v, selected: v === value }, text))));
-  return h('div', { class: 'select-row' },
-    pick(catalog.map((p) => [p.id, p.name]), provider, 'Provider', (id) => {
-      form.provider = id;
-      form.model = catalog.find((p) => p.id === id).models[0]?.id;
-    }),
-    pick(models.map((m) => [m.id, m.name]), model, 'Model', (id) => {
-      form.provider = provider;
-      form.model = id;
-    }));
-}
-
 async function create(ctx) {
   if (!form.role) return toast('Pick a role first.', { error: true });
   try {
@@ -190,7 +187,7 @@ async function create(ctx) {
       role: form.role,
       colour: form.colour,
       ...chosen(),
-      brief: form.brief.trim() || roleOf(form.role).brief(form.name.trim()),
+      brief: form.brief.trim() || roleOf(form.role).brief(form.name.trim(), store.human),
     });
     if (agent.tracker) await joinTracker(agent.name, chosenProjects());
     form = blank();

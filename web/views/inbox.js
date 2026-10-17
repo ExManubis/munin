@@ -1,23 +1,21 @@
 // Inbox: questions agents asked the human, oldest first. A list on the left and the selected
 // question on the right; when the screen is narrow, one question at a time. Below the
-// questions, what happened lately. Before munin is set up, a "Get started" checklist.
+// questions, what happened lately. (Setting munin up is setup.js's, the first time it opens.)
 
 import { api } from '../api.js';
 import { store, remember, displayName } from '../store.js';
 import { markdown } from '../markdown.js';
 import { optionRow } from '../cards.js';
 import { condense, describe, eventIcon } from '../history.js';
-import { openNewProject } from '../dialogs.js';
 import {
   h, kbd, MOD, avatar, agentAvatar, statusIcon, statusLabel, time, topbar, logoMark,
-  bindDraft, drafts, onModEnter, firstLine, toast, copyButton,
+  bindDraft, drafts, onModEnter, firstLine, toast,
 } from '../ui.js';
 
 let showContext = false; // narrow layout: is the issue context expanded?
 const picks = new Map(); // question id → the option picked, before sending
 let baseline = null; // the newest event id seen before this visit; newer ones get a dot
 const SEEN = 'munin:seen-event';
-const ONBOARDING = 'munin:onboarding'; // "active" once the checklist showed, "done" when finished
 
 const go = (hash) => location.replace(hash);
 const itemHash = (item) => (item ? `#/inbox/${item.question.id}` : '#/inbox');
@@ -40,15 +38,9 @@ export const view = {
     baseline = null;
   },
 
-  // An agent connecting isn't announced on the event stream, so check while setup waits for it.
-  poll: (data) => !data.items.length && store.agents.some((a) => !a.revoked) && !store.agents.some((a) => a.last_seen_at),
-
   render(data, ctx) {
     const feed = lately(data.activity);
-    if (!data.items.length) {
-      const steps = gettingStarted(data.activity);
-      return steps ? checklist(steps, feed) : empty(feed);
-    }
+    if (!data.items.length) return empty(feed);
     const index = data.items.findIndex((i) => i.question.id === data.selectedId);
     return h('div', { class: 'inbox-wrap' },
       h('div', { class: 'inbox' }, list(data.items, index, feed), detail(data, index, ctx, lately(data.activity))));
@@ -106,54 +98,6 @@ function lately(activity) {
           time(e.created_at, { cls: 'event-time' }));
       })
       : h('p', { class: 'feed-empty' }, 'Nothing has happened yet.'));
-}
-
-// Get started -------------------------------------------------------------------------------
-
-// The setup steps and whether each is done, or null once munin is set up.
-function gettingStarted(activity) {
-  const project = store.projects.length > 0;
-  const token = store.agents.some((a) => !a.revoked);
-  const connected = store.agents.some((a) => a.last_seen_at);
-  const working = store.projects.some((p) => (p.counts.in_progress || 0) > 0)
-    || store.agents.some((a) => a.working_on.length > 0)
-    || activity.some((e) => e.kind === 'created' && e.actor_kind === 'agent');
-  const state = remember(ONBOARDING);
-  if (project && token && connected && working) {
-    if (state === 'active') remember(ONBOARDING, 'done');
-    return null;
-  }
-  // Show it to new setups, and keep showing it until every step is done.
-  if (state === 'done' || (state !== 'active' && project && connected)) return null;
-  remember(ONBOARDING, 'active');
-  return { project, token, connected, working };
-}
-
-function checklist(steps, feed) {
-  const key = store.projects[0]?.key || 'KEY';
-  const command = `claude mcp add --transport http munin ${store.me.mcp_url} --header "Authorization: Bearer <token>"`;
-  const slash = `/mcp__munin__continue ${key}`;
-  const next = ['project', 'token', 'connected', 'working'].find((s) => !steps[s]);
-  const code = (text) => h('div', { class: 'step-code' }, h('code', {}, text), copyButton(() => text));
-  const step = (name, title, body, action) => h('li', { class: ['step', steps[name] && 'done', name === next && 'next'] },
-    statusIcon(steps[name] ? 'done' : 'todo', true),
-    h('div', { class: 'step-main' }, h('div', { class: 'step-title' }, title), h('div', { class: 'step-body' }, body)),
-    steps[name] ? null : action);
-  const primaryIf = (name) => (name === next ? 'btn primary small' : 'btn small');
-  return h('div', { class: 'page' },
-    topbar([h('span', { class: 'title' }, 'Inbox'), h('span', { class: 'mono muted' }, '0 open')]),
-    h('div', { class: 'getting-started' },
-      h('div', { class: 'label' }, 'Get started'),
-      h('h1', { class: 'h1' }, 'Set up munin'),
-      h('p', { class: 'lead' }, 'Four steps. Each one ticks itself off as you go, and then this becomes your inbox.'),
-      h('ol', { class: 'steps' },
-        step('project', 'Create a project', 'A project holds a pile of issues and a brief that agents read before they start.',
-          h('button', { type: 'button', class: primaryIf('project'), onclick: openNewProject }, 'New project')),
-        step('token', 'Add an agent token', 'Each agent gets its own token, so you can revoke one without touching the others.',
-          h('a', { class: primaryIf('token'), href: '#/settings' }, 'Open Settings')),
-        step('connected', 'Connect it', ['Run this where the agent works, with its token in place of <token>:', code(command)]),
-        step('working', 'Put it to work', ['In Claude Code, run this and the agent takes the top of the pile:', code(slash)])),
-      feed));
 }
 
 function list(items, selected, feed) {

@@ -9,16 +9,25 @@ import { KeyError, checkOpenRouterKey, cleanKey, openKeys } from './keys.js';
 
 export const STANDIN = { provider: 'standin', model: 'stand-in' };
 
-// A short list to pick from; the rest of OpenRouter's catalog is still usable by id.
-const PICKS = {
-  openrouter: [
-    'anthropic/claude-haiku-5.5', 'anthropic/claude-sonnet-5.5', 'anthropic/claude-opus-5.5',
-    '~google/gemini-flash-latest', '~deepseek/deepseek-flash-latest', '~moonshotai/kimi-latest',
-  ],
+// OpenRouter's models agents pick from are your favourites; these until you choose your own.
+// The rest of its catalog is a search away (search below), and usable by id.
+export const FAVOURITES = ['anthropic/claude-haiku-5.5', 'anthropic/claude-opus-5.5'];
+
+// What setup recommends: a few cheap models and a few frontier ones.
+const RECOMMENDED = {
+  cheap: ['anthropic/claude-haiku-5.5', 'deepseek/deepseek-v4-flash', 'z-ai/glm-5.3-flash'],
+  frontier: ['anthropic/claude-opus-5.5', 'meta/muse-wonder', 'google/gemini-4-argon'],
 };
 
 // Rough dollars a day at a steady pace: two million tokens in, a hundred thousand out.
 const perDay = (cost) => (cost ? Math.round((cost.input * 2 + cost.output * 0.1) * 100) / 100 : 0);
+
+// A model as the frontend shows it. OpenRouter names its models "Maker: Name"; prices are
+// dollars per million tokens.
+function described(m) {
+  const [maker, name] = /^([^:]+): (.+)$/.exec(m.name)?.slice(1) || [m.id.split('/')[0].replace(/^~/, ''), m.name];
+  return { id: m.id, name, maker, input: m.cost?.input ?? 0, output: m.cost?.output ?? 0, day: perDay(m.cost) };
+}
 
 function standinReply(context) {
   const last = [...context.messages].reverse().find((m) => m.role === 'user');
@@ -84,20 +93,39 @@ export async function buildModels(settings, { extra = [], env = process.env, che
   const ollama = settings.ollamaUrl ? await ollamaProvider(settings.ollamaUrl) : null;
   if (ollama) models.setProvider(ollama);
   for (const provider of extra) models.setProvider(provider);
+  // OpenRouter's whole catalog, key or not, for recommending and searching.
+  const everything = createModels({});
+  everything.setProvider(openrouterProvider());
+  const known = (id) => everything.getModel('openrouter', id);
 
-  const catalog = () => {
+  const free = (m) => ({ id: m.id, name: m.name || m.id, maker: '', input: 0, output: 0, day: 0 });
+  // OpenRouter's models are your favourites, then any other an agent is on (`inUse`), so an
+  // agent's picker always has its own model in it.
+  const catalog = ({ favourites = FAVOURITES, inUse = [] } = {}) => {
     const out = [];
     if (openrouter) {
+      const ids = [...new Set([...favourites, ...inUse])];
       out.push({
         id: 'openrouter', name: 'OpenRouter',
-        models: PICKS.openrouter.map((id) => models.getModel('openrouter', id)).filter(Boolean)
-          .map((m) => ({ id: m.id, name: m.name.replace(/^[^:]+: /, ''), day: perDay(m.cost) })),
+        models: ids.map((id) => models.getModel('openrouter', id)).filter(Boolean)
+          .map((m) => ({ ...described(m), favourite: favourites.includes(m.id) })),
       });
     }
-    if (ollama) out.push({ id: 'ollama', name: 'Ollama, on the server', models: models.getModels('ollama').map((m) => ({ id: m.id, name: m.id, day: 0 })) });
-    for (const provider of extra) out.push({ id: provider.id, name: provider.name || provider.id, models: models.getModels(provider.id).map((m) => ({ id: m.id, name: m.name || m.id, day: 0 })) });
-    out.push({ id: STANDIN.provider, name: 'Stand-in, no model', models: [{ id: STANDIN.model, name: 'Stand-in', day: 0 }] });
+    if (ollama) out.push({ id: 'ollama', name: 'Ollama, on the server', models: models.getModels('ollama').map((m) => ({ ...free(m), name: m.id })) });
+    for (const provider of extra) out.push({ id: provider.id, name: provider.name || provider.id, models: models.getModels(provider.id).map(free) });
+    out.push({ id: STANDIN.provider, name: 'Stand-in, no model', models: [{ ...free({ id: STANDIN.model, name: 'Stand-in' }) }] });
     return out;
+  };
+
+  const recommended = () => Object.fromEntries(Object.entries(RECOMMENDED).map(([tier, ids]) => [tier, ids.map(known).filter(Boolean).map(described)]));
+
+  // OpenRouter's models whose id or name has every word of `q`, leaving out batch-only ones.
+  const search = (q, limit = 20) => {
+    const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return { total: 0, models: [] };
+    const found = everything.getModels('openrouter')
+      .filter((m) => !m.id.endsWith(':batch') && words.every((w) => `${m.id} ${m.name}`.toLowerCase().includes(w)));
+    return { total: found.length, models: found.slice(0, limit).map(described) };
   };
 
   const keyOf = () => (pasted ? { from: 'settings', hint: pasted.slice(-4) } : env.OPENROUTER_API_KEY?.trim() ? { from: 'environment' } : null);
@@ -135,5 +163,5 @@ export async function buildModels(settings, { extra = [], env = process.env, che
     sync();
   }
 
-  return { models, catalog, providers, resolve, setKey, removeKey };
+  return { models, catalog, recommended, search, known, providers, resolve, setKey, removeKey };
 }

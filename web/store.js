@@ -7,6 +7,8 @@ export const store = {
   agents: [],
   // From the agent runtime: its agents, and what they're waiting on you for.
   runtimeAgents: [],
+  // What agents call you, from setup (runtime.me().name), or null while that's MUNIN_USER's "me".
+  human: null,
   waiting: [],
   // The project the current screen is about; the new-issue dialog starts there.
   projectKey: null,

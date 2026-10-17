@@ -1,6 +1,6 @@
 // Settings, behind your square in the topbar: the models munin's own agents run on, where
 // each project's code lives, the outside agents that connect to the tracker over MCP (a token
-// each), notifications, and, on the mock runtime, a reset for its sample agents.
+// each), notifications, setup once more, and, on the mock runtime, a reset for its sample agents.
 
 import { api } from '../api.js';
 import { runtime } from '../runtime/index.js';
@@ -45,6 +45,13 @@ export const view = {
         table(agents, ctx),
         connect(agents, me, ctx),
         notifications(ctx),
+        h('section', { class: 'section', id: 'setup' },
+          h('div', { class: 'section-head' }, h('h2', {}, 'Setup')),
+          h('div', { class: 'setting' },
+            h('div', { class: 'setting-main' },
+              h('div', {}, 'Go through setup again'),
+              h('div', { class: 'hint' }, 'What agents call you, the model key and your favourite models, a new agent, and outside agents. Nothing you set up is lost.')),
+            h('a', { class: 'btn small', href: '#/setup' }, 'Open setup'))),
         runtime.kind === 'mock' ? dummy(ctx) : null));
   },
 };

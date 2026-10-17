@@ -23,6 +23,7 @@ import { indexView as agentsIndexView, agentsSidebar } from './views/agents.js';
 import { view as conversationView } from './views/conversation.js';
 import { view as profileView } from './views/profile.js';
 import { view as newAgentView } from './views/new-agent.js';
+import { openSetup, setupOpen } from './setup.js';
 
 const ROUTES = [
   [/^\/agents$/, agentsIndexView, () => ({}), 'agents'],
@@ -231,7 +232,7 @@ function renderAppbar(route, waiting) {
     href: sectionHref(section),
     'aria-current': route.section === section ? 'page' : null,
   }, label);
-  appbar.replaceChildren(
+  appbar.replaceChildren(...[
     h('a', { class: 'logo', href: HOME.agents, 'aria-label': 'munin' },
       h('img', { src: 'munin-lockup-dither-on-dark.svg', alt: 'munin', width: 122, height: 26 })),
     h('nav', { class: 'section-tabs', 'aria-label': 'Parts of munin' }, tab('agents', 'Agents'), tab('tracker', 'Tracker')),
@@ -240,8 +241,21 @@ function renderAppbar(route, waiting) {
     waiting.length
       ? h('button', { type: 'button', class: 'chip waiting-chip', onclick: openWaiting, 'aria-haspopup': 'dialog' }, `${waiting.length} waiting on you`)
       : null,
-    h('a', { class: ['me-square', route.section === 'settings' && 'active'], href: '#/settings', title: `${store.me.name} · Settings`, 'aria-label': 'Settings' },
-      (store.me.name.trim()[0] || 'M').toUpperCase()));
+    meSquare(route),
+  ].filter(Boolean)); // replaceChildren would write a null out as "null"
+}
+
+// Your square: what agents call you (from setup), or who's looking when Tailscale says
+// (behind the edge), or else the name your comments get (MUNIN_USER).
+function meSquare(route) {
+  const { you } = store.me;
+  const name = (store.human || you?.name || store.me.name).trim();
+  return h('a', {
+    class: ['me-square', route.section === 'settings' && 'active'],
+    href: '#/settings',
+    title: `${you ? `${you.name} (${you.login})` : name} · Settings`,
+    'aria-label': 'Settings',
+  }, (name[0] || '?').toUpperCase());
 }
 
 function trackerSidebar(route, data) {
@@ -285,6 +299,7 @@ function settingsSidebar() {
       store.projects.length ? jump('code', 'Code') : null,
       jump('outside-agents', 'Outside agents'),
       jump('notifications', 'Notifications'),
+      jump('setup', 'Setup'),
       runtime.kind === 'mock' ? jump('dummy', 'Dummy data') : null),
   ];
 }
@@ -308,7 +323,7 @@ function renderTabbar(route) {
 let pendingG = 0;
 
 document.addEventListener('keydown', (e) => {
-  if (e.defaultPrevented) return;
+  if (e.defaultPrevented || setupOpen()) return;
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault();
     if (dialogOpen('palette')) closeDialog();
@@ -411,7 +426,14 @@ document.addEventListener('visibilitychange', () => !document.hidden && liveRefr
 // Start ------------------------------------------------------------------------
 
 onCreated(() => refresh());
+addEventListener('munin:setup-closed', () => refresh());
 window.addEventListener('hashchange', () => {
+  // #/setup opens setup over wherever you were.
+  if (location.hash === '#/setup') {
+    history.replaceState(null, '', `#${current.path || '/agents'}`);
+    openSetup();
+    return;
+  }
   // Leaving a screen ends its one-off state (like a freshly shown token) even if we come straight back.
   const next = parseRoute();
   if (!next || next.scope !== current.scope) current.view?.leave?.();
@@ -424,7 +446,13 @@ window.addEventListener('hashchange', () => {
   } catch (err) {
     toast(err.message, { error: true });
   }
+  // Setup, the first time munin opens (with its intro), until it's done; or when #/setup asks.
+  const about = await runtime.me().catch(() => null);
+  store.human = about?.name && about.name !== 'me' ? about.name : null;
+  const asked = location.hash === '#/setup';
+  if (asked) history.replaceState(null, '', `#${remember('munin:section-path') || '/agents'}`);
   if (!location.hash) location.replace(`#${parseRoute()?.path || '/agents'}`);
+  if (asked || (about && about.setup !== 'done')) openSetup({ intro: !asked && !about.setup });
   await refresh();
   connect();
   // The dummy's cast talks about issues by title; find them, and its questions, in this tracker.

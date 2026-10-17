@@ -122,7 +122,7 @@ export function createTracker({ registry, agents, agentFor, write, user, onTake,
       async execute(args, api, context) {
         const agent = agentFor(api.conversationId);
         const fail = (text) => ({ output: [{ type: 'text', text }], isError: true });
-        if (!agent?.tracker?.token) return fail(`You aren't connected to munin's tracker. Ask ${user} to turn on the Tracker ability in your profile.`);
+        if (!agent?.tracker?.token) return fail(`You aren't connected to munin's tracker. Ask ${user()} to turn on the Tracker ability in your profile.`);
         const client = mcpClient(urlOf(agent), agent.tracker.token);
         let result;
         try {
@@ -166,13 +166,13 @@ export function createTracker({ registry, agents, agentFor, write, user, onTake,
   const render = (input) => {
     const agent = agentFor(input.conversationId);
     if (!agent) return undefined;
-    if (!agent.tracker?.token) return `You aren't connected to munin's tracker yet, so its tools won't work. If you need them, ask ${user} to turn on the Tracker ability in your profile.`;
-    if (!listed) return `munin's tracker can't be reached right now, so its tools are missing. If you need them, tell ${user}.`;
+    if (!agent.tracker?.token) return `You aren't connected to munin's tracker yet, so its tools won't work. If you need them, ask ${user()} to turn on the Tracker ability in your profile.`;
+    if (!listed) return `munin's tracker can't be reached right now, so its tools are missing. If you need them, tell ${user()}.`;
     const projects = agent.tracker?.projects || [];
     return [
       instructions.trim(),
-      projects.length ? `Your projects: ${projects.join(', ')}. Work on these unless ${user} says otherwise.` : null,
-      `For a question about an issue, ask on the issue with add_comment(ask_human=true) rather than ask_human: ${user} sees it in this conversation and in the tracker's inbox, and the answer reaches you as a message.`,
+      projects.length ? `Your projects: ${projects.join(', ')}. Work on these unless ${user()} says otherwise.` : null,
+      `For a question about an issue, ask on the issue with add_comment(ask_human=true) rather than ask_human: ${user()} sees it in this conversation and in the tracker's inbox, and the answer reaches you as a message.`,
     ].filter(Boolean).join('\n\n');
   };
 

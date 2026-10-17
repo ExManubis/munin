@@ -2,6 +2,8 @@
 
 import asyncio
 from datetime import UTC, datetime
+from email.errors import HeaderParseError
+from email.header import decode_header, make_header
 from importlib.metadata import version
 from typing import Annotated
 
@@ -233,9 +235,30 @@ def me(request: Request) -> dict:
     base = settings.public_url or str(request.base_url).rstrip("/")
     return {
         "name": settings.user,
+        "you": _you(request),
         "mcp_url": f"{base}/mcp",
         "version": version("munin"),
     }
+
+
+def _you(request: Request) -> dict | None:
+    """Who's looking, behind the edge: tailscale serve says, having removed whatever the caller sent, on
+    requests to munin's public name. `name` stays the one your comments get; this is only who's at the screen."""
+    settings = request.app.state.settings
+    if not settings.public_host or (request.url.hostname or "").lower() != settings.public_host:
+        return None
+    login = request.headers.get("tailscale-user-login", "").strip()
+    if not login:
+        return None
+    return {"name": _header_text(request.headers.get("tailscale-user-name", "")) or login.split("@")[0], "login": login}
+
+
+def _header_text(value: str) -> str:
+    """Serve sends a name with letters outside ASCII encoded, like =?utf-8?q?Mikkel_N=C3=B8rgaard?=."""
+    try:
+        return str(make_header(decode_header(value))).strip()
+    except (HeaderParseError, LookupError, UnicodeDecodeError):
+        return value.strip()
 
 
 @router.get("/projects")

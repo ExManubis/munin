@@ -1,5 +1,6 @@
 // The roles a new agent can start from, and helpers for the model catalog the runtime
-// serves (runtime.models()). Shared by the mock runtime and the screens.
+// serves (runtime.models()). Shared by the mock runtime and the screens. A role's brief takes
+// the agent's name and yours (what agents call you), when munin knows it.
 
 export const ROLES = [
   {
@@ -27,7 +28,7 @@ export const ROLES = [
     abilities: { apps: true, web: true },
     model: 'anthropic/claude-haiku-5.5',
     hint: 'An assistant does many small things; a small model keeps it cheap.',
-    brief: (name) => `You're ${name}, Mikkel's assistant. Keep his calendar and inbox in order, and say things once, briefly. Ask before you send mail or accept invites for him.`,
+    brief: (name, you) => `You're ${name}, ${you || 'your human'}'s assistant. Keep their calendar and inbox in order, and say things once, briefly. Ask before you send mail or accept invites for them.`,
   },
   {
     id: 'writer',
@@ -54,7 +55,7 @@ export const ROLES = [
     abilities: {},
     model: 'anthropic/claude-haiku-5.5',
     hint: "A companion doesn't need a big model. About $0.02 a conversation.",
-    brief: (name) => `You're ${name}. You're curious and cheerful, and you like riddles, word games and odd facts. Keep replies short. When Mikkel seems busy, let him be.`,
+    brief: (name, you) => `You're ${name}. You're curious and cheerful, and you like riddles, word games and odd facts. Keep replies short. When ${you || 'your human'} seems busy, let them be.`,
   },
 ];
 
@@ -79,6 +80,13 @@ export function modelIn(catalog, provider, model) {
   if (catalog.find((p) => p.id === provider)?.models.some((m) => m.id === model)) return { provider, model };
   const first = catalog.find((p) => p.models.length);
   return first ? { provider: first.id, model: first.models[0].id } : { provider, model };
+}
+
+// A model's price as "$in / $out", dollars per million tokens; "free" when it costs nothing.
+export function price(model) {
+  if (!model.input && !model.output) return 'free';
+  const usd = (n) => `$${Number.isInteger(n) ? n : n < 0.1 ? n.toFixed(3).replace(/0$/, '') : n.toFixed(2)}`;
+  return `${usd(model.input)} / ${usd(model.output)}`;
 }
 
 export function costHint(catalog, providerId, modelId) {
