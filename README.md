@@ -88,7 +88,7 @@ Without a provider, agents run on a stand-in that answers without a model, so yo
 
 Coders get a folder of their own under `~/.munin/agents/<name>`, with a shell and file tools. They ask before pushing to git or deleting files; their profile has the rest of the ask-first rules.
 
-Tell munin where each project's code is, under Code in Settings: a git URL, or a folder with a clone. munin keeps a clone of its own, and a coder that takes an issue gets a worktree of it on a branch named after the issue (`~/.munin/agents/forge/MUN-46`, on `mun-46-stream-tool-output`), so coders working side by side never share a checkout. Their commits are in their own names. How work gets delivered (push, pull request, merge) is up to the project's brief in the tracker.
+Tell munin where each project's code is, under Code in Settings: a git URL, or a folder with a clone. munin keeps a clone of its own, each coder gets a clone of that in its folder, and a coder that takes an issue gets a worktree on a branch named after the issue (`~/.munin/agents/forge/MUN-46`, on `mun-46-stream-tool-output`), so coders working side by side never share a checkout or each other's branches. Their commits are in their own names. How work gets delivered (push, pull request, merge) is up to the project's brief in the tracker.
 
 Coders and reviewers also work in the tracker, as any MCP client does: munin gets each one a token of its own when you make it, and you pick its projects. Start one with "Work on it" next to a project in its conversation, or just tell it what to do. Its questions about an issue show in the conversation and in the tracker's inbox, and answering in either place answers both.
 

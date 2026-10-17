@@ -7,7 +7,7 @@ your laptop, your phone ──tailnet──▶ tailscale serve (HTTPS, says who 
                                       ├─ /           tracker         127.0.0.1:7777   munin-tracker.service
                                       ├─ /runtime/api agent runtime  127.0.0.1:7779   munin-runtime.service
                                       └─ /mcp        tracker, for outside agents, with their tokens
-munin-runtime ──docker exec──▶ a container per coder: its folder and munin's clones, nothing else
+munin-runtime ──docker exec──▶ a container per coder: its own folder, nothing else
 ```
 
 Both services listen on 127.0.0.1 only, run as the `munin` user, and keep everything in `/var/lib/munin`. People get in through `tailscale serve`, and only the ones in `MUNIN_USERS`.
@@ -51,7 +51,7 @@ It keeps `/etc/munin/environment` and `/etc/munin/secrets` as they are.
 | | |
 |---|---|
 | Settings | `/etc/munin/environment` (both services), `/etc/munin/secrets` (the runtime only, root-only file) |
-| Data | `/var/lib/munin`: `munin.db` (the tracker), `runtime.sqlite` (the agents), `keys.json` (model keys pasted in Settings), `agents/` (their folders and worktrees), `repos/` (munin's clones) |
+| Data | `/var/lib/munin`: `munin.db` (the tracker), `runtime.sqlite` (the agents), `keys.json` (model keys pasted in Settings), `agents/` (their folders, clones and worktrees), `repos/` (munin's clones) |
 | Services | `systemctl status munin-tracker munin-runtime`; logs: `journalctl -u munin-tracker -u munin-runtime -f` |
 | Edge | `tailscale serve status` |
 | Coders' containers | `docker ps --filter label=munin.agent` |
@@ -62,7 +62,7 @@ To back up, copy `/var/lib/munin` with the services stopped, or the two database
 
 - **People:** `tailscale serve` removes any `Tailscale-User-Login` header the caller sent and sets it from who's actually calling, so the tracker and the runtime trust it on requests that came through it. Requests to munin's public name are let in only for the logins in `MUNIN_USERS`; everyone else gets a 403, and so do tagged devices, which carry no identity. Tailscale's ACLs decide who can reach the machine at all. The square at the top right shows who's looking, by the name Tailscale has for them; comments still go out under `MUNIN_USER`.
 - **Agents:** `/mcp` takes an agent token instead, from wherever the agent runs. munin's own coders call it from the runtime, on this machine (`MUNIN_TRACKER_MCP`).
-- **Coders' containers** see their own folder and munin's clones, run as the `munin` user's id, and can't reach this machine's 127.0.0.1, so they can't reach munin's web API, its databases or its keys.
+- **Coders' containers** see their own folder, with their own clones, run as the `munin` user's id, and can't reach this machine's 127.0.0.1, so they can't reach munin's web API, its databases or its keys.
 - **This machine:** anything running on it outside the containers, as root or as `munin`, can still do anything munin can.
 
 ## How this was tested

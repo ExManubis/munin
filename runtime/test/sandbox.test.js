@@ -5,6 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -130,15 +131,23 @@ test('in a container, a coder takes an issue and commits in its worktree', { ski
   await runtime.setRepo('MUN', { source: origin });
   const tracker = await fakeTracker();
   t.after(() => tracker.close());
+  await mkdir(join(settings.agentsDir, 'anvil', '.repos', 'MUN'), { recursive: true }); // another coder's, on this machine
+  // forge's container from before, made when containers mounted munin's clones too: it's made again.
+  const home = createHash('sha256').update(settings.agentsDir).digest('hex').slice(0, 6);
+  execFileSync('docker', ['run', '--detach', '--name', `munin-${home}-forge`, '--label', 'munin.agent=forge',
+    '--volume', `${join(dir, 'repos')}:${join(dir, 'repos')}`, IMAGE, 'sleep', 'infinity'], { stdio: 'ignore' });
   await runtime.createAgent({ name: 'forge', role: 'coder', provider: 'scripted', model: 'model', tracker: { url: tracker.url, token: 'tok-forge' } });
 
   await turn('forge',
     ['update_issue', { issue: 'MUN-5', status: 'in_progress' }],
-    ['bash', { command: 'pwd; git branch --show-current; echo retry > retry.txt; git add retry.txt; git commit -qm "Retry on 429"; git log -1 --format=%an' }],
+    ['bash', { command: `pwd; git branch --show-current; echo retry > retry.txt; git add retry.txt; git commit -qm "Retry on 429"; git log -1 --format=%an; ls ${join(dir, 'repos')} 2>&1 | head -1; ls ${join(settings.agentsDir, 'anvil')} 2>&1 | head -1` }],
     'Committed.');
   const tree = join(settings.agentsDir, 'forge', 'MUN-5');
-  assert.deepEqual(heard[1].text.split('\n'), [tree, 'mun-5-retry-rate-limited-calls', 'forge']);
-  assert.equal(git(join(dir, 'repos', 'MUN'), 'log', '-1', '--format=%s', 'mun-5-retry-rate-limited-calls'), 'Retry on 429', 'the commit is in munin\'s clone');
+  const [pwd, branch, author, repos, anvil] = heard[1].text.split('\n');
+  assert.deepEqual([pwd, branch, author], [tree, 'mun-5-retry-rate-limited-calls', 'forge']);
+  assert.match(repos, /No such file or directory/, "munin's own clones aren't in the container");
+  assert.match(anvil, /No such file or directory/, "nor are other agents' folders");
+  assert.equal(git(join(settings.agentsDir, 'forge', '.repos', 'MUN'), 'log', '-1', '--format=%s', 'mun-5-retry-rate-limited-calls'), 'Retry on 429', "the commit is in forge's own clone");
   const container = execFileSync('docker', ['ps', '--filter', 'label=munin.agent=forge', '--format', '{{.Names}}'], { encoding: 'utf8' }).trim().split('\n').find((n) => n.endsWith('-forge'));
   await runtime.deleteAgent('forge');
   assert.throws(() => execFileSync('docker', ['inspect', container], { stdio: 'ignore' }), 'deleting the agent removes its container');
