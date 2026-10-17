@@ -5,6 +5,7 @@
 import { createModels, createProvider, defaultProviderAuthContext, fauxProvider, fauxAssistantMessage, fauxText } from '@earendil-works/pi-ai';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
+import { withWebSearch } from './web.js';
 import { KeyError, checkOpenRouterKey, cleanKey, openKeys } from './keys.js';
 
 export const STANDIN = { provider: 'standin', model: 'stand-in' };
@@ -70,6 +71,27 @@ async function ollamaProvider(url) {
     auth: { apiKey: { name: 'Ollama', resolve: async () => ({ auth: {} }) } },
     models,
     api: openAICompletionsApi(),
+  });
+}
+
+// The models, with every request to OpenRouter passed through withWebSearch (web.js): an agent's
+// web_search tool becomes OpenRouter's own search, right before the request goes out.
+export function searching(models) {
+  const withSearch = (options) => ({
+    ...options,
+    onPayload: async (payload, model) => {
+      const theirs = await options?.onPayload?.(payload, model);
+      return withWebSearch(theirs ?? payload) ?? theirs;
+    },
+  });
+  return new Proxy(models, {
+    get(target, key) {
+      if (key === 'stream' || key === 'streamSimple') {
+        return (model, context, options) => target[key](model, context, model?.provider === 'openrouter' ? withSearch(options) : options);
+      }
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
   });
 }
 
@@ -163,5 +185,5 @@ export async function buildModels(settings, { extra = [], env = process.env, che
     sync();
   }
 
-  return { models, catalog, recommended, search, known, providers, resolve, setKey, removeKey };
+  return { models: searching(models), catalog, recommended, search, known, providers, resolve, setKey, removeKey };
 }
