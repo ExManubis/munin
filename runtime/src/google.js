@@ -23,6 +23,11 @@ export const SCOPES = {
   gmail: ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.compose'],
   calendar: ['https://www.googleapis.com/auth/calendar.calendarlist.readonly', 'https://www.googleapis.com/auth/calendar.events'],
 };
+// Asked for too, but not needed for the service to work: Gmail's organising tools (labels,
+// archive, read, trash) need gmail.modify, and a sign-in from before it was asked for still has
+// Gmail without them.
+export const MODIFY = 'https://www.googleapis.com/auth/gmail.modify';
+export const EXTRA = { gmail: [MODIFY] };
 const IDENTITY = ['openid', 'email'];
 
 const PENDING_MS = 10 * 60 * 1000; // a sign-in left at Google's page this long is forgotten
@@ -104,6 +109,7 @@ export async function openGoogle({ file, endpoints = ENDPOINTS, fetch = globalTh
     account: saved.account ? {
       email: saved.account.email,
       services: Object.keys(SCOPES).filter((service) => SCOPES[service].every((scope) => saved.account.scopes.includes(scope))),
+      organise: saved.account.scopes.includes(MODIFY), // Gmail's labels, archive, read and trash
       working: !problem,
       problem,
     } : null,
@@ -134,7 +140,7 @@ export async function openGoogle({ file, endpoints = ENDPOINTS, fetch = globalTh
         client_id: saved.client.id,
         redirect_uri: redirect,
         response_type: 'code',
-        scope: [...IDENTITY, ...services.flatMap((service) => SCOPES[service])].join(' '),
+        scope: [...IDENTITY, ...services.flatMap((service) => [...SCOPES[service], ...(EXTRA[service] || [])])].join(' '),
         access_type: 'offline', // a refresh token, so the sign-in lasts
         prompt: 'consent', // and a new one each time, even for an account that said yes before
         include_granted_scopes: 'true',

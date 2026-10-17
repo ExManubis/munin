@@ -94,7 +94,7 @@ Coders and reviewers also work in the tracker, as any MCP client does: munin get
 
 Routines, on an agent's profile, start it by themselves: on a schedule ("Weekdays 09:00", "Every 2 hours, 08–18", in the runtime's time zone) or when something happens in the tracker ("When an issue moves to In review", "When vera sends my work back"). munin shows each one back in its own words, so you can see what it understood. Agents and their conversations live in `~/.munin/runtime.sqlite` and survive a restart.
 
-Gmail and Google Calendar: under Google in Settings, add an OAuth client from your own Google Cloud project (Settings walks you through it) and sign in; then pick Gmail and Google Calendar under Apps on an agent's profile. Reading and drafting go straight through; sending and calendar changes ask you first.
+Gmail and Google Calendar: under Google in Settings, add an OAuth client from your own Google Cloud project (Settings walks you through it) and sign in; then pick Gmail and Google Calendar under Apps on an agent's profile. Reading, drafting and organising (labels, archive, read) go straight through; sending, the bin and calendar changes ask you first. Organising needs `gmail.modify` added to your Google Cloud project's Data Access, then signing in again.
 
 The web: an agent with the Web ability reads pages, and one on an OpenRouter model also searches the web through OpenRouter, billed to your OpenRouter key.
 
