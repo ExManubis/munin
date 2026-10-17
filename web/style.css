@@ -872,6 +872,8 @@ button.option-card:hover { border-color: var(--text); }
 
 .provider-row .label.on { color: var(--text); }
 .key-form { display: flex; flex-direction: column; gap: 8px; padding: 14px 0 16px; border-bottom: 1px solid var(--line); }
+.steps { margin: 8px 0 14px; padding-left: 20px; display: grid; gap: 6px; color: var(--muted); }
+.steps code { word-break: break-all; }
 .key-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; }
 .key-fields .input { flex: 1 1 260px; max-width: 420px; height: 36px; padding: 0 12px; font: 13px/18px var(--mono); }
 .key-form .hint { max-width: 640px; }

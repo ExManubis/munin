@@ -136,8 +136,11 @@ test('an app added in Settings gives the agents that have it its tools', async (
   assert.equal((await stat(join(dir, 'apps.json'))).mode & 0o777, 0o600);
   assert.match(await readFile(join(dir, 'apps.json'), 'utf8'), /cal-secret-1234/);
   runtime = await open(dir, faux);
-  await until(async () => (await runtime.apps())[0]?.connected);
-  assert.deepEqual((await runtime.apps()).map((app) => [app.id, app.connected]), [['calendar', true]]);
+  const ours = async () => (await runtime.apps()).filter((app) => !app.builtin);
+  await until(async () => (await ours())[0]?.connected);
+  assert.deepEqual((await ours()).map((app) => [app.id, app.connected]), [["calendar", true]]);
+  assert.deepEqual((await runtime.apps()).filter((app) => app.builtin).map((app) => [app.id, app.connected, app.detail]),
+    [['gmail', false, 'Sign in with Google in Settings'], ['google-calendar', false, 'Sign in with Google in Settings']], 'Gmail and Calendar come with munin');
 
   // Gone: hugin loses the tools, and hears that apps aren't connected.
   await runtime.removeApp('calendar');

@@ -59,6 +59,28 @@ export function createRuntimeServer(runtime, settings) {
   route('GET', '/models/recommended', () => runtime.recommendedModels());
   route('GET', '/models/search', (m, body, url) => runtime.searchModels(url.searchParams.get('q') || ''));
   route('PUT', '/favourites', (m, body) => runtime.setFavourites(body.models));
+  // Google sign-in (google.js). Google sends the browser back to the runtime's own callback, at
+  // the address the browser reaches it on: the edge's, or localhost on this machine (Google takes
+  // http only for localhost). The page to return to must be munin's own.
+  const callbackFor = (req) => {
+    const host = hostOf(req.headers.host || '');
+    if (edge && host === edge.hostname) return `${edge.origin}/runtime/api/google/callback`;
+    const port = /:(\d+)$/.exec(req.headers.host || '')?.[1];
+    return `http://localhost${port ? `:${port}` : ''}/runtime/api/google/callback`;
+  };
+  const ownPage = (back) => {
+    try {
+      const page = new URL(back);
+      return LOOPBACK.has(page.hostname) || (edge && page.origin === edge.origin) ? page.href : null;
+    } catch {
+      return null;
+    }
+  };
+  route('GET', '/google', (m, body, url, req) => runtime.google(callbackFor(req)));
+  route('PUT', '/google/client', (m, body) => runtime.setGoogleClient(body));
+  route('POST', '/google/signin', (m, body, url, req) => runtime.googleSignIn({ services: body.services, redirect: callbackFor(req), back: ownPage(body.back) }));
+  route('DELETE', '/google', () => runtime.googleSignOut());
+
   route('GET', '/repos', () => runtime.repos());
   route('PUT', '/repos/([^/]+)', (m, body) => runtime.setRepo(enc(m[1]), body));
   route('DELETE', '/repos/([^/]+)', (m) => runtime.removeRepo(enc(m[1])));
@@ -96,6 +118,20 @@ export function createRuntimeServer(runtime, settings) {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, cors);
       return res.end();
+    }
+
+    // Google's redirect back after signing in: back to Settings, saying how it went.
+    if (req.method === 'GET' && url.pathname === '/runtime/api/google/callback') {
+      const done = await runtime.googleFinish(Object.fromEntries(['state', 'code', 'error'].map((key) => [key, url.searchParams.get(key)])));
+      const back = done.back ? new URL(done.back) : null;
+      if (back) {
+        back.searchParams.set('google', done.ok ? 'ok' : 'failed');
+        back.searchParams.set('message', done.message);
+        res.writeHead(302, { Location: back.href, 'Cache-Control': 'no-store' });
+        return res.end();
+      }
+      res.writeHead(done.ok ? 200 : 400, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(`${done.message}\n\nYou can close this tab and go back to munin.\n`);
     }
 
     if (req.method === 'GET' && url.pathname === '/runtime/api/stream') {
@@ -148,7 +184,7 @@ export function createRuntimeServer(runtime, settings) {
           const raw = Buffer.concat(chunks).toString('utf8');
           body = raw ? JSON.parse(raw) : {};
         }
-        const result = await handler(m, body, url);
+        const result = await handler(m, body, url, req);
         return send(res, req.method === 'POST' && /\/(agents|routines|apps)$/.test(url.pathname) ? 201 : 200, result ?? {}, cors);
       } catch (err) {
         if (err instanceof SyntaxError) return send(res, 400, { detail: 'That isn’t JSON.' }, cors);
