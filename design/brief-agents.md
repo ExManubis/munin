@@ -421,5 +421,5 @@ forge  13:57
 - **Big faces (100 px and up) use a 48-dot grid,** finer than the profile's 36, for setup's portraits and its last screen (Mikkel, from the setup preview).
 - **The shading is figment's own again,** after a softer version for a while (Mikkel, comparing the two).
 - **A face blends into a new expression** over 0.35 s, as figment's timeline does, blinking through a change of eye shape.
-- **The open agent's Figbot fills the Agents sidebar's bottom-right corner** at 120 px, cut by the sidebar's edges like the model's own crop.
+- **The agent's Figbot fills the foot of the conversation's ABOUT panel,** as wide as the panel: the panel's left border and a line above it frame it, and the window's right and bottom edges cut it.
 - **Idle, paused and happy faces glance about now and then,** and paused ones move too. Before, only working faces moved.

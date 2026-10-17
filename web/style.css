@@ -702,11 +702,6 @@ a.toast:hover { border-color: var(--muted); color: var(--text); }
 .agent-item-preview.typing { color: var(--text-2); }
 .chip.row-chip { height: 20px; padding: 0 6px; }
 .btn.new-agent { justify-content: space-between; width: 100%; margin-top: 12px; }
-/* The open agent's Figbot fills the sidebar's bottom-right corner, cut by its edges like the model is. */
-.side-foot { display: flex; align-items: flex-end; gap: 12px; margin: 12px -12px -16px 0; }
-.side-foot .btn.new-agent { flex: 1; min-width: 0; margin: 0 0 16px; }
-.side-bot { flex-shrink: 0; line-height: 0; }
-@media (max-height: 560px) { .side-bot { display: none; } .side-foot { margin: 0; } .side-foot .btn.new-agent { margin: 12px 0 0; } }
 .btn.new-agent.pressed { border-color: var(--text); color: var(--text); }
 
 .convo-wrap { height: 100%; container-type: inline-size; }
@@ -783,6 +778,7 @@ button.option-card:hover { border-color: var(--text); }
 .composer-input::placeholder { color: var(--muted); opacity: 1; }
 .composer .hint { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding-top: 8px; }
 .send { display: inline-flex; align-items: center; }
+.send kbd { padding-right: 2px; letter-spacing: 2px; } /* a little air between ⌘ and ↵ */
 .send-up { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 1px solid var(--line); font: 13px/16px var(--mono); color: var(--muted); }
 .about { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; border-left: 1px solid var(--line); }
 .about-head { display: flex; flex-shrink: 0; align-items: center; height: 56px; padding: 0 24px; border-bottom: 1px solid var(--line); }
@@ -798,6 +794,12 @@ button.option-card:hover { border-color: var(--text); }
 .app-row { display: flex; align-items: center; gap: 10px; color: var(--text); }
 .about-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
 .about-actions .btn { justify-content: space-between; width: 100%; }
+/* The agent's Figbot fills the foot of the panel: the panel's left border is its frame's, a
+   line above it is the rest, and the window's edges cut it like the model's own crop. */
+.about-bot { margin-top: auto; }
+.about-bot-frame { aspect-ratio: 1; overflow: hidden; border-top: 1px solid var(--line); background: var(--ink); }
+.about-bot-frame canvas { width: 100% !important; height: 100% !important; }
+@media (max-height: 640px) { .about-bot { display: none; } }
 @container (max-width: 1000px) {
   .convo-grid { grid-template-columns: minmax(0, 1fr); }
   .about { display: none; }
