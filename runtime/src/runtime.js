@@ -33,7 +33,7 @@ import { createWorkspace, WorkspaceError } from './workspace.js';
 import { QUIET_GIT, createDockerSandbox, localShellEnv, passedThrough } from './sandbox.js';
 import { KeyError } from './keys.js';
 import { FAVOURITES } from './models.js';
-import { MeetingError, isQuiet as meetingQuiet, speech, speechOf, discussion, nextTurn, hasNews, meetingOut, meetingSummary, turnText, parseMeeting, meetingOfTurn } from './meetings.js';
+import { MeetingError, isQuiet as meetingQuiet, speech, speechOf, discussion, nextTurn, hasNews, mentionsIn, meetingOut, meetingSummary, turnText, parseMeeting, meetingOfTurn } from './meetings.js';
 
 export class RuntimeError extends Error {
   constructor(status, message) {
@@ -1008,6 +1008,12 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         const summary = await summaryOf(agent);
         for (const item of items) if ((item.kind === 'question' || item.kind === 'approval') && item.status === 'open') out.push({ agent: summary, item });
       }
+      // A meeting where a figbot called you in, until you speak there.
+      for (const meeting of meetings.values()) {
+        const agent = meeting.status === 'open' && meeting.needsYou && agents.get(meeting.needsYou.from);
+        if (!agent) continue;
+        out.push({ agent: await summaryOf(agent), item: { id: `${meeting.id}-you`, kind: 'meeting', status: 'open', at: new Date(meeting.needsYou.at).toISOString(), text: meeting.needsYou.text, meeting: { id: meeting.id, title: meeting.title } } });
+      }
       return out.sort((a, b) => a.item.at.localeCompare(b.item.at));
     },
 
@@ -1468,7 +1474,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         status: 'open', speeches: [], createdAt: now(),
       };
       if (parsed.first) speech(meeting, { from: null, text: parsed.first, at: now() });
-      meeting.talk = discussion(meeting, agents); // everyone gets a first round
+      meeting.talk = discussion(meeting, agents, { text: parsed.first, you: named() }); // everyone, or who you @named
       meetings.set(meeting.id, meeting);
       await saveMeetings();
       changed();
@@ -1486,8 +1492,9 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       // A turn asked long ago whose answer never came (its input was lost) doesn't hold you up.
       if (meeting.asked && now() - meeting.asked.at > STALE_TURN) meeting.asked = null;
       speech(meeting, { from: null, text: said, at: now() });
-      meeting.talk = discussion(meeting, agents);
+      meeting.talk = discussion(meeting, agents, { text: said, you: named() });
       meeting.waiting = null;
+      meeting.needsYou = null; // you're here
       await saveMeetings();
       changed();
       await driveMeeting(meeting.id);
@@ -1500,6 +1507,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       meeting.status = 'closed';
       meeting.asked = null; // a turn still being answered finishes, and says nothing
       meeting.talk = null;
+      meeting.needsYou = null;
       await saveMeetings();
       changed();
       return meetingOut(meeting, meetingAgentFor);
@@ -1540,6 +1548,12 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     const pass = !said || meetingQuiet(said);
     speech(meeting, { from: agentName, text: pass ? null : said, at: now(), pass });
     if (meeting.talk && !pass) Object.assign(meeting.talk, { spoke: true, speeches: meeting.talk.speeches + 1 });
+    // @you: the figbot wants your decision. The meeting waits on you, and your devices hear it.
+    if (!pass && mentionsIn(said, meeting, named()).you) {
+      meeting.needsYou = { from: agentName, text: said, at: now() };
+      const agent = agents.get(agentName);
+      if (agent) push.notify(agent, 'meeting', { title: meeting.title, text: said }).catch(() => {});
+    }
     await saveMeetings();
     changed();
     await driveMeeting(meeting.id);
