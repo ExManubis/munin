@@ -176,7 +176,7 @@ test('an app asks first before anything that changes something, and reading goes
   await runtime.addApp({ name: 'Calendar', url: cal.url, token: 'cal-secret-1234' });
   await runtime.createAgent({ name: 'hugin', role: 'assistant', provider: 'scripted', model: 'model' });
   let agent = await runtime.updateAgent('hugin', { apps: ['calendar'] });
-  assert.deepEqual(agent.askFirst.map((r) => [r.id, r.label, r.on]), [['app:calendar', 'Calendar: sending, changing or deleting', true]]);
+  assert.deepEqual(agent.askFirst.filter((r) => r.app).map((r) => [r.id, r.label, r.on]), [['app:calendar', 'Calendar: sending, changing or deleting', true]]);
 
   const heard = [];
   const turn = async (...steps) => {
@@ -219,5 +219,5 @@ test('an app asks first before anything that changes something, and reading goes
   assert.equal((await runtime.agent('hugin')).askFirst.find((r) => r.id === 'app:calendar').on, false, 'always turns the rule off');
 
   agent = await runtime.updateAgent('hugin', { apps: [] });
-  assert.deepEqual(agent.askFirst, [], 'no app, no rule');
+  assert.deepEqual(agent.askFirst.filter((r) => r.app), [], 'no app, no rule');
 });

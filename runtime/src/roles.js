@@ -46,6 +46,10 @@ export function askFirstFor(abilities) {
   ];
 }
 
+// Every agent's rule for setting up its own routines (the routine tools in runtime.js): off,
+// since agents do it when asked, and on for an agent you'd rather approve each one for.
+export const ROUTINES_RULE = { id: 'routines', label: 'Setting up its own routines', what: 'change its routines', third: 'changes its routines', tools: ['add_routine', 'change_routine', 'remove_routine'], on: false };
+
 export function ruleMatches(rule, name, args) {
   const tools = rule.tools || [rule.tool];
   if (!tools.includes(name)) return false;

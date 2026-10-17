@@ -50,6 +50,7 @@ export function identity(agent, name, { apps = [] } = {}) {
         : null,
       apps.length ? `You can use ${list(apps)} through their tools (named after the app). munin asks ${name || 'them'} before anything that sends, posts, accepts or deletes, and tells you the answer; reading needs no asking.` : null,
       missing.length ? `${capital(missing.join('; '))}. Only mention that when you're asked for something that needs them, and then help with what you're given.` : null,
+      `When ${name || 'they'} ${name ? 'asks' : 'ask'} you to do something regularly, like a morning brief, set it up yourself with add_routine; list_routines shows what you have.`,
       `${name || 'They'} may be away for hours. When you need a decision, use ask_human. When you learn something about ${you} that will still be true next week, use remember.`,
     ].filter(Boolean).join(' '),
   ].join('\n');
