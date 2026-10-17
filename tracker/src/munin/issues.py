@@ -2,12 +2,12 @@
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import and_, case, exists, func, select, update
 from sqlalchemy.orm import Session, aliased
 
-from munin.models import OPEN_STATUSES, STATUSES, Comment, Event, Issue, Project, utcnow
+from munin.models import OPEN_STATUSES, PRIORITIES, STATUSES, Comment, Event, Issue, Project, PullRequest, utcnow
 
 KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
 UNASSIGNED = ("", "none", "null", "nobody", "unassigned")
@@ -167,8 +167,10 @@ def create_issue(
     status: str = "todo",
     assignee: str | None = None,
     blocked_by: list[str] | None = None,
+    priority: str = "normal",
 ) -> Issue:
     proj = get_project(s, project)
+    priority = _check_priority(priority)
     if not title.strip():
         raise Invalid("An issue needs a title.")
     status = _check_status(status)
@@ -185,6 +187,7 @@ def create_issue(
         title=title.strip(),
         description=description,
         status=status,
+        priority=priority,
         assignee=assignee,
         position=(bottom or 0.0) + 1.0,
         created_by=actor.name,
@@ -196,6 +199,8 @@ def create_issue(
     _record(issue, actor, now, "created", new=status)
     if blockers:
         _record(issue, actor, now, "blocked_by", new=_refs(blockers))
+    if priority != "normal":
+        _record(issue, actor, now, "priority", "normal", priority)
     s.commit()
     return issue
 
@@ -211,6 +216,7 @@ def update_issue(
     assignee: str | None | object = _UNSET,
     position: float | None = None,
     blocked_by: list[str] | None = None,
+    priority: str | None = None,
 ) -> Issue:
     """Change an issue.
 
@@ -238,6 +244,8 @@ def update_issue(
         values["assignee"] = clean_assignee(assignee)
     if position is not None:
         values["position"] = float(position)
+    if priority is not None:
+        values["priority"] = _check_priority(priority)
     blockers = _check_blockers(s, issue, blocked_by) if blocked_by is not None else None
 
     held_by_other = issue.status == "in_progress" and issue.assignee not in (None, actor.name)
@@ -250,7 +258,7 @@ def update_issue(
             raise Conflict(f"{issue.ref} is blocked by {_refs(waiting_for)}, which isn't done yet. Take another issue.")
 
     now = utcnow()
-    before = {field: getattr(issue, field) for field in ("title", "description", "status", "assignee")}
+    before = {field: getattr(issue, field) for field in ("title", "description", "status", "assignee", "priority")}
     old_blockers = list(issue.blocked_by)
     changes = {field: new for field, new in values.items() if field in before and new != before[field]}
     blockers_changed = blockers is not None and set(blockers) != set(old_blockers)
@@ -273,7 +281,7 @@ def update_issue(
             held = f", assigned to {issue.assignee}" if issue.assignee else ""
             raise Conflict(f"{issue.ref} changed just now: it's {issue.status}{held}. Look at it again.")
 
-    for field in ("status", "assignee", "title"):
+    for field in ("status", "assignee", "title", "priority"):
         if field in changes:
             _record(issue, actor, now, field, before[field], changes[field])
     if "description" in changes:
@@ -371,6 +379,12 @@ def similar_open_issues(s: Session, issue: Issue) -> list[Issue]:
 
 def _title_words(title: str) -> set[str]:
     return {word for word in re.findall(r"[a-z0-9_]+", title.lower()) if len(word) > 2} - FILLER_WORDS
+
+
+def _check_priority(priority: str) -> str:
+    if priority not in PRIORITIES:
+        raise Invalid(f"Unknown priority {priority!r}. Use one of: {', '.join(PRIORITIES)}.")
+    return priority
 
 
 def _check_status(status: str) -> str:
@@ -487,7 +501,75 @@ def describe_event(event: Event) -> str:
             return f"{who} edited the description"
         case "blocked_by":
             return f"{who} set it to wait for {new}" if new else f"{who} removed what it waited for"
+        case "pull_request":
+            number = (new or old or "").rstrip("/").rsplit("/", 1)[-1]
+            return f"{who} linked pull request #{number}" if new else f"{who} unlinked pull request #{number}"
+        case "priority":
+            return f"{who} made it {new}" if new != "normal" else f"{who} made it normal priority"
     return f"{who} changed {event.kind}"
+
+
+# Pull requests
+
+
+def link_pull_request(s: Session, actor: Actor, ref: str, url: str, found: dict | None = None) -> PullRequest:
+    """Link a pull request on GitHub to an issue. `found` is what GitHub said about it, if it was asked."""
+    from munin.github import GitHubError, parse_pull_url
+
+    issue = get_issue(s, ref)
+    try:
+        repo, number, clean = parse_pull_url(url)
+    except GitHubError as error:
+        raise Invalid(str(error)) from error
+    existing = next((pr for pr in issue.pull_requests if pr.url == clean), None)
+    if existing:
+        return existing
+    now = utcnow()
+    pull = PullRequest(
+        issue=issue, url=clean, repo=repo, number=number, added_by=actor.name, created_at=now,
+        title=(found or {}).get("title"), state=(found or {}).get("state"), checked_at=now if found else None,
+    )
+    s.add(pull)
+    issue.updated_at = now
+    _record(issue, actor, now, "pull_request", None, clean)
+    s.commit()
+    return pull
+
+
+def unlink_pull_request(s: Session, actor: Actor, ref: str, pull_id: int) -> None:
+    issue = get_issue(s, ref)
+    pull = next((pr for pr in issue.pull_requests if pr.id == pull_id), None)
+    if pull is None:
+        raise NotFound(f"{issue.ref} has no pull request {pull_id}.")
+    now = utcnow()
+    issue.pull_requests.remove(pull)
+    _record(issue, actor, now, "pull_request", pull.url, None)
+    s.commit()
+
+
+GITHUB = Actor("GitHub", "system")  # what the tracker does because of what GitHub says
+
+
+def settle_pull_requests(s: Session, issue: Issue, closed: list[PullRequest]) -> None:
+    """After GitHub said some of an issue's pull requests finished: a pull request closed without
+    merging gets a comment, and once none is open and one merged, the work is in, so it's done."""
+    for pull in closed:
+        add_comment(s, GITHUB, issue.ref, f"{pull.repo}#{pull.number} was closed without merging: {pull.url}")
+    states = [pr.state for pr in issue.pull_requests]
+    if issue.status in CLOSED_STATUSES or "merged" not in states or any(state in (None, "open") for state in states):
+        return
+    try:
+        update_issue(s, GITHUB, issue.ref, status="done")
+    except MuninError:
+        s.rollback()  # someone changed it just now; the next look settles it
+
+
+def pulls_to_check(s: Session) -> list[PullRequest]:
+    """Linked pull requests that may still change: open, or never asked about."""
+    statement = select(PullRequest).join(Issue).where(
+        (PullRequest.state.is_(None)) | (PullRequest.state == "open"), Issue.status.not_in(CLOSED_STATUSES)
+    )
+    return list(s.scalars(statement))
 
 
 # Comments and the inbox
@@ -518,6 +600,8 @@ def add_comment(
     issue.updated_at = now
     s.add(comment)
     s.flush()
+    if asks_human:
+        issue.snoozed_until = None  # something new to answer
     _record(issue, actor, now, "comment", None, str(comment.id))
     s.commit()
     return comment
@@ -551,15 +635,32 @@ def _unanswered():
     return exists().where(reply.issue_id == Comment.issue_id, reply.author_kind == "human", reply.id > Comment.id)
 
 
-def inbox(s: Session) -> list[Comment]:
-    """Open questions from agents, oldest first."""
+def inbox(s: Session, snoozed: bool = False) -> list[Comment]:
+    """Open questions from agents, oldest first: the ones waiting on you, or (`snoozed`) the ones
+    you put off till later."""
+    now = utcnow()
+    asleep = Issue.snoozed_until.is_not(None) & (Issue.snoozed_until > now)
     query = (
         select(Comment)
         .join(Issue)
-        .where(Comment.asks_human, ~_unanswered(), Issue.status.not_in(CLOSED_STATUSES))
+        .where(Comment.asks_human, ~_unanswered(), Issue.status.not_in(CLOSED_STATUSES), asleep if snoozed else ~asleep)
         .order_by(Comment.id)
     )
     return list(s.scalars(query))
+
+
+def snooze(s: Session, ref: str, until: datetime | None) -> Issue:
+    """Put an issue's questions out of your inbox until a time, or (None) bring them back now.
+    No event: agents aren't told, their question just waits. A new question wakes it."""
+    issue = get_issue(s, ref)
+    if until is not None:
+        if until.tzinfo is not None:
+            until = until.astimezone(timezone.utc).replace(tzinfo=None)
+        if until <= utcnow():
+            raise Invalid("Snooze until a time that hasn't come yet.")
+    issue.snoozed_until = until
+    s.commit()
+    return issue
 
 
 def waiting_on_human(issue: Issue) -> bool:

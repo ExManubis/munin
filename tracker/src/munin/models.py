@@ -17,6 +17,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 STATUSES = ("todo", "in_progress", "in_review", "done", "cancelled")
 OPEN_STATUSES = ("in_progress", "in_review", "todo")
+# How much an issue matters, beside its place in the pile: urgent ones go first.
+PRIORITIES = ("urgent", "high", "normal", "low")
 
 
 def utcnow() -> datetime:
@@ -59,6 +61,8 @@ class Issue(Base):
     title: Mapped[str] = mapped_column(String(300))
     description: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default="todo")
+    # One of PRIORITIES. The server default fills it in for issues from before munin kept it.
+    priority: Mapped[str] = mapped_column(String(10), default="normal", server_default="normal")
     assignee: Mapped[str | None] = mapped_column(String(100), default=None)
     # Order within the pile: lower is nearer the top.
     position: Mapped[float] = mapped_column(Float, default=0.0)
@@ -67,8 +71,13 @@ class Issue(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     # When the issue entered its current status. Empty for issues from before munin kept it.
     status_changed_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow)
+    # Out of your inbox until then. Yours alone: no event, so agents never hear of it.
+    snoozed_until: Mapped[datetime | None] = mapped_column(DateTime, default=None)
 
     project: Mapped[Project] = relationship(back_populates="issues")
+    pull_requests: Mapped[list["PullRequest"]] = relationship(
+        back_populates="issue", order_by="PullRequest.id", cascade="all, delete-orphan"
+    )
     comments: Mapped[list["Comment"]] = relationship(
         back_populates="issue", order_by="Comment.id", cascade="all, delete-orphan"
     )
@@ -110,6 +119,27 @@ class Comment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     issue: Mapped[Issue] = relationship(back_populates="comments")
+
+
+class PullRequest(Base):
+    """A pull request on GitHub that carries an issue's work, with what GitHub last said about it."""
+
+    __tablename__ = "pull_requests"
+    __table_args__ = (UniqueConstraint("issue_id", "url"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(ForeignKey("issues.id"))
+    url: Mapped[str] = mapped_column(String(300))
+    repo: Mapped[str] = mapped_column(String(200))  # owner/name
+    number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str | None] = mapped_column(String(300), default=None)
+    # "open", "merged" or "closed" (without merging); empty until GitHub has been asked.
+    state: Mapped[str | None] = mapped_column(String(10), default=None)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    added_by: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    issue: Mapped[Issue] = relationship(back_populates="pull_requests")
 
 
 class Event(Base):

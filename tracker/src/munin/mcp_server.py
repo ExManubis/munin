@@ -1,5 +1,6 @@
 """The MCP server agents connect to. Tools return short plain text, to keep agents' context small."""
 
+import contextlib
 import functools
 import inspect
 import time
@@ -26,10 +27,13 @@ How to work:
 1. Call list_projects first. It tells you your name in munin, and each project's description
    is the brief: what to build and how work is delivered, for example which branch to commit to.
 2. Take the top issue from the pile: list_issues(project, status="todo") lists the pile in order.
+   An issue marked (urgent) goes before the rest, wherever it is in the pile.
    Take one that's unassigned or assigned to you with update_issue(issue, status="in_progress").
    If another agent already has it, munin says so; take the next one.
 3. Do the work. Comment on the issue when something's worth recording.
 4. When you're done, add a comment saying what you did, then set status="in_review".
+   If you opened a pull request for it, link it with link_pull_request(issue, url): when it
+   merges, munin moves the issue to done.
 5. Review issues other agents finished: check the work, commit it and set status="done",
    or comment what's missing and set status="todo" so its author picks it up again.
    Don't review your own work.
@@ -61,6 +65,7 @@ QUIET_FOR = timedelta(minutes=15)
 OTHERS_AROUND = timedelta(minutes=5)
 
 Status = Literal["todo", "in_progress", "in_review", "done", "cancelled"]
+Priority = Annotated[Literal["urgent", "high", "normal", "low"], Field(description="How much it matters. Urgent goes first.")]
 IssueRef = Annotated[str, Field(description="Issue id, like MUN-12")]
 
 
@@ -69,7 +74,7 @@ class QuestionOption(BaseModel):
     detail: str = Field("", description="One line on what picking it means")
 
 
-def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
+def build_mcp(sessions: sessionmaker[Session], github=None) -> MCPServer:
     mcp = MCPServer(name="munin", instructions=INSTRUCTIONS)
 
     def tool(fn: Callable) -> Callable:
@@ -182,11 +187,12 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         blocked_by: Annotated[
             list[str] | None, Field(description="Issues that must be done before anyone can start this one.")
         ] = None,
+        priority: Priority = "normal",
     ) -> str:
         """Create an issue. It goes to the bottom of the project's pile."""
         assignee = _actor(ctx).name if assignee == "me" else assignee
         with sessions() as s:
-            created = svc.create_issue(s, _actor(ctx), project, title, description, status, assignee, blocked_by)
+            created = svc.create_issue(s, _actor(ctx), project, title, description, status, assignee, blocked_by, priority)
             reply = f"Created {created.ref}: {created.title}"
             if similar := svc.similar_open_issues(s, created):
                 reply += "\nThese open issues look similar. If it duplicates one, set it to cancelled:\n"
@@ -206,17 +212,37 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         blocked_by: Annotated[
             list[str] | None, Field(description="Replaces what this issue waits for. [] clears it.")
         ] = None,
+        priority: Priority | None = None,
     ) -> str:
         """Change an issue. Setting status="in_progress" takes the issue and assigns it to you.
 
         Fails if another agent has the issue in progress, or if it's blocked by issues that aren't done.
         """
-        changes = {"title": title, "description": description, "status": status, "blocked_by": blocked_by}
+        changes = {"title": title, "description": description, "status": status, "blocked_by": blocked_by, "priority": priority}
         if assignee is not None:
             changes["assignee"] = _actor(ctx).name if assignee == "me" else assignee
         with sessions() as s:
             updated = svc.update_issue(s, _actor(ctx), issue, **changes)
             return f"Updated {_issue_line(updated)}"
+
+    @tool
+    def link_pull_request(
+        ctx: Context,
+        issue: IssueRef,
+        url: Annotated[str, Field(description="The pull request on GitHub, like https://github.com/owner/repo/pull/12")],
+    ) -> str:
+        """Link a pull request you opened to the issue it's for, so its state shows on the issue."""
+        from munin.github import GitHubError, parse_pull_url
+
+        found = None
+        if github is not None:
+            with contextlib.suppress(GitHubError):
+                repo, number, _ = parse_pull_url(url)
+                found = github.pull(repo, number)
+        with sessions() as s:
+            pull = svc.link_pull_request(s, _actor(ctx), issue, url, found)
+            state = f" ({pull.state})" if pull.state else ""
+            return f"Linked {pull.repo}#{pull.number}{state}{f': {pull.title}' if pull.title else ''} to {pull.issue.ref}."
 
     @tool
     def add_comment(
@@ -354,6 +380,8 @@ def _available_text(available: svc.Available) -> str:
 
 def _issue_line(issue: Issue) -> str:
     parts = [f"{issue.ref} [{issue.status}]", issue.title]
+    if issue.priority and issue.priority != "normal":
+        parts.append(f"({issue.priority})")
     if issue.assignee:
         parts.append(f"(assignee: {issue.assignee})")
     if svc.waiting_on_human(issue):
@@ -366,7 +394,7 @@ def _issue_line(issue: Issue) -> str:
 def _issue_text(issue: Issue) -> str:
     lines = [
         f"{issue.ref}: {issue.title}",
-        f"Project: {issue.project.key} · Status: {issue.status} · Assignee: {issue.assignee or 'none'}"
+        f"Project: {issue.project.key} · Status: {issue.status}{f' · Priority: {issue.priority}' if issue.priority != 'normal' else ''} · Assignee: {issue.assignee or 'none'}"
         f" · Created by {issue.created_by} {_when(issue.created_at)}",
         "",
         issue.description or "(no description)",
@@ -375,6 +403,10 @@ def _issue_text(issue: Issue) -> str:
         lines += ["", "Waits for:"] + [_issue_line(blocker) for blocker in issue.blocked_by]
     if issue.blocks:
         lines += ["", "Blocks:"] + [_issue_line(blocked) for blocked in issue.blocks]
+    if issue.pull_requests:
+        lines += ["", "Pull requests:"] + [
+            f"{pr.url}{f' {pr.title}' if pr.title else ''} ({pr.state or 'not checked yet'})" for pr in issue.pull_requests
+        ]
     if issue.events:
         lines += ["", "History:"]
         lines += [f"{_when(event.created_at)}  {line}" for event, line in svc.history(issue.events)[-12:]]

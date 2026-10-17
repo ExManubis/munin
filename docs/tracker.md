@@ -27,8 +27,9 @@ Everything else (reviewing someone else's work, unassigning yourself when you gi
 ## Data
 
 - **Project**: a key (like `MUN`, which prefixes issue ids like `MUN-12`), a name and a description agents can read as the brief.
-- **Issue**: title, description (Markdown), status (`todo`, `in_progress`, `in_review`, `done`, `cancelled`), assignee, position in the pile, the issues it waits for, who created it, timestamps.
+- **Issue**: title, description (Markdown), status (`todo`, `in_progress`, `in_review`, `done`, `cancelled`), priority (`urgent`, `high`, `normal` or `low`; an agent takes an urgent issue first, wherever it is in the pile, and urgent and high show as a chip), assignee, position in the pile, the issues it waits for, who created it, timestamps.
 - **Event**: one line of an issue's history: created, moved, assigned, renamed, edited, what it waits for. Every comment is an event too, so the event feed has them in order.
+- **Pull request**: a pull request on GitHub that carries an issue's work, with its title and whether it's open, merged or closed. munin asks GitHub every two minutes (`MUNIN_GITHUB_POLL`) about the pull requests of issues that aren't finished. Public repositories need no token; for private ones, add a fine-grained token with read access to pull requests in Settings. It's kept in `github.json` next to the database, readable by the tracker's user only, and never shown again. Once none of an issue's pull requests is open and at least one merged, munin moves the issue to **Done** (as "GitHub"), so what waits for it can start. A pull request closed without merging gets a comment instead. Polling rather than webhooks, since munin sits on your tailnet where GitHub can't reach it.
 - **Comment**: author, whether it's from an agent or you, body, whether it's a question for you, and the options it offers.
 - **Agent**: a name and a hashed token. Tokens are shown once and can be revoked.
 
@@ -43,6 +44,7 @@ Everything else (reviewing someone else's work, unassigning yourself when you gi
 | `get_issue` | An issue with its description, what it waits for and blocks, its history and comments |
 | `create_issue` | A new issue at the bottom of a project's pile, optionally waiting for others. Points out open issues with similar titles, so parallel agents notice duplicates |
 | `update_issue` | Change title, description, status, assignee or what it waits for. Moving to `in_progress` takes the issue |
+| `link_pull_request` | Link a pull request on GitHub to an issue, by its URL. Says its title and state when GitHub knows it |
 | `add_comment` | Comment on an issue; `ask_human` puts it in your inbox, optionally with 2 to 6 `options` to pick from. Returns the comment's id |
 | `events` | What happened in the tracker, oldest first: issues created, moved, assigned and edited, and comments, your answers included. Pass the last id seen as `after` for only what's new |
 | `wait_for_work` | Waits up to 50 seconds for something the agent can do in a project: an issue to take, someone else's work to review, an answer from you. Says when there's nothing left worth waiting for |
@@ -53,9 +55,9 @@ Tools return short plain text to keep agents' context small. They're the same fo
 
 The web UI updates live as agents work.
 
-- **Inbox**: agents' questions, oldest first, with the issue for context. Replying on the issue answers them. Below them, "Lately": what agents have been doing, with what's new since you last looked marked.
+- **Inbox**: agents' questions, oldest first, with the issue for context. Replying on the issue answers them. A question you can't answer yet can be snoozed (later today, tomorrow morning, next week, or a day you pick): the issue's questions leave the inbox and the waiting count until then and come back on their own, or sooner if the agent asks something new. Snoozing is yours alone, so agents aren't told and their question just waits. Snoozed questions are listed below the open ones, where you can wake one early. Below them, "Lately": what agents have been doing, with what's new since you last looked marked.
 - **Projects**: the brief agents read, then issues grouped by status with the Todo pile in order (reorder it by dragging), or as a board. "Put an agent on it" has the commands to start one.
-- **Issue**: title, description, status, assignee, what it waits for and blocks, and one timeline of comments and history. An issue whose agent has gone quiet can be released.
+- **Issue**: title, description, status, assignee, linked pull requests (paste a URL to link one), what it waits for and blocks, and one timeline of comments and history. An issue whose agent has gone quiet can be released.
 - **Agents**: tokens (created once, revocable), and what each agent is working on.
 - **Everywhere**: Ctrl/Cmd+K to jump to anything, `?` for shortcuts, the number of questions in the tab title, and opt-in push notifications that reach your devices with munin closed (in a browser without push, notifications while munin is open). It works on a phone and can be installed there.
 - **Setup**: the first time munin opens, an intro and then four short steps: what agents call you, an OpenRouter key and your favourite models, your first agent, and a token for outside agents over MCP. It ends on your agent, waiting for its first message. Settings opens it again.
@@ -68,4 +70,4 @@ From a terminal:
 
 ## Not yet
 
-Priorities, GitHub integration, permission settings, snooze, and multiple human users.
+Permission settings and multiple human users.

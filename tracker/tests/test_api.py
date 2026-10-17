@@ -69,7 +69,7 @@ def test_other_host_names_are_refused(client):
 
 
 def test_me(client):
-    me = {"name": "me", "you": None, "mcp_url": "http://localhost/mcp", "version": "0.2.0"}
+    me = {"name": "me", "you": None, "mcp_url": "http://localhost/mcp", "version": "0.2.0", "demo": False}
     assert client.get("/api/me").json() == me, "on this machine, nobody says who's looking"
     assert client.get("/api/me", headers={"Host": "127.0.0.1:7777"}).json()["mcp_url"] == "http://127.0.0.1:7777/mcp"
 
@@ -158,3 +158,19 @@ def test_questions_carry_options_and_comments_stay_out_of_history(client, settin
     assert [e["kind"] for e in issue["events"]] == ["created"]
     assert [a["kind"] for a in client.get("/api/activity").json()] == ["created"]
     assert client.get("/api/inbox").json() == []
+
+
+def test_priority_over_the_api_and_for_issues_from_before(client, settings):
+    client.post("/api/projects", json={"key": "MUN", "name": "munin"})
+    made = client.post("/api/issues", json={"project": "MUN", "title": "Ship it", "priority": "high"}).json()
+    assert made["priority"] == "high"
+    assert client.patch("/api/issues/MUN-1", json={"priority": "urgent"}).json()["priority"] == "urgent"
+    assert client.patch("/api/issues/MUN-1", json={"priority": "soon"}).status_code == 422
+    assert client.post("/api/issues", json={"project": "MUN", "title": "Plain"}).json()["priority"] == "normal"
+
+    # A database from before priorities: the column comes back filled in.
+    import sqlite3
+    with sqlite3.connect(settings.db_path) as db:
+        db.execute("ALTER TABLE issues DROP COLUMN priority")
+    with TestClient(create_app(settings), base_url="http://localhost") as again:
+        assert [i["priority"] for i in again.get("/api/issues?project=MUN").json()] == ["normal", "normal"]

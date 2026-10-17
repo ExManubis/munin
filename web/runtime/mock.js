@@ -594,6 +594,11 @@ export const mock = {
   },
 
   // Everything waiting on the human, oldest first: { agent, item }.
+  // The cast's work isn't counted per issue.
+  async issueCosts() {
+    return {};
+  },
+
   async waiting() {
     const out = [];
     for (const agent of agentsInOrder()) {

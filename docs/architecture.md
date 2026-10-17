@@ -17,7 +17,7 @@ agent runtime ──MCP──▶ tracker ◀──MCP── Claude Code, Codex, 
 
 | Piece | What it does | Built with | Status |
 |---|---|---|---|
-| **web** | The one frontend for all of munin: a topbar with AGENTS and TRACKER, each with its own sidebar | Plain JS modules, no build step | Built; the Agents part uses the runtime when it answers, and a mock when it doesn't |
+| **web** | The one frontend for all of munin: a topbar with AGENTS and TRACKER, each with its own sidebar | Plain JS modules, no build step | Built; the Agents part uses the runtime when it answers, and hides when it doesn't (`munin demo` and `?mock` use a mock) |
 | **tracker** | Projects, issues, comments, history, questions for you, agent tokens. An API for the frontend, MCP for agents | Python, FastAPI, SQLAlchemy, SQLite | Built; see `tracker.md` |
 | **agent runtime** | munin's own agents: their conversations, roles, models, routines and memory; keeps them working and survives restarts | Node, pi-durable and pi-ai, its own SQLite | A first version; `runtime-api.md` says what it does and what's next |
 | **edge** | One HTTPS address on the tailnet; says who you are; sends each path to its service | `tailscale serve` | Built: `deploy/install.sh` sets it up; see `server.md` |
@@ -49,7 +49,7 @@ agent runtime ──MCP──▶ tracker ◀──MCP── Claude Code, Codex, 
 - **An agent's name links the two.** An agent in the runtime is the agent of the same name in the tracker. Its face is drawn in its colour everywhere, the tracker's screens included.
 - **A question about an issue lives in the tracker.** The runtime ties its agent's question to the tracker's copy (`trackerQuestion`), so the question shows in both the conversation and the tracker inbox, and answering it in either answers both. The waiting count lists it once.
 - **Adding an agent:** the frontend creates the agent in the runtime, then, for one with the Tracker ability, gets it a token from the tracker and hands that to the runtime. The tracker only ever hears from the runtime's agents over MCP, each with its own token. Deleting the agent, or turning the ability off, revokes the token.
-- **Finding services:** each service answers on a known path: `/api/me` for the tracker, and `/runtime/api/me` for the runtime. The frontend looks for the runtime at its own address (behind the edge) and on port 7779 of the same host (on a laptop, where the runtime lets in pages from 127.0.0.1). When it doesn't answer, the Agents part runs on the mock for now; later it hides, and munin is the tracker plus outside agents.
+- **Finding services:** each service answers on a known path: `/api/me` for the tracker, and `/runtime/api/me` for the runtime. The frontend looks for the runtime at its own address (behind the edge) and on port 7779 of the same host (on a laptop, where the runtime lets in pages from 127.0.0.1). When it doesn't answer, the Agents part hides and munin is the tracker plus outside agents: Settings keeps GitHub, outside agents and notifications, and setup, which is about munin's own agents, isn't offered. The frontend keeps looking, after 10 seconds and then less often, down to once a minute, and the Agents part appears when the runtime does. `munin demo` (the tracker says `demo` in `/api/me`) and `?mock` in the address use the mock instead, so the screens can be shown and worked on without a runtime.
 - **Live updates:** each service has its own event stream, and the frontend listens to every one that's present. Events are numbered: a client that reconnects with `Last-Event-ID` gets what it missed, or a `reset` (reload everything) when it missed too much.
 
 ## The edge
@@ -118,7 +118,7 @@ pi-durable is experimental, and its API changes between releases. Pin exact vers
    - routines run on a schedule, or when the tracker's event feed shows a match, so agents start work by themselves;
    - each coder gets a git worktree per issue, on a branch named after it, from the runtime's clone of the project;
    - next: apps and the web as tools, and a budget that pauses.
-5. **Then:** live agent output, cost per issue, and maybe the Claudewitz iPhone app as a client. Approvals and push notifications are done: each service pushes its own things with keys of its own, and the frontend subscribes a device to both.
+5. **Then:** live agent output, and maybe the Claudewitz iPhone app as a client. Approvals, push notifications and cost per issue (counted by the runtime, which knows what its agents are on) are done: each service pushes its own things with keys of its own, and the frontend subscribes a device to both.
 
 ## Open questions
 

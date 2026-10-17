@@ -1,13 +1,14 @@
 // One issue: title and description (editable), status and assignee, what it waits for and
 // blocks, and one timeline of comments and history.
 
+import { withCosts, dollars } from '../runtime/costs.js';
 import { api } from '../api.js';
 import { store, liveAgents, displayName, quietAgent } from '../store.js';
 import { markdown } from '../markdown.js';
 import { condense, describe, eventIcon } from '../history.js';
 import { issuePicker } from '../search.js';
 import {
-  h, kbd, MOD, avatar, agentAvatar, personAvatar, statusIcon, statusLabel, STATUSES, time, parseTime, topbar, bindDraft, drafts, onModEnter, toast, changeIssue, agentPrompts, onEnterSend, SEND_KEY,
+  h, kbd, MOD, PRIORITIES, avatar, agentAvatar, personAvatar, statusIcon, statusLabel, STATUSES, time, parseTime, topbar, bindDraft, drafts, onModEnter, toast, changeIssue, agentPrompts, onEnterSend, SEND_KEY,
 } from '../ui.js';
 
 let editing = null; // id of the issue whose title and description are being edited
@@ -19,7 +20,9 @@ export const view = {
   title: (data) => `${data.issue.id} ${data.issue.title}`,
 
   async load({ id }) {
-    return { issue: await api.issue(id) };
+    const issue = await api.issue(id);
+    await withCosts([issue]);
+    return { issue };
   },
 
   leave() {
@@ -312,6 +315,10 @@ function properties(issue, project, ctx) {
     STATUSES.map(([value, label]) => h('option', { value }, label)));
   status.value = issue.status;
   status.addEventListener('change', () => changeIssue(issue, { status: status.value }, ctx.reload));
+  const priority = h('select', { class: 'select', 'aria-label': 'Priority' },
+    PRIORITIES.map(([value, label]) => h('option', { value }, label)));
+  priority.value = issue.priority || 'normal';
+  priority.addEventListener('change', () => changeIssue(issue, { priority: priority.value }, ctx.reload));
 
   // Free text with suggestions. Empty means unassigned. The draft only lives while typing.
   const key = `assignee:${issue.id}`;
@@ -343,13 +350,56 @@ function properties(issue, project, ctx) {
   const prop = (label, ...value) => h('div', { class: 'prop' }, h('span', { class: 'prop-key' }, label), h('span', { class: 'prop-value' }, value));
   return h('aside', { class: 'props', 'aria-label': 'Properties' },
     prop('Status', statusIcon(issue.status), h('span', { class: 'select-wrap' }, status)),
+    prop('Priority', h('span', { class: 'select-wrap' }, priority)),
     prop('Assignee', personAvatar(issue.assignee), assignee,
       issue.assignee ? h('button', { type: 'button', class: 'link unassign', onclick: () => changeIssue(issue, { assignee: '' }, ctx.reload) }, 'Clear') : null,
       h('datalist', { id: 'assignee-options' }, names.map((n) => h('option', { value: n })))),
     prop('Project', h('a', { href: `#/projects/${encodeURIComponent(issue.project)}` }, project ? project.name : issue.project)),
+    pullRequests(issue, ctx),
+    cost(issue),
     prop('Created', h('span', {}, `${displayName(issue.created_by)}, `, time(issue.created_at, { long: true }))),
     prop('Updated', time(issue.updated_at, { long: true })),
     prompts(issue, 'props-prompts'));
+}
+
+// What its agents' models cost while they worked on it, from the runtime; who spent what when several did.
+function cost(issue) {
+  if (!issue.cost?.cost) return null;
+  const agents = Object.entries(issue.cost.agents).sort((a, b) => b[1] - a[1]);
+  return h('div', { class: 'prop prop-cost' },
+    h('span', { class: 'prop-key' }, 'Cost'),
+    h('span', { class: 'prop-value', title: `${issue.cost.tokens.toLocaleString()} tokens` }, dollars(issue.cost.cost),
+      agents.length > 1 ? h('span', { class: 'muted' }, agents.map(([name, spent]) => `${name} ${dollars(spent)}`).join(', ')) : null));
+}
+
+// Pull requests on GitHub that carry the issue's work, with what GitHub last said about them.
+function pullRequests(issue, ctx) {
+  const key = `pull:${issue.id}`;
+  const input = bindDraft(h('input', { class: 'input bare', placeholder: 'Paste a pull request URL', autocomplete: 'off', spellcheck: false, 'aria-label': 'Link a pull request' }), key);
+  const link = async () => {
+    if (!input.value.trim()) return;
+    try {
+      await api.linkPullRequest(issue.id, input.value.trim());
+      drafts.delete(key);
+      ctx.reload();
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  };
+  input.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), link()));
+  const unlink = async (pull) => {
+    await api.unlinkPullRequest(issue.id, pull.id);
+    ctx.reload();
+  };
+  const STATE = { open: 'Open', merged: 'Merged', closed: 'Closed' };
+  return h('div', { class: 'prop prop-pulls' },
+    h('span', { class: 'prop-key' }, 'Pull requests'),
+    h('span', { class: 'prop-value pulls' },
+      (issue.pull_requests || []).map((pull) => h('span', { class: 'pull' },
+        h('a', { href: pull.url, target: '_blank', rel: 'noopener noreferrer', title: pull.url }, pull.title || `${pull.repo}#${pull.number}`, ` #${pull.number}`),
+        h('span', { class: ['chip', pull.state === 'merged' && 'prio-urgent', pull.state === 'open' && 'prio-high'], title: pull.state ? `GitHub says it's ${pull.state}` : "GitHub hasn't been asked yet" }, STATE[pull.state] || 'Unchecked'),
+        h('button', { type: 'button', class: 'link', onclick: () => unlink(pull) }, 'Unlink'))),
+      input));
 }
 
 // Shown in the side panel when there's room, and after the thread when there isn't.

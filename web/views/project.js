@@ -1,13 +1,13 @@
 // A project's issues, as a list grouped by status or as a board, with its brief and the
 // reorderable Todo pile. Also the plain list of projects that the phone tab bar opens.
 
+import { withCosts, dollars } from '../runtime/costs.js';
 import { api, ApiError } from '../api.js';
 import { store, openCount, quietAgent, remember } from '../store.js';
 import { markdown } from '../markdown.js';
 import { openNewIssue, openNewProject } from '../dialogs.js';
 import {
-  h, kbd, MOD, icon, svg, personAvatar, statusIcon, time, parseTime, topbar, logoMark, bindDraft, drafts, onModEnter, toast,
-  firstLine, changeIssue, agentPrompts,
+  h, kbd, MOD, icon, svg, personAvatar, statusIcon, time, parseTime, topbar, logoMark, bindDraft, drafts, onModEnter, toast, firstLine, changeIssue, agentPrompts, priorityChip,
 } from '../ui.js';
 
 const GROUPS = [
@@ -35,7 +35,7 @@ export const view = {
   async load({ key }) {
     const project = store.projects.find((p) => p.key === key);
     if (!project) throw new ApiError(`No project with key ${key}.`, 404);
-    const issues = await api.issues({ project: key, status: 'all' });
+    const issues = await withCosts(await api.issues({ project: key, status: 'all' }));
     return { project, issues };
   },
 
@@ -316,11 +316,13 @@ function row(issue, pile) {
     h('span', { class: 'id' }, issue.id),
     statusIcon(issue.status, true),
     h('span', { class: 'row-title' }, h('a', { href, draggable: false }, issue.title)),
+    priorityChip(issue),
     waitingChip(issue),
     waitsChip(issue),
     h('span', { class: 'spacer' }),
     pile ? moveButtons(pile) : null,
     quietHint(issue),
+    issue.cost?.cost ? h('span', { class: 'cost mono muted', title: 'What its agents\' models cost while they worked on it' }, dollars(issue.cost.cost)) : null,
     h('span', { class: 'who', title: issue.assignee ? `Assigned to ${issue.assignee}` : 'Unassigned' },
       personAvatar(issue.assignee),
       h('span', { class: 'who-name' }, issue.assignee || '')),
@@ -492,7 +494,7 @@ function card(issue, pile) {
       if (!e.target.closest('a, button')) location.hash = href;
     },
   },
-    h('div', { class: 'card-top' }, h('span', { class: 'id' }, issue.id), h('span', { class: 'spacer' }), quietHint(issue), when(issue)),
+    h('div', { class: 'card-top' }, h('span', { class: 'id' }, issue.id), priorityChip(issue), h('span', { class: 'spacer' }), quietHint(issue), when(issue)),
     h('a', { class: 'card-title', href, draggable: false }, issue.title),
     issue.waiting_on_human || issue.blocked_by.length ? h('div', { class: 'card-chips' }, waitingChip(issue), waitsChip(issue)) : null,
     h('div', { class: 'card-foot' }, personAvatar(issue.assignee, { size: 14 }), h('span', { class: 'who-name' }, issue.assignee || 'Anyone')));

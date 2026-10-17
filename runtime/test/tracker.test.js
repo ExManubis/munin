@@ -194,5 +194,34 @@ test("on the server, agents' tracker calls go to the tracker on this machine", a
 test('issue lines read back from the tracker', () => {
   assert.deepEqual(parseIssueLine('MUN-5 [in_review] Retry (and back off) (assignee: forge) (blocked by MUN-2)'),
     { id: 'MUN-5', status: 'in_review', title: 'Retry (and back off)', assignee: 'forge' });
+  assert.deepEqual(parseIssueLine('MUN-7 [todo] Fix the login (urgent) (assignee: forge)'), { id: 'MUN-7', status: 'todo', title: 'Fix the login', assignee: 'forge' }, 'a priority is no part of the title');
   assert.equal(parseIssueLine('No issues match.'), null);
+});
+
+test('what model responses cost counts towards the issue the agent is on, and only while it is', async () => {
+  const tracker = await fakeTracker();
+  const dir = await mkdtemp(join(tmpdir(), 'munin-costs-'));
+  const settings = { db: join(dir, 'runtime.sqlite'), agentsDir: join(dir, 'agents'), ollamaUrl: null, user: 'Mikkel' };
+  const faux = fauxProvider({ provider: 'scripted', models: [{ id: 'model' }] });
+  const open = async () => openRuntime(settings, { models: await buildModels(settings, { extra: [faux.provider], env: {} }), costOf: () => 0.1 });
+  let runtime = await open();
+  faux.setResponses([
+    reply(fauxText('Taking it.'), fauxToolCall('update_issue', { issue: 'MUN-5', status: 'in_progress' })), // before the take: the agent's alone
+    reply(fauxText('Done, sending it to review.'), fauxToolCall('update_issue', { issue: 'MUN-5', status: 'in_review' })), // on MUN-5
+    reply(fauxText('Sent.')), // after: the agent's alone again
+  ]);
+  await runtime.createAgent({ name: 'forge', role: 'coder', provider: 'scripted', model: 'model', tracker: { url: tracker.url, token: 'tok-forge', projects: ['mun'] } });
+  await runtime.send('forge', 'Continue MUN.');
+  await runtime.waitForIdle();
+  const { 'MUN-5': costs, ...others } = runtime.issueCosts();
+  assert.deepEqual([costs.cost, costs.agents, others], [0.1, { forge: 0.1 }, {}]);
+  assert.ok(costs.tokens > 0);
+  assert.equal((await runtime.agent('forge')).usage.today, 0.3, "the agent's own cost has every response");
+  assert.deepEqual(runtime.issueCosts(['mun-9']), {}, 'asked for others, none');
+  await runtime.close();
+
+  runtime = await open();
+  assert.deepEqual(Object.keys(runtime.issueCosts(['MUN-5'])), ['MUN-5'], 'kept across a restart');
+  await runtime.close();
+  await tracker.close();
 });

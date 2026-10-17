@@ -106,7 +106,7 @@ def _demo(settings: Settings, args: argparse.Namespace) -> int:
     db_path = Path(tempfile.mkdtemp(prefix="munin-demo-")) / "demo.db"
     with connect(db_path)() as s:
         seed(s, settings.user)
-    settings = replace(settings, db_path=db_path, host="127.0.0.1", port=args.port)
+    settings = replace(settings, db_path=db_path, host="127.0.0.1", port=args.port, demo=True)
     note = "a sample project in a throwaway database; your own data isn't touched"
     return _run(settings, note, open_browser=not args.no_open)
 

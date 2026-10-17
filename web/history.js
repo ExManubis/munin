@@ -54,6 +54,11 @@ export function describe(event, it = 'this') {
       if (added.length) return `made ${it} wait for ${added.join(', ')}`;
       return `made ${it} stop waiting for ${removed.join(', ')}`;
     }
+    case 'pull_request': {
+      const number = String(value || old || '').split('/').pop();
+      return value ? `linked pull request #${number} to ${it}` : `unlinked pull request #${number} from ${it}`;
+    }
+    case 'priority': return value === 'normal' ? `made ${it} normal priority` : `made ${it} ${value}${value === 'urgent' ? '' : ' priority'}`;
     default: return `changed ${kind} on ${it}`;
   }
 }

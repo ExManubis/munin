@@ -1,6 +1,6 @@
 // Inbox: questions agents asked the human, oldest first. A list on the left and the selected
 // question on the right; when the screen is narrow, one question at a time. Below the
-// questions, what happened lately. (Setting munin up is setup.js's, the first time it opens.)
+// questions, the ones snoozed till later, then what happened lately. (Setting munin up is setup.js's, the first time it opens.)
 
 import { api } from '../api.js';
 import { store, remember, displayName } from '../store.js';
@@ -39,10 +39,10 @@ export const view = {
 
   render(data, ctx) {
     const feed = lately(data.activity);
-    if (!data.items.length) return empty(feed);
+    if (!data.items.length) return empty([snoozedList(ctx), feed]);
     const index = data.items.findIndex((i) => i.question.id === data.selectedId);
     return h('div', { class: 'inbox-wrap' },
-      h('div', { class: 'inbox' }, list(data.items, index, feed), detail(data, index, ctx, lately(data.activity))));
+      h('div', { class: 'inbox' }, list(data.items, index, [snoozedList(ctx), feed]), detail(data, index, ctx, [snoozedList(ctx), lately(data.activity)])));
   },
 
   onKey(e, data, ctx) {
@@ -67,6 +67,74 @@ function empty(feed) {
       h('h2', {}, 'Nothing is waiting on you'),
       h('p', {}, 'When an agent needs a decision it asks with a comment, and the question lands here, oldest first.')),
     h('div', { class: 'empty-feed' }, feed));
+}
+
+// Snooze --------------------------------------------------------------------------------
+// An issue's questions can wait till later: out of the inbox and the waiting count until then.
+// Agents aren't told; their question just waits. A new question brings it back early.
+
+const atNine = (date) => {
+  date.setHours(9, 0, 0, 0);
+  return date;
+};
+function snoozeTimes(now = new Date()) {
+  const later = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+  const tomorrow = atNine(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
+  const monday = atNine(new Date(now.getFullYear(), now.getMonth(), now.getDate() + (((8 - now.getDay()) % 7) || 7)));
+  return [['later', 'Later today', later], ['tomorrow', 'Tomorrow morning', tomorrow], ['week', 'Next week', monday]];
+}
+
+// "today 15:30", "tomorrow 09:00", "Mon 20 Oct, 09:00"
+export function untilLabel(value) {
+  const date = new Date(value);
+  const clock = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const days = Math.round((new Date(date).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86400000);
+  if (days === 0) return `today ${clock}`;
+  if (days === 1) return `tomorrow ${clock}`;
+  return `${date.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}, ${clock}`;
+}
+
+async function snooze(issueId, until, after) {
+  try {
+    await api.snooze(issueId, until ? until.toISOString() : null);
+    toast(until ? `${issueId} snoozed until ${untilLabel(until)}` : `${issueId} is back in your inbox`);
+    after();
+  } catch (err) {
+    toast(err.message, { error: true });
+  }
+}
+
+function snoozeControl(issue, after) {
+  const day = h('input', { type: 'date', class: 'input snooze-date', hidden: true, 'aria-label': 'Snooze until a day', min: new Date(Date.now() + 86400000).toLocaleDateString('sv') });
+  day.addEventListener('change', () => day.value && snooze(issue.id, atNine(new Date(`${day.value}T00:00`)), after));
+  const pick = h('select', { class: 'select snooze-pick', 'aria-label': `Snooze ${issue.id}` },
+    h('option', { value: '' }, 'Snooze…'),
+    snoozeTimes().map(([value, label, at]) => h('option', { value, title: untilLabel(at) }, label)),
+    h('option', { value: 'date' }, 'Pick a day…'));
+  pick.addEventListener('change', () => {
+    if (pick.value === 'date') {
+      day.hidden = false;
+      day.focus();
+      day.showPicker?.();
+      return;
+    }
+    const chosen = snoozeTimes().find(([value]) => value === pick.value);
+    if (chosen) snooze(issue.id, chosen[2], after);
+  });
+  return h('span', { class: 'snooze' }, h('span', { class: 'select-wrap' }, pick), day);
+}
+
+function snoozedList(ctx) {
+  if (!store.snoozed.length) return null;
+  const issues = [...new Map(store.snoozed.map((item) => [item.issue.id, item])).values()];
+  return h('section', { class: 'snoozed', 'aria-label': 'Snoozed' },
+    h('div', { class: 'list-head' }, h('span', { class: 'label' }, 'Snoozed'), h('span', { class: 'label' }, store.snoozed.length)),
+    issues.map((item) => h('div', { class: 'snoozed-row' },
+      agentAvatar(item.question.author),
+      h('a', { class: 'snoozed-main', href: `#/issues/${item.issue.id}`, title: item.question.body },
+        h('span', { class: 'q-text' }, `${item.question.author}: ${firstLine(item.question.body)}`),
+        h('span', { class: 'q-meta' }, `${item.issue.id} · until ${untilLabel(item.issue.snoozed_until)}`)),
+      h('button', { type: 'button', class: 'link', onclick: () => snooze(item.issue.id, null, ctx.reload) }, 'Wake'))));
 }
 
 // Lately ---------------------------------------------------------------------------------
@@ -179,7 +247,12 @@ function detail(data, index, ctx, feed) {
         h('span', { class: 'single-only title' }, 'Inbox'),
         h('span', { class: 'single-only mono muted' }, `${index + 1} of ${items.length}`),
       ],
-      h('a', { class: 'action split-only', href: `#/issues/${issue.id}` }, h('span', { class: 'label' }, 'Open issue'), kbd('↵'))),
+      [snoozeControl(issue, () => {
+        const target = itemHash(next);
+        if (location.hash === target) ctx.reload();
+        else go(target);
+      }),
+      h('a', { class: 'action split-only', href: `#/issues/${issue.id}` }, h('span', { class: 'label' }, 'Open issue'), kbd('↵'))]),
     h('div', { class: 'detail-scroll', 'data-scroll': `question-${q.id}` },
       h('article', { class: 'detail-body' },
         h('div', { class: 'status-line' },
