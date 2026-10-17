@@ -856,6 +856,27 @@ export const mock = {
     changed();
   },
 
+  // Google sign-in. The mock signs in at once, without going to Google.
+  async google() {
+    return { client: state.googleClient ? { configured: true, id: state.googleClient } : { configured: false }, account: state.googleAccount || null, redirect: 'http://localhost:7779/runtime/api/google/callback' };
+  },
+  async setGoogleClient(json) {
+    const id = /"client_id"\s*:\s*"([^"]+\.apps\.googleusercontent\.com)"/.exec(String(json))?.[1];
+    if (!id) throw new Error("That doesn't look like a Google OAuth client: its id ends in .apps.googleusercontent.com.");
+    state.googleClient = id;
+    changed();
+    return mock.google();
+  },
+  async googleSignIn() {
+    state.googleAccount = { email: 'mikkel@example.com', services: ['gmail', 'calendar'], working: true, problem: null };
+    changed();
+    return { url: `${location.pathname}?google=ok&message=${encodeURIComponent('Signed in with Google as mikkel@example.com.')}${location.hash}` };
+  },
+  async googleSignOut() {
+    state.googleAccount = null;
+    changed();
+  },
+
   // Apps: MCP servers agents use. The mock pretends every app answers with a few tools.
   async apps() {
     state.apps ||= [
