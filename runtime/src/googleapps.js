@@ -128,6 +128,8 @@ export function googleApps({ google, fetch = globalThis.fetch, gmail = GMAIL, ca
     ready: ready('gmail', 'Gmail'),
     // One ask-first rule per kind of change (apps.js), so sorting can go without asking while
     // sending still asks.
+    // In the agent's prompt (prompt.js capabilities).
+    does: () => `search and read your mail, draft replies, send mail${google.status().account?.organise ? ', label, archive and mark it read, and move it to the bin' : ' (labelling, archiving and the bin need one more sign-in with Google)'}`,
     rules: [
       { kind: 'send', label: 'Gmail: sending mail', what: 'send mail', third: 'sends mail', on: true },
       { kind: 'trash', label: 'Gmail: moving mail to the bin', what: 'move mail to the bin', third: 'moves mail to the bin', on: true },
@@ -324,6 +326,7 @@ export function googleApps({ google, fetch = globalThis.fetch, gmail = GMAIL, ca
     id: 'google-calendar',
     name: 'Google Calendar',
     ready: ready('calendar', 'Google Calendar'),
+    does: () => 'see your events, add, change and delete them, and answer invitations',
     tools: [
       {
         name: 'list_events',

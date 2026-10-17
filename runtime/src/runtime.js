@@ -21,7 +21,7 @@ import { AppError, describeAppCall, openApps } from './apps.js';
 import { GoogleError, openGoogle } from './google.js';
 import { googleApps } from './googleapps.js';
 import { readPageTool, webSearchTool } from './web.js';
-import { identity, about } from './prompt.js';
+import { identity, about, capabilities } from './prompt.js';
 import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
 import { createWorkspace, WorkspaceError } from './workspace.js';
@@ -208,7 +208,19 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       // (prompt.js). The brief is part of the first section, so it comes before munin's own notes.
       section('munin', (input) => {
         const agent = agentFor(input.conversationId);
-        return agent ? identity(agent, named(), { apps: apps.namesFor(agent) }) : undefined;
+        return agent ? identity(agent, named()) : undefined;
+      }, { tag: false }),
+      // What the agent can do right now (prompt.js), so it can say so when it's asked.
+      section('capabilities', (input) => {
+        const agent = agentFor(input.conversationId);
+        if (!agent) return undefined;
+        return capabilities(agent, named(), {
+          search: models.resolve(agent.provider, agent.model).provider === 'openrouter',
+          apps: apps.capabilitiesFor(agent),
+          tracker: agent.abilities.tracker ? { reachable: tracker.reachable() && Boolean(agent.tracker?.token), projects: agent.tracker?.projects || [] } : null,
+          repos: Object.keys(repos),
+          routines: agent.routines.length,
+        });
       }, { tag: false }),
       section('about', (input) => {
         const agent = agentFor(input.conversationId);
