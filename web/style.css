@@ -402,7 +402,8 @@ select option { background: var(--ink); color: var(--text); }
   .props-top { display: none; }
   .issue { display: flex; flex-direction: column; padding: 32px 32px 64px; }
   .issue-body { display: contents; }
-  .issue-body > .deps, .issue-body > .thread, .issue-body > .reply, .issue-body > .body-prompts { order: 2; }
+  .issue-body > .live-work, .issue-body > .deps, .issue-body > .thread, .issue-body > .reply, .issue-body > .body-prompts { order: 2; }
+  .issue-body > .live-work { margin-top: 20px; padding-top: 0; border-top: 0; }
   .props {
     order: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px;
     margin-top: 24px; padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); border-left: 0;
@@ -1283,3 +1284,16 @@ button.option-card:hover { border-color: var(--text); }
 .empty-feed .snoozed { margin-top: 0; }
 .detail-feed .snoozed { margin-top: 0; border-top: 0; }
 .detail-feed .snoozed-row { padding-right: 0; padding-left: 0; }
+
+/* An issue's agent at work: its latest run, live. */
+.live-work { display: flex; flex-direction: column; gap: 12px; margin-top: 28px; padding: 16px 0 4px; border-top: 1px solid var(--line); }
+.live-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.live-who { min-width: 0; font: 13px/18px var(--sans); color: var(--text); }
+.live-head .spacer { flex: 1; }
+.live-head .link { flex-shrink: 0; }
+.live-work .hint { margin: 0; }
+@container (max-width: 600px) {
+  .live-head { flex-wrap: wrap; }
+  .live-work .run-steps { padding-left: 12px; }
+  .live-work .run-step { gap: 10px; }
+}

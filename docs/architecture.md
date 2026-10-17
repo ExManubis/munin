@@ -118,7 +118,7 @@ pi-durable is experimental, and its API changes between releases. Pin exact vers
    - routines run on a schedule, or when the tracker's event feed shows a match, so agents start work by themselves;
    - each coder gets a git worktree per issue, on a branch named after it, from the runtime's clone of the project;
    - next: apps and the web as tools, and a budget that pauses.
-5. **Then:** live agent output, and maybe the Claudewitz iPhone app as a client. Approvals, push notifications and cost per issue (counted by the runtime, which knows what its agents are on) are done: each service pushes its own things with keys of its own, and the frontend subscribes a device to both.
+5. **Then:** maybe the Claudewitz iPhone app as a client. Approvals, push notifications, cost per issue (counted by the runtime, which knows what its agents are on) and live agent output on the issue page (the frontend reads the agent's latest run from the runtime as its live stream moves) are done: each service pushes its own things with keys of its own, and the frontend subscribes a device to both.
 
 ## Open questions
 
