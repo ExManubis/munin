@@ -66,7 +66,8 @@ test('an agent is told who it is talking with as a plain fact, then how it talks
   assert.match(prompts[0], /^You're hugin, an assistant, and you work for the person you're talking with, in munin/);
   assert.match(prompts[0], /only they can write to you here\. You don't know their name yet: ask once, when it fits, and then leave it\./);
   assert.doesNotMatch(prompts[0], /\bme's\b|with me\b|about me\b/, 'MUNIN_USER\'s "me" is no name');
-  assert.match(prompts[0], /Their calendar, mail and other apps aren't connected to munin yet; you can't search or read the web yet\./);
+  assert.match(prompts[0], /Their calendar, mail and other apps aren't connected to munin yet\. Only mention that/);
+  assert.match(prompts[0], /You can read a page with read_page\. Searching the web needs a model on OpenRouter, which you aren't on/);
 
   await runtime.updateMe({ name: 'Mikkel' });
   await runtime.send('hugin', 'Who do you work for?');

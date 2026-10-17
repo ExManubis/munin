@@ -18,6 +18,7 @@ import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite
 import { ROLES, roleName, askFirstFor, ruleMatches, upgradeBrief } from './roles.js';
 import { toItems, summarize } from './items.js';
 import { AppError, describeAppCall, openApps } from './apps.js';
+import { readPageTool, webSearchTool } from './web.js';
 import { identity, about } from './prompt.js';
 import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
@@ -278,6 +279,12 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
   const registry = createRegistry();
   registry.install(CodingTools);
+  // The web (web.js): reading pages for every agent with the Web ability, and searching for those
+  // on OpenRouter, whose requests swap web_search for OpenRouter's own search.
+  const WebRead = defineExtension({ name: 'web-read', tools: [readPageTool()] });
+  const WebSearch = defineExtension({ name: 'web-search', tools: [webSearchTool] });
+  registry.install(WebRead);
+  registry.install(WebSearch);
   registry.install(Munin);
   registry.install(Workspace);
   const tracker = createTracker({ registry, agents: () => agents.values(), agentFor, write, user: who, onTake, mcpUrl: settings.trackerMcp || null });
@@ -328,7 +335,8 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     return {
       model: { provider, modelId: model },
       thinkingLevel: agent.thinking,
-      extensions: [Munin, ...(agent.abilities.code ? [CodingTools, Workspace] : []), ...(agent.abilities.tracker ? [tracker.extension()] : []), ...apps.extensionsFor(agent)],
+      extensions: [Munin, ...(agent.abilities.code ? [CodingTools, Workspace] : []), ...(agent.abilities.tracker ? [tracker.extension()] : []), ...apps.extensionsFor(agent),
+        ...(agent.abilities.web ? [WebRead, ...(provider === 'openrouter' ? [WebSearch] : [])] : [])],
       cwd: agent.abilities.code ? (agent.work?.folder || agent.folder) : null,
     };
   };
