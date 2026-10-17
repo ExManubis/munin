@@ -85,6 +85,8 @@ kbd {
   font: 11px/16px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
 }
 .chip:hover { border-color: var(--text); }
+.chip.prio-high { border-style: solid; border-color: var(--text-2); }
+.chip.prio-urgent { border-style: solid; border-color: var(--text); background: var(--text); color: var(--ink); }
 
 .action { display: inline-flex; align-items: center; gap: 8px; }
 .action:hover .label { color: var(--text); }

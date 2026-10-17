@@ -378,3 +378,25 @@ def test_agents_create_projects_and_keep_their_briefs(server):
     assert texts[5] == "Updated project WEB: Website."
     assert "WEB: Site\nThe marketing site. Open a pull request per issue." in texts[7], "a new name keeps the brief"
     assert "needs a name" in texts[9]
+
+
+def test_priorities_mark_what_matters_most(server):
+    url, tokens, settings = server
+    claude = tokens["claude-code"]
+    results = run(
+        url, claude,
+        ("create_issue", {"project": "MUN", "title": "Login is down", "priority": "urgent"}),
+        ("update_issue", {"issue": "MUN-2", "priority": "high"}),
+        ("list_issues", {"project": "MUN", "status": "todo"}),
+        ("get_issue", {"issue": "MUN-3"}),
+    )
+    texts = [text for _, text in results]
+    assert texts[1] == "Updated MUN-2 [todo] Second (high)"
+    assert texts[2] == "MUN-1 [todo] First\nMUN-2 [todo] Second (high)\nMUN-3 [todo] Login is down (urgent)", "the pile keeps its order"
+    assert "Status: todo · Priority: urgent · Assignee: none" in texts[3]
+    assert "claude-code made it urgent" in texts[3]
+    ((is_error, text),) = run(url, claude, ("update_issue", {"issue": "MUN-1", "priority": "whenever"}))
+    assert is_error
+    with connect(settings.db_path)() as s:
+        assert svc.get_issue(s, "MUN-2").priority == "high"
+        assert [line for _, line in svc.history(svc.get_issue(s, "MUN-2").events)][-1] == "claude-code made it high"

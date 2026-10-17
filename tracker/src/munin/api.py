@@ -87,6 +87,7 @@ class IssueOut(BaseModel):
     title: str
     description: str
     status: str
+    priority: str
     assignee: str | None
     position: float
     created_by: str
@@ -154,6 +155,7 @@ def _issue_out(issue: Issue) -> IssueOut:
         title=issue.title,
         description=issue.description,
         status=issue.status,
+        priority=issue.priority or "normal",
         assignee=issue.assignee,
         position=issue.position,
         created_by=issue.created_by,
@@ -207,6 +209,7 @@ class IssueIn(BaseModel):
     status: str = "todo"
     assignee: str | None = None
     blocked_by: list[str] = []
+    priority: str = "normal"
 
 
 class IssuePatch(BaseModel):
@@ -216,6 +219,7 @@ class IssuePatch(BaseModel):
     assignee: str | None = None
     position: float | None = None
     blocked_by: list[str] | None = None
+    priority: str | None = None
 
 
 class CommentIn(BaseModel):
@@ -295,7 +299,7 @@ def list_issues(
 @router.post("/issues", status_code=201)
 def create_issue(body: IssueIn, s: DB, actor: Human) -> IssueDetailOut:
     issue = svc.create_issue(
-        s, actor, body.project, body.title, body.description, body.status, body.assignee, body.blocked_by
+        s, actor, body.project, body.title, body.description, body.status, body.assignee, body.blocked_by, body.priority
     )
     return _issue_detail_out(issue)
 

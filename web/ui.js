@@ -65,6 +65,13 @@ export const STATUSES = [
 ];
 export const statusLabel = (status) => (STATUSES.find(([s]) => s === status) || [status, status])[1];
 
+// How much an issue matters, beside its place in the pile. Urgent and high show as a chip.
+export const PRIORITIES = [['urgent', 'Urgent'], ['high', 'High'], ['normal', 'Normal'], ['low', 'Low']];
+export function priorityChip(issue) {
+  if (issue.priority !== 'urgent' && issue.priority !== 'high') return null;
+  return h('span', { class: ['chip', `prio-${issue.priority}`], title: issue.priority === 'urgent' ? 'Urgent: agents take it first' : 'High priority' }, issue.priority === 'urgent' ? 'Urgent' : 'High');
+}
+
 // Squares that fill up as an issue moves forward.
 export function statusIcon(status, labelled = false) {
   const shapes = {
@@ -252,12 +259,14 @@ export function toast(message, { error = false, href, action } = {}) {
 // Change an issue's status and/or assignee, with a toast that can undo it.
 export async function changeIssue(issue, changes, reload) {
   const before = {};
-  for (const key of Object.keys(changes)) before[key] = key === 'assignee' ? issue.assignee || '' : issue[key];
+  for (const key of Object.keys(changes)) before[key] = key === 'assignee' ? issue.assignee || '' : key === 'priority' ? issue.priority || 'normal' : issue[key];
   const status = changes.status !== undefined && changes.status !== issue.status;
   const assignee = changes.assignee !== undefined && (changes.assignee || null) !== (issue.assignee || null);
-  if (!status && !assignee) return;
+  const priority = changes.priority !== undefined && changes.priority !== (issue.priority || 'normal');
+  if (!status && !assignee && !priority) return;
   let message;
-  if (status && assignee && changes.status === 'todo' && !changes.assignee) message = `Put ${issue.id} back on the pile`;
+  if (priority && !status && !assignee) message = `Made ${issue.id} ${(PRIORITIES.find(([p]) => p === changes.priority) || [, changes.priority])[1].toLowerCase()} priority`;
+  else if (status && assignee && changes.status === 'todo' && !changes.assignee) message = `Put ${issue.id} back on the pile`;
   else if (status) message = `Moved ${issue.id} to ${statusLabel(changes.status)}`;
   else message = changes.assignee ? `Assigned ${issue.id} to ${changes.assignee}` : `Unassigned ${issue.id}`;
   try {
