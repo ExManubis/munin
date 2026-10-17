@@ -17,6 +17,7 @@ import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { ROLES, roleName, askFirstFor, ruleMatches, upgradeBrief } from './roles.js';
 import { toItems, summarize } from './items.js';
+import { identity, about } from './prompt.js';
 import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
 import { createWorkspace, WorkspaceError } from './workspace.js';
@@ -129,26 +130,16 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     name: 'munin',
     tools: [askHuman, remember],
     sections: [
+      // Who the agent is, who it's talking with and how it talks, then what it knows about you
+      // (prompt.js). The brief is part of the first section, so it comes before munin's own notes.
       section('munin', (input) => {
         const agent = agentFor(input.conversationId);
-        if (!agent) return undefined;
-        const name = named();
-        const user = name || 'the person you work for';
-        return [
-          name
-            ? `You are ${agent.name}, one of ${name}'s agents in munin, an app where ${name} works with agents.`
-            : `You are ${agent.name}, an agent in munin, an app where the person you work for works with agents.`,
-          name
-            ? `The messages in this conversation are from ${name}, the person you work for: talk to ${name} as "you", and read "I", "me" and "my" in them as ${name}.`
-            : `The messages in this conversation are from the person you work for: talk to them as "you", and read "I", "me" and "my" in them as that person. You don't know their name yet; when it would help, ask what to call them.`,
-          `Messages munin writes for you, like a routine starting or an answer to your question, say so.`,
-          `${name || 'They'} may be away for hours. Keep replies short. When you need a decision, use ask_human; when you learn something about ${user} worth keeping, use remember.`,
-        ].join(' ');
+        return agent ? identity(agent, named()) : undefined;
       }, { tag: false }),
-      section('memory', (input) => {
-        const notes = agentFor(input.conversationId)?.memory || [];
-        return notes.length ? notes.map((n) => `- ${n.text}`).join('\n') : undefined;
-      }),
+      section('about', (input) => {
+        const agent = agentFor(input.conversationId);
+        return agent ? about(agent, named()) : undefined;
+      }, { tag: false }),
     ],
     hooks: [hook(ToolTask, {
       beforeTool: async (call, api) => {
@@ -298,7 +289,6 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     return {
       model: { provider, modelId: model },
       thinkingLevel: agent.thinking,
-      instructions: agent.brief,
       extensions: [Munin, ...(agent.abilities.code ? [CodingTools, Workspace] : []), ...(agent.abilities.tracker ? [tracker.extension()] : [])],
       cwd: agent.abilities.code ? (agent.work?.folder || agent.folder) : null,
     };

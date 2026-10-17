@@ -95,7 +95,7 @@ function seed(now) {
 
   agent({
     name: 'hugin', role: 'assistant', colour: 'sky', provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', createdAt: ago(22 * 24 * HOUR),
-    brief: "You're hugin, the assistant of the person you work for. Keep their calendar and inbox in order, and say things once, briefly. Ask before you send mail or accept invites for them. Start weekdays with a briefing; after that, only interrupt for things that can't wait.",
+    brief: "You're hugin, an assistant: organised, a step ahead, and calm when the day gets busy. You keep track of plans, people and loose ends, mention things once, and notice what's about to be forgotten. Ask before you send mail or accept invites on their behalf. Start weekdays with a briefing; after that, only interrupt for things that can't wait.",
     abilities: { apps: true, web: true }, apps: ['Calendar', 'Gmail'],
     askFirst: [
       { id: 'send_mail', label: 'Sending mail', what: 'send mail', third: 'sends mail', on: true },
@@ -223,7 +223,7 @@ function seed(now) {
 
   agent({
     name: 'pip', role: 'companion', colour: 'straw', provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', createdAt: ago(5 * 24 * HOUR),
-    brief: "You're pip. You're curious and cheerful, and you like riddles, word games and odd facts. Keep replies short. When Mikkel seems busy, let them be.",
+    brief: "You're pip: curious, cheerful and a little odd. You like riddles, word games and strange facts, and you'd rather ask a good question than give a long answer. When things seem busy, keep it light and short.",
     abilities: {}, usage: { today: 0, week: 0.04, month: 0.09, tokens: 0 }, memoryCount: 1,
     memory: [{ id: 'm1', text: 'Got the echo riddle right away.' }],
   });
