@@ -45,11 +45,11 @@ test('your name and setup being over are kept, and agents call you by the name',
   await runtime.createAgent({ name: 'pip', role: 'companion', provider: 'scripted', model: 'model' });
   await runtime.send('pip', 'Hello');
   await runtime.waitForIdle();
-  assert.match(seen, /You are pip, one of Mikkel N's agents in munin/);
+  assert.match(seen, /You're pip, a companion, and you work for Mikkel N\. You're talking with Mikkel N right now, in munin/);
   await runtime.close();
 });
 
-test('an agent knows the person writing to it is the one it works for, named or not', async () => {
+test('an agent is told who it is talking with as a plain fact, then how it talks, then its brief', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'munin-setup-'));
   const faux = fauxProvider({ provider: 'scripted', models: [{ id: 'model' }] });
   const prompts = []; // the newest system prompt each turn, as text
@@ -59,21 +59,26 @@ test('an agent knows the person writing to it is the one it works for, named or 
     return fauxAssistantMessage([fauxText('Hi.')]);
   }));
   const runtime = await open(dir, { extra: [faux.provider] });
-  await runtime.createAgent({ name: 'hugin', role: 'assistant', provider: 'scripted', model: 'model' });
+  await runtime.createAgent({ name: 'hugin', role: 'assistant', provider: 'scripted', model: 'model', brief: "You're hugin, an assistant." });
 
-  await runtime.send('hugin', "What's on my calendar?");
+  await runtime.send('hugin', 'Who am I?');
   await runtime.waitForIdle();
-  assert.doesNotMatch(prompts[0], /\bme's\b|\bme talks\b|about me worth/, 'MUNIN_USER\'s "me" is no name');
-  assert.match(prompts[0], /You are hugin, an agent in munin, an app where the person you work for works with agents/);
-  assert.match(prompts[0], /The messages in this conversation are from the person you work for/);
-  assert.match(prompts[0], /You don't know their name yet/);
+  assert.match(prompts[0], /^You're hugin, an assistant, and you work for the person you're talking with, in munin/);
+  assert.match(prompts[0], /only they can write to you here\. You don't know their name yet: ask once, when it fits, and then leave it\./);
+  assert.doesNotMatch(prompts[0], /\bme's\b|with me\b|about me\b/, 'MUNIN_USER\'s "me" is no name');
+  assert.match(prompts[0], /Their calendar, mail and other apps aren't connected to munin yet; you can't search or read the web yet\./);
 
   await runtime.updateMe({ name: 'Mikkel' });
   await runtime.send('hugin', 'Who do you work for?');
   await runtime.waitForIdle();
-  assert.match(prompts[1], /You are hugin, one of Mikkel's agents/);
-  assert.match(prompts[1], /The messages in this conversation are from Mikkel, the person you work for: talk to Mikkel as "you", and read "I", "me" and "my" in them as Mikkel/);
-  assert.doesNotMatch(prompts[1], /don't know their name/);
+  const prompt = prompts[1];
+  assert.match(prompt, /^You're hugin, an assistant, and you work for Mikkel\. You're talking with Mikkel right now, in munin, the app Mikkel uses to work with agents\. munin is private, so only Mikkel can write to you here\. Talk to Mikkel as "you"\./);
+  assert.doesNotMatch(prompt, /know their name/);
+  assert.match(prompt, /Only mention that when you're asked for something that needs them/);
+  const order = ["You're talking with Mikkel", 'How you talk:', "You're hugin, an assistant.", "Mikkel's calendar, mail and other apps aren't connected", 'Mikkel may be away for hours'];
+  assert.deepEqual(order.map((words) => prompt.indexOf(words)), order.map((words) => prompt.indexOf(words)).toSorted((a, b) => a - b), 'in this order');
+  assert.ok(order.every((words) => prompt.includes(words)));
+  for (const p of prompts) assert.doesNotMatch(p, /messages in this conversation are from|read "I"|verif|confirm who/i, 'nothing about where messages come from');
 
   faux.setResponses([
     () => fauxAssistantMessage([fauxToolCall('ask_human', { question: 'Lunch at 12?' })], { stopReason: 'toolUse' }),
@@ -96,21 +101,34 @@ test('an agent knows the person writing to it is the one it works for, named or 
   await runtime.close();
 });
 
-test("briefs made with your name in them say \"the person you work for\" after a restart; your own words stay", async () => {
+test('briefs made from older words get the new ones after a restart; your own words stay', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'munin-setup-'));
   const db = join(dir, 'runtime.sqlite');
+  const old = {
+    hugin: ['assistant', "You're hugin, Mikkel's assistant. Keep their calendar and inbox in order, and say things once, briefly. Ask before you send mail or accept invites for them. Start weekdays with a briefing."],
+    tosk: ['assistant', "You're tosk, the assistant of the person you work for. Keep their calendar and inbox in order, and say things once, briefly. Ask before you send mail or accept invites for them."],
+    pip: ['companion', "You're pip. You're curious and cheerful, and you like riddles, word games and odd facts. Keep replies short. When Mikkel seems busy, let them be."],
+    forge: ['coder', "You're forge, a coder. Take issues from the top of the pile, do the work on a branch named after the issue, and send it to review with a short note on what you did. Ask when something is unclear instead of guessing."],
+    atlas: ['researcher', "You're atlas, a researcher. Read up on what you're asked, say what you found in a few lines, and list your sources."],
+    vera: ['assistant', "You're vera, Mikkel's right hand. Keep his diary."],
+  };
   let runtime = await open(dir, { db });
-  await runtime.createAgent({ name: 'hugin', role: 'assistant', brief: "You're hugin, Mikkel's assistant. Keep their calendar and inbox in order, and say things once, briefly. Ask before you send mail or accept invites for them. Start weekdays with a briefing." });
-  await runtime.createAgent({ name: 'tosk', role: 'assistant', brief: "You're tosk, your human's assistant. Keep their calendar and inbox in order, and say things once, briefly." });
-  await runtime.createAgent({ name: 'pip', role: 'companion', brief: "You're pip. You're curious and cheerful, and you like riddles, word games and odd facts. Keep replies short. When Mikkel seems busy, let them be." });
-  await runtime.createAgent({ name: 'vera', role: 'assistant', brief: "You're vera, Mikkel's right hand. Keep his diary." });
+  for (const [name, [role, brief]] of Object.entries(old)) await runtime.createAgent({ name, role, brief });
   await runtime.close();
 
   runtime = await open(dir, { db });
-  assert.equal((await runtime.agent('hugin')).brief, "You're hugin, the assistant of the person you work for. Keep their calendar and inbox in order, and say things once, briefly. Ask before you send mail or accept invites for them. Start weekdays with a briefing.");
-  assert.match((await runtime.agent('tosk')).brief, /^You're tosk, the assistant of the person you work for\. Keep their calendar/);
-  assert.match((await runtime.agent('pip')).brief, /Keep replies short\. When the person you work for seems busy, let them be\.$/);
-  assert.equal((await runtime.agent('vera')).brief, "You're vera, Mikkel's right hand. Keep his diary.", 'a brief you wrote yourself');
+  const brief = async (name) => (await runtime.agent(name)).brief;
+  assert.equal(await brief('hugin'), "You're hugin, an assistant: organised, a step ahead, and calm when the day gets busy. You keep track of plans, people and loose ends, mention things once, and notice what's about to be forgotten. Ask before you send mail or accept invites on their behalf. Start weekdays with a briefing.", 'what you added stays');
+  assert.match(await brief('tosk'), /^You're tosk, an assistant: organised/);
+  assert.equal(await brief('pip'), "You're pip: curious, cheerful and a little odd. You like riddles, word games and strange facts, and you'd rather ask a good question than give a long answer. When things seem busy, keep it light and short.");
+  assert.match(await brief('forge'), /^You're forge, a coder: careful, practical, and quick to say when an idea won't hold up\. Take issues from the top of the pile/);
+  assert.match(await brief('atlas'), /keep what's known apart from what's guessed, and list your sources\.$/);
+  assert.equal(await brief('vera'), "You're vera, Mikkel's right hand. Keep his diary.", 'a brief you wrote yourself');
+  const upgraded = await brief('forge');
+  await runtime.close();
+
+  runtime = await open(dir, { db });
+  assert.equal((await runtime.agent('forge')).brief, upgraded, 'new words stay as they are');
   await runtime.close();
 });
 
