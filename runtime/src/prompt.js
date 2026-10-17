@@ -14,10 +14,9 @@ export const VOICE = [
 ].join(' ');
 
 // Abilities an agent can have that munin can't give it yet, said the way the prompt says them.
-// Apps count as not yet while none of the agent's apps answer. MUN-8 (the web) takes its off.
+// Apps count as not yet while none of the agent's apps answer.
 const NOT_YET = {
   apps: (owner) => `${owner} calendar, mail and other apps aren't connected to munin yet`,
-  web: () => "you can't search or read the web yet",
   images: () => "you can't make pictures yet",
 };
 const capital = (text) => text[0].toUpperCase() + text.slice(1);
@@ -44,6 +43,11 @@ export function identity(agent, name, { apps = [] } = {}) {
     agent.brief,
     '',
     [
+      agent.abilities?.web
+        ? (agent.provider === 'openrouter'
+          ? 'You can search the web with web_search and read a page with read_page; say where what you found came from.'
+          : `You can read a page with read_page. Searching the web needs a model on OpenRouter, which you aren't on, so ask ${name || 'them'} for links when you need them.`)
+        : null,
       apps.length ? `You can use ${list(apps)} through their tools (named after the app). munin asks ${name || 'them'} before anything that sends, posts, accepts or deletes, and tells you the answer; reading needs no asking.` : null,
       missing.length ? `${capital(missing.join('; '))}. Only mention that when you're asked for something that needs them, and then help with what you're given.` : null,
       `${name || 'They'} may be away for hours. When you need a decision, use ask_human. When you learn something about ${you} that will still be true next week, use remember.`,
