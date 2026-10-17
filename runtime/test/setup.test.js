@@ -10,6 +10,7 @@ import { fauxProvider, fauxAssistantMessage, fauxText, fauxToolCall } from '@ear
 import { buildModels } from '../src/models.js';
 import { openRuntime } from '../src/runtime.js';
 import { createRuntimeServer } from '../src/server.js';
+import { SOULS } from '../src/roles.js';
 
 async function open(dir, { env = {}, db = ':memory:', extra = [] } = {}) {
   const settings = { db, host: '127.0.0.1', agentsDir: join(dir, 'agents'), ollamaUrl: null, user: 'me' };
@@ -101,7 +102,7 @@ test('an agent is told who it is talking with as a plain fact, then how it talks
   await runtime.close();
 });
 
-test('briefs made from older words get the new ones after a restart; your own words stay', async () => {
+test("briefs made from older words get their role's soul after a restart; your own words stay", async () => {
   const dir = await mkdtemp(join(tmpdir(), 'munin-setup-'));
   const db = join(dir, 'runtime.sqlite');
   const old = {
@@ -111,6 +112,9 @@ test('briefs made from older words get the new ones after a restart; your own wo
     forge: ['coder', "You're forge, a coder. Take issues from the top of the pile, do the work on a branch named after the issue, and send it to review with a short note on what you did. Ask when something is unclear instead of guessing."],
     atlas: ['researcher', "You're atlas, a researcher. Read up on what you're asked, say what you found in a few lines, and list your sources."],
     vera: ['assistant', "You're vera, Mikkel's right hand. Keep his diary."],
+    // the words from before souls, when a brief named the agent and listed what it's like
+    quill: ['writer', "You're quill, a writer with an ear for plain, short sentences. Draft and edit, keep one voice across everything you write, and say when a sentence isn't pulling its weight. Mostly munin's docs."],
+    ada: ['reviewer', "You're ada, a reviewer: thorough, fair and specific. Review what other agents send to review: run the tests, read the diff, merge what's good and send back what isn't, saying exactly what's missing."],
   };
   let runtime = await open(dir, { db });
   for (const [name, [role, brief]] of Object.entries(old)) await runtime.createAgent({ name, role, brief });
@@ -118,17 +122,26 @@ test('briefs made from older words get the new ones after a restart; your own wo
 
   runtime = await open(dir, { db });
   const brief = async (name) => (await runtime.agent(name)).brief;
-  assert.equal(await brief('hugin'), "You're hugin, an assistant: organised, a step ahead, and calm when the day gets busy. You keep track of plans, people and loose ends, mention things once, and notice what's about to be forgotten. Ask before you send mail or accept invites on their behalf. Start weekdays with a briefing.", 'what you added stays');
-  assert.match(await brief('tosk'), /^You're tosk, an assistant: organised/);
-  assert.equal(await brief('pip'), "You're pip: curious, cheerful and a little odd. You like riddles, word games and strange facts, and you'd rather ask a good question than give a long answer. When things seem busy, keep it light and short.");
-  assert.match(await brief('forge'), /^You're forge, a coder: careful, practical, and quick to say when an idea won't hold up\. Take issues from the top of the pile/);
-  assert.match(await brief('atlas'), /keep what's known apart from what's guessed, and list your sources\.$/);
+  const examples = async (name) => (await runtime.agent(name)).examples;
+  assert.equal(await brief('hugin'), `${SOULS.assistant.brief()} Start weekdays with a briefing.`, 'what you added stays');
+  assert.ok((await brief('tosk')).startsWith(SOULS.assistant.brief()));
+  assert.equal(await brief('pip'), SOULS.companion.brief());
+  assert.equal(await brief('forge'), SOULS.coder.brief());
+  assert.equal(await brief('atlas'), SOULS.researcher.brief());
+  assert.equal(await brief('quill'), `${SOULS.writer.brief()} Mostly munin's docs.`, 'from the words before souls');
+  assert.equal(await brief('ada'), SOULS.reviewer.brief());
   assert.equal(await brief('vera'), "You're vera, Mikkel's right hand. Keep his diary.", 'a brief you wrote yourself');
+  assert.doesNotMatch(await brief('forge'), /^You're forge/, "the runtime says who it is, so the brief doesn't");
+  assert.equal(await examples('hugin'), SOULS.assistant.examples('hugin'), 'its role\'s examples, for its name');
+  assert.equal(await examples('quill'), SOULS.writer.examples('quill'));
+  assert.equal(await examples('vera'), '', 'none for a brief you wrote yourself');
   const upgraded = await brief('forge');
+  await runtime.updateAgent('pip', { examples: '' });
   await runtime.close();
 
   runtime = await open(dir, { db });
   assert.equal((await runtime.agent('forge')).brief, upgraded, 'new words stay as they are');
+  assert.equal((await runtime.agent('pip')).examples, '', 'examples you emptied stay empty');
   await runtime.close();
 });
 

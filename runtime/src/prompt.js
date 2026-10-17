@@ -1,16 +1,20 @@
-// What every agent of munin's is told first: who it is, who it's talking with, how it talks,
-// and its own brief, then what it knows about you. Hermes Agent taught two things here: a voice
-// works when it's written as behaviour rather than a list of traits, and an agent that's told
-// where its messages come from starts doubting them, so the person it talks with is a plain fact.
+// What every agent of munin's is told first: who it is, who it's talking with, what no munin
+// agent sounds like, and its own brief and examples, then what it can do, who else is on the
+// team, and what it knows about you. Hermes Agent taught two things here: a voice works when
+// it's written as behaviour rather than a list of traits, and an agent that's told where its
+// messages come from starts doubting them, so the person it talks with is a plain fact. Character
+// cards taught a third: a few lines of how an agent talks show its voice better than any
+// description, so each agent has examples of its own.
 
-import { roleName } from './roles.js';
+import { ROLES, roleName } from './roles.js';
 
-// How every munin agent talks. A brief adds the agent's own character on top.
+// What every munin agent leaves out. How it does sound is its own: its brief and its examples.
+// Kept short on purpose, since a long shared voice makes every agent sound the same.
 export const VOICE = [
-  "How you talk: like someone who knows the person you're talking with and likes working with them, not like a help desk.",
+  "How you talk: like someone who knows the person you're talking with, not like a help desk.",
   'Match your reply to the message: a quick question gets a quick answer, and a real problem gets the room it needs.',
   'Skip filler ("Great question", "I\'d be happy to"), don\'t repeat the question back, and don\'t sum up what you just said.',
-  "Have opinions and say them. When you're unsure, say so once, plainly, and carry on.",
+  "When you're unsure, say so once, plainly. The rest of how you sound is your own, below.",
 ].join(' ');
 
 const capital = (text) => text[0].toUpperCase() + text.slice(1);
@@ -31,7 +35,31 @@ export function identity(agent, name) {
     VOICE,
     '',
     agent.brief,
+    ...examples(agent, name),
   ].join('\n');
+}
+
+// The agent's examples, made-up exchanges that show how it sounds. They're written from your
+// side, "You:" for you and the agent's name for it; in the prompt "you" is the agent, so your
+// lines get your name and its lines become "You:". Lines under its own name taught it to start
+// replies with its name ("pike: Good, thanks.").
+function examples(agent, name) {
+  const text = String(agent.examples || '').trim();
+  if (!text) return [];
+  const them = name || 'Them';
+  const own = `${agent.name.toLowerCase()}:`;
+  const lines = text.split('\n').map((line) => {
+    if (line.startsWith('You:')) return `${them}:${line.slice(4)}`;
+    if (line.toLowerCase().startsWith(own)) return `You:${line.slice(own.length)}`;
+    return line;
+  });
+  return [
+    '',
+    // Agents told only that the examples are made up brought their content up as if it had
+    // happened ("like the expired session no test touches") and retold their facts.
+    `How you sound, in a few made-up exchanges with ${name || 'the person you work for ("Them")'}. They're there for your voice: they didn't happen, so don't bring up what's in them.`,
+    ...lines,
+  ];
 }
 
 // The abilities an agent can have, as the profile names them, and what each is for.
@@ -45,7 +73,6 @@ const ABILITIES = {
 
 // What munin can't do for any agent yet, and what to offer instead.
 const NOT_IN_MUNIN = [
-  "Reach a phone. What you say waits in munin until it's read.",
   'Make pictures.',
 ];
 
@@ -54,12 +81,19 @@ const NOT_IN_MUNIN = [
 //   search: whether its model can search the web (OpenRouter);
 //   apps: { mine: [{ name, answering, detail, does }], others: [{ name, detail }] } (apps.js);
 //   tracker: { reachable, projects }, repos: project keys with code, routines: how many it has,
-//   watches: { mail, calendar }, whether its Gmail and Google Calendar can start routines.
-export function capabilities(agent, name, { search = false, apps = { mine: [], others: [] }, tracker = null, repos = [], routines = 0, watches = {} } = {}) {
+//   watches: { mail, calendar }, whether its Gmail and Google Calendar can start routines;
+//   devices: how many devices get munin's notifications.
+export function capabilities(agent, name, { search = false, apps = { mine: [], others: [] }, tracker = null, repos = [], routines = 0, watches = {}, devices = 0 } = {}) {
   const you = name || 'the person you work for';
   const has = (ability) => Boolean(agent.abilities?.[ability]);
   const can = [];
   can.push(`Talk things through with ${you}. When you need a decision, use ask_human; they may be away for hours. When you learn something about ${you} that will still be true next week, use remember.`);
+  // What reaches a phone (push.js): questions and approvals from everyone, and what agents
+  // that don't code say.
+  const reaches = has('code') ? 'your questions and approvals reach' : 'what you say reaches';
+  can.push(devices
+    ? `Reaching ${you}: ${reaches} their phone too, as notifications, even with munin closed${has('code') ? '; the rest of what you say waits in munin' : ''}.`
+    : `Reaching ${you}: what you say waits in munin until they look. Once they turn on notifications in munin's Settings, ${reaches} their phone too.`);
   can.push(`Routines: work you do on your own. When you're asked to do something regularly, like a morning brief, set it up with add_routine (and change_routine, remove_routine, list_routines). munin understands "when" like "Weekdays 07:30", "Mondays at 9", "Every night 02:00" or "Every 30 minutes, 08–18"${has('tracker') ? ', for the tracker "When an issue moves to In review"' : ''}${watches.mail ? ', for mail (trigger mail) "When new mail arrives" or "When mail from ann@example.com arrives"' : ''}${watches.calendar ? ', for the calendar (trigger calendar) "Before each meeting", "15 minutes before each event" or "When an invitation arrives"' : ''}. You have ${routines === 0 ? 'none yet' : routines === 1 ? 'one' : routines}.`);
   if (has('web')) {
     can.push(search
@@ -105,4 +139,24 @@ export function capabilities(agent, name, { search = false, apps = { mine: [], o
 export function about(agent, name) {
   const notes = agent.memory || [];
   return notes.length ? [`What you know about ${name || 'the person you work for'}:`, ...notes.map((n) => `- ${n.text}`)].join('\n') : undefined;
+}
+
+// Who else is on the team: munin's other agents, what each does, and what each is on, so the
+// agent can say whose job something is. Only what changes now and then, since a section that
+// changes every turn is sent again every turn: whether an agent is paused, and the issue a coder
+// last took, but not whether it's busy this minute.
+export function team(others) {
+  if (!others.length) return undefined;
+  const line = (other) => {
+    const issue = other.abilities?.code && !other.work?.detached ? other.work?.issue : null;
+    return [
+      `- ${other.name}, ${article(roleName(other.role).toLowerCase())}: ${ROLES[other.role]?.does || 'one of the team'}.`,
+      issue ? ` Last took ${issue.id}${issue.title ? ` · ${issue.title}` : ''}.` : '',
+      other.paused ? ' Paused.' : '',
+    ].join('');
+  };
+  return [
+    "Your team: munin's other agents. You don't message them; coders and reviewers work together in the tracker. When something is another agent's job, say so, and whose.",
+    ...others.map(line),
+  ].join('\n');
 }
