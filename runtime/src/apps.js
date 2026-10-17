@@ -17,6 +17,21 @@ const slug = (name) => String(name).toLowerCase().normalize('NFKD').replace(/[^a
 const toolName = (app, tool) => `${app.replace(/-/g, '_')}__${tool}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
 const hint = (token) => (token ? token.slice(-4) : null);
 
+// Whether a tool changes something (sends, posts, accepts, deletes) rather than only reading:
+// what the server says in its annotations, or else what its name says.
+const READS = /^(list|get|read|search|find|fetch|query|describe|show|lookup|check|count|view)(_|$)/i;
+export const changes = (spec) => (spec.annotations?.readOnlyHint !== undefined ? !spec.annotations.readOnlyHint : !READS.test(spec.name));
+
+// A call in plain words for an approval card: "send email · to: ann@example.com · subject: Lunch".
+export function describeAppCall(tool, args = {}) {
+  const words = tool.replace(/_/g, ' ');
+  const parts = Object.entries(args)
+    .filter(([, value]) => value !== null && value !== undefined && typeof value !== 'object' || Array.isArray(value))
+    .map(([key, value]) => `${key.replace(/_/g, ' ')}: ${Array.isArray(value) ? value.join(', ') : String(value)}`);
+  const line = [words, ...parts].join(' · ');
+  return line.length > 200 ? `${line.slice(0, 199)}…` : line;
+}
+
 // `registry` gets each app's tools as an extension once it answers; `onChange()` hears that
 // the apps, or which of them answer, changed, so conversations can be given the new tools.
 export async function openApps({ file, registry, onChange = () => {} }) {
@@ -135,6 +150,19 @@ export async function openApps({ file, registry, onChange = () => {} }) {
     extensionsFor: (agent) => appsOf(agent).map((app) => live.get(app.id)?.extension).filter(Boolean),
     // What the prompt says: the names of the agent's apps that answer.
     namesFor: (agent) => appsOf(agent).filter((app) => live.get(app.id)?.extension).map((app) => app.name),
+
+    // The ask-first rule an app gets on an agent that has it: anything that changes something.
+    ruleFor: (id) => {
+      const app = saved.find((a) => a.id === id);
+      return app && { id: `app:${app.id}`, app: app.id, label: `${app.name}: sending, changing or deleting`, what: `do something in ${app.name}`, third: `does things in ${app.name}`, on: true };
+    },
+    // The agent's apps by id, picks from before apps were real included.
+    idsFor: (agent) => saved.filter((app) => (agent.apps || []).some((pick) => pick === app.id || pick.toLowerCase() === app.name.toLowerCase())).map((app) => app.id),
+    // The tool behind a call's name, when it's one of `app`'s and changes something.
+    changing(app, name) {
+      const spec = live.get(app)?.tools?.find((tool) => toolName(app, tool.name) === name);
+      return spec && changes(spec) ? spec : null;
+    },
 
     close() {
       closed = true;

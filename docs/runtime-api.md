@@ -158,7 +158,7 @@ The runtime (`runtime/src/`) is a thin layer over pi-durable:
 - **Questions, answers, approvals, decisions and actions** are entries of munin's own kinds (`munin.question`, `munin.answer`, `munin.approval`, `munin.decision`, `munin.action`).
   - Agents ask with an `ask_human` tool, with options or without.
   - An answer goes to the agent as an input, so it steers a running agent.
-- **Ask-first rules** are a `beforeTool` hook. A call a rule covers is blocked and an approval written. The decision goes to the agent as a message, and "once" lets the next such call through. "Always" switches the rule off; undo switches it back on.
+- **Ask-first rules** are a `beforeTool` hook. A call a rule covers is blocked and an approval written. The decision goes to the agent as a message, and "once" lets the next such call through. "Always" switches the rule off; undo switches it back on. Each app an agent has gets a rule of its own (`app:<id>`, "Calendar: sending, changing or deleting"), on until you turn it off, which covers the app's tools that change something: those the server doesn't mark `readOnlyHint`, or, without annotations, those whose names don't start like `list_`, `get_` or `search_`. Its approval says the call in plain words: "add event · title: Lunch with Ann · when: 12:00". Taking the app away takes its rule with it.
 - **Steering:** `send` while a run is going is `submit({ whenBusy: "steer" })`.
 - **Brief, model and abilities** are the conversation's agent settings: instructions, model and extensions. Coders get pi-durable's coding tools (read, write, edit, bash) in their own folder.
 - **Memory** is a `remember` tool. Notes go into the agent's system prompt.
@@ -180,4 +180,4 @@ An agent in the tracker starts work when you tell it to, from its projects in th
 
 Stored but not acted on yet, next roughly in this order:
 
-1. **Ask-first rules for apps** like "send mail" (MUN-7), then mail and calendar routines (MUN-9). **The web** as a tool (MUN-8). **Apps that run as a local command** (stdio MCP servers), not only over HTTP.
+1. **Mail and calendar routines** (MUN-9). **The web** as a tool (MUN-8). **Apps that run as a local command** (stdio MCP servers, MUN-27), not only over HTTP.

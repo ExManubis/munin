@@ -44,7 +44,7 @@ export function identity(agent, name, { apps = [] } = {}) {
     agent.brief,
     '',
     [
-      apps.length ? `You can use ${list(apps)} through their tools (named after the app). Ask before you send, post, accept or delete anything for ${name || 'them'}.` : null,
+      apps.length ? `You can use ${list(apps)} through their tools (named after the app). munin asks ${name || 'them'} before anything that sends, posts, accepts or deletes, and tells you the answer; reading needs no asking.` : null,
       missing.length ? `${capital(missing.join('; '))}. Only mention that when you're asked for something that needs them, and then help with what you're given.` : null,
       `${name || 'They'} may be away for hours. When you need a decision, use ask_human. When you learn something about ${you} that will still be true next week, use remember.`,
     ].filter(Boolean).join(' '),

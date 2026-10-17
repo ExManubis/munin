@@ -17,7 +17,7 @@ import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { ROLES, roleName, askFirstFor, ruleMatches, upgradeBrief } from './roles.js';
 import { toItems, summarize } from './items.js';
-import { AppError, openApps } from './apps.js';
+import { AppError, describeAppCall, openApps } from './apps.js';
 import { identity, about } from './prompt.js';
 import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
@@ -165,7 +165,8 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         if (agent?.pausedFor === 'budget' && agent.paused) {
           return { block: "You've reached your budget for this month, so munin has paused you. Don't call any more tools: say in a line or two where you got to, and stop." };
         }
-        const rule = agent?.askFirst.find((r) => r.on && ruleMatches(r, call.name, call.arguments));
+        // An app's rule covers its tools that change something; the others match by tool and command.
+        const rule = agent?.askFirst.find((r) => r.on && (r.app ? apps.changing(r.app, call.name) : ruleMatches(r, call.name, call.arguments)));
         if (!rule) return undefined;
         const allowed = agent.allowances.indexOf(rule.id);
         if (allowed >= 0) {
@@ -173,7 +174,8 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
           await saveAgents();
           return undefined;
         }
-        const target = call.name === 'bash' ? String(call.arguments.command || '').slice(0, 160) : String(call.arguments.path || call.name);
+        const target = rule.app ? describeAppCall(apps.changing(rule.app, call.name).name, call.arguments)
+          : call.name === 'bash' ? String(call.arguments.command || '').slice(0, 160) : String(call.arguments.path || call.name);
         await write(agent, 'munin.approval', { rule: rule.id, label: rule.label, what: rule.what, third: rule.third, target });
         return { block: `${them({ start: true })} hasn't allowed this yet (${rule.label.toLowerCase()}). They've been asked; their answer comes as a message. Don't try again before it does.` };
       },
@@ -297,10 +299,19 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
   const saved = await harness.snapshot(AgentsDoc, ctx);
   for (const agent of Object.values(saved?.agents || {})) agents.set(agent.name, { ...structuredClone(agent), brief: upgradeBrief(agent.brief) });
+  for (const agent of agents.values()) syncAppRules(agent);
   Object.assign(repos, structuredClone(saved?.repos || {}));
   Object.assign(prefs, structuredClone(saved?.prefs || {}));
   workspace = createWorkspace({ dir: reposDir, agentsDir: settings.agentsDir, repos });
   tracker.connect(); // in the background: until the tracker answers, agents are told it's away
+
+  // Each app an agent has gets an ask-first rule (apps.ruleFor), on until you turn it off; an
+  // app it no longer has, or that's gone, takes its rule with it.
+  function syncAppRules(agent) {
+    const ids = apps.idsFor(agent);
+    agent.askFirst = agent.askFirst.filter((rule) => !rule.app || ids.includes(rule.app));
+    for (const id of ids) if (!agent.askFirst.some((rule) => rule.app === id)) agent.askFirst.push(apps.ruleFor(id));
+  }
 
   async function saveAgents() {
     await harness.commit(async (tx) => {
@@ -622,7 +633,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         if (agent.abilities.code && !agent.askFirst.length) agent.askFirst = askFirstFor(agent.abilities);
         if (agent.abilities.code) await mkdir(agent.folder, { recursive: true });
       }
-      if (patch.apps) agent.apps = [...patch.apps];
+      if (patch.apps) {
+        agent.apps = [...patch.apps];
+        syncAppRules(agent);
+      }
       if (patch.askFirst) for (const rule of agent.askFirst) if (rule.id in patch.askFirst) rule.on = Boolean(patch.askFirst[rule.id]);
       if ('tracker' in patch) agent.tracker = trackerLink(patch.tracker, agent.tracker);
       await (await conversationOf(agent)).configure(change(agent), ctx);
@@ -769,6 +783,8 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     async removeApp(id) {
       try {
         await apps.remove(id);
+        for (const agent of agents.values()) syncAppRules(agent);
+        await saveAgents();
       } catch (err) {
         if (err instanceof AppError) throw new RuntimeError(404, err.message);
         throw err;
