@@ -33,7 +33,7 @@ import { createWorkspace, WorkspaceError } from './workspace.js';
 import { QUIET_GIT, createDockerSandbox, localShellEnv, passedThrough } from './sandbox.js';
 import { KeyError } from './keys.js';
 import { FAVOURITES } from './models.js';
-import { MeetingError, isQuiet as meetingQuiet, speech, speechOf, nextSpeaker, waitingOn, meetingOut, meetingSummary, turnText, parseMeeting } from './meetings.js';
+import { MeetingError, isQuiet as meetingQuiet, speech, speechOf, nextSpeaker, waitingOn, meetingOut, meetingSummary, turnText, parseMeeting, meetingOfTurn } from './meetings.js';
 
 export class RuntimeError extends Error {
   constructor(status, message) {
@@ -48,7 +48,9 @@ const conflict = (message) => new RuntimeError(409, message);
 
 // Every agent's settings, where each project's code is, and what setup asked (your name, your
 // favourite models, whether it's done), in one session document next to the conversations.
-const AgentsDoc = defineDoc({ kind: 'munin.agents', version: 1, scope: 'session', initial: () => ({ agents: {}, repos: {}, prefs: {}, skills: {}, meetings: {} }) });
+const AgentsDoc = defineDoc({ kind: 'munin.agents', version: 1, scope: 'session', initial: () => ({ agents: {}, repos: {}, prefs: {}, skills: {} }) });
+// Meetings (meetings.js), transcripts and who's been asked to speak included: { id: meeting }.
+const MeetingsDoc = defineDoc({ kind: 'munin.meetings', version: 1, scope: 'session', initial: () => ({ meetings: {} }) });
 // What model responses cost while an agent worked on an issue: { 'MUN-12': { cost, tokens, agents: { forge: cost } } }.
 const CostsDoc = defineDoc({ kind: 'munin.costs', version: 1, scope: 'session', initial: () => ({ issues: {} }) });
 
@@ -99,7 +101,7 @@ const costOfResponse = (message) => message.usage?.cost?.total || 0;
 export async function openRuntime(settings, { models, storage, now = Date.now, timers = true, costOf = costOfResponse, google: googleTest = {}, push: pushTest = {} } = {}) {
   storage ||= settings.db === ':memory:' ? new MemoryStorage() : await openNodeSqliteStorage(settings.db);
   const meetings = new Map(); // id → meeting (meetings.js)
-  const meetingTurns = new Map(); // agent name → meeting id, while munin has asked it to speak
+  const meetingNow = new Map(); // agent name → the meeting whose turn it's answering right now
   const agents = new Map(); // name → settings
   const skills = new Map(); // id → skill (skills.js), each with its owner and who it's shared with
   const turns = new Map(); // agent name → 'heartbeat' or 'journal', while munin's own input is being answered (rhythm.js)
@@ -256,19 +258,27 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   });
 
   // Meetings (meetings.js): speak_in_meeting, the tool an agent answers a meeting turn with.
-  // Text is the speech; calling it with none passes. The meeting id comes from what munin asked.
+  // Text is the speech; calling it with none passes. Which meeting: the one it was given, else the
+  // one whose turn it's answering, else the only one that asked it.
   const speakInMeeting = defineTool({
     name: 'speak_in_meeting',
     description: 'Say your turn in a munin meeting. A few sentences at most, spoken to the others in the room. With nothing to add, call it with no text to pass.',
-    parameters: Type.Object({ text: Type.Optional(Type.String({ description: 'What you say, or left out to pass' })) }),
+    parameters: Type.Object({
+      text: Type.Optional(Type.String({ description: 'What you say, or left out to pass' })),
+      meeting: Type.Optional(Type.String({ description: 'The meeting id from your turn, when you were asked in more than one' })),
+    }),
     execute: async (args, toolApi) => {
       const agent = agentFor(toolApi.conversationId);
-      const meetingId = meetingTurns.get(agent.name);
-      if (!meetingId || !meetings.has(meetingId)) return say("You haven't been asked to speak in a meeting.", true);
-      meetingTurns.delete(agent.name);
-      const text = args.text == null ? null : String(args.text).trim();
-      await recordTurn(meetingId, agent.name, text);
-      return say(text == null ? 'You passed.' : 'Said in the meeting.');
+      const asking = [...meetings.values()].filter((m) => m.status === 'open' && m.asked?.agent === agent.name);
+      const id = args.meeting || meetingNow.get(agent.name) || (asking.length === 1 ? asking[0].id : null);
+      const meeting = id ? meetings.get(id) : null;
+      if (!meeting || meeting.status !== 'open' || meeting.asked?.agent !== agent.name) {
+        return say(asking.length > 1 ? `Say which meeting: ${asking.map((m) => `${m.id} ("${m.title}")`).join(', ')}.` : "You haven't been asked to speak in a meeting.", true);
+      }
+      meetingNow.delete(agent.name);
+      const text = args.text == null ? null : String(args.text);
+      const spoke = await recordTurn(meeting.id, agent.name, text);
+      return say(spoke ? 'Said in the meeting.' : 'You passed.');
     },
   });
 
@@ -455,6 +465,15 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       beforeRequest: async (request, api) => {
         const agent = agentFor(api.conversationId);
         if (agent?.budget) await spentThisMonth(agent);
+        // Which meeting's turn this request answers, if any: the turn's text is the last thing
+        // munin said to it, so a turn queued behind other work isn't mistaken for that work.
+        if (agent) {
+          const said = request.messages.findLast((m) => m.role === 'user');
+          const turn = meetingOfTurn(typeof said?.content === 'string' ? said.content : (said?.content || []).map((c) => c.text || '').join(''));
+          const asked = turn && meetings.get(turn.id)?.asked;
+          if (asked?.agent === agent.name && asked.turn === turn.turn) meetingNow.set(agent.name, turn.id);
+          else meetingNow.delete(agent.name);
+        }
         // In a long conversation, who the agent is gets repeated at the end, for this request
         // only: a persona drifts as attention leaves the system prompt (prompt.js, reminder).
         if (!agent || request.messages.filter((m) => m.role !== 'system').length < REMIND_AFTER) return undefined;
@@ -467,6 +486,16 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         spent.total += costOf(message);
         if (agent.onIssue) await countFor(agent.onIssue, agent, message);
         if (agent.budget && spent.total >= agent.budget) await pauseForBudget(agent);
+        // A meeting turn the agent ended without speak_in_meeting (it answered in plain words,
+        // failed or was stopped): what it said is its speech, nothing is a pass. The meeting
+        // moves on either way, and its words aren't pushed as a message to you.
+        const answering = message.stopReason !== 'toolUse' ? meetingNow.get(agent.name) : null;
+        if (answering) {
+          meetingNow.delete(agent.name);
+          const words = message.stopReason === 'stop' ? (message.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n') : null;
+          if (meetings.get(answering)?.asked?.agent === agent.name) await recordTurn(answering, agent.name, words);
+          return;
+        }
         // A finished answer (not a step towards one) reaches your devices. A journal entry goes
         // on the profile instead, and a heartbeat with nothing to say goes nowhere (rhythm.js).
         const text = message.stopReason === 'stop' ? (message.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim() : '';
@@ -691,7 +720,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   Object.assign(prefs, structuredClone(saved?.prefs || {}));
   for (const skill of Object.values(saved?.skills || {})) skills.set(skill.id, structuredClone(skill));
   Object.assign(issueCosts, structuredClone((await harness.snapshot(CostsDoc, ctx))?.issues || {}));
-  for (const meeting of Object.values((await harness.snapshot(AgentsDoc, ctx))?.meetings || {})) meetings.set(meeting.id, structuredClone(meeting));
+  for (const meeting of Object.values((await harness.snapshot(MeetingsDoc, ctx))?.meetings || {})) meetings.set(meeting.id, structuredClone(meeting));
   workspace = createWorkspace({ dir: reposDir, agentsDir: settings.agentsDir, repos });
   tracker.connect(); // in the background: until the tracker answers, agents are told it's away
 
@@ -721,7 +750,14 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       for (const [name, agent] of agents) doc.agents[name] = structuredClone(agent);
       doc.repos = structuredClone(repos);
       doc.prefs = structuredClone(prefs);
-      doc.skills = Object.fromEntries([...skills].map(([id, skill]) => ([id, structuredClone(skill)])));
+      doc.skills = Object.fromEntries([...skills].map(([id, skill]) => [id, structuredClone(skill)]));
+    }, ctx);
+  }
+
+  // Meetings in their own doc, so a long transcript isn't written again with every agent setting.
+  async function saveMeetings() {
+    await harness.commit(async (tx) => {
+      const doc = await tx.doc(MeetingsDoc);
       doc.meetings = Object.fromEntries([...meetings].map(([id, meeting]) => [id, structuredClone(meeting)]));
     }, ctx);
   }
@@ -1426,7 +1462,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       };
       if (parsed.first) speech(meeting, { from: null, text: parsed.first, at: now() });
       meetings.set(meeting.id, meeting);
-      await saveAgents();
+      await saveMeetings();
       changed();
       await driveMeeting(meeting.id);
       return meetingOut(meeting, meetingAgentFor);
@@ -1440,8 +1476,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       if (meeting.status !== 'open') throw conflict('That meeting is closed.');
       meeting.turns = 0;
       meeting.lastPasses = 0; // your word breaks a silence, as it breaks a run of turns
+      // A turn asked long ago whose answer never came (its input was lost) doesn't hold you up.
+      if (meeting.asked && now() - meeting.asked.at > STALE_TURN) meeting.asked = null;
       speech(meeting, { from: null, text: said, at: now() });
-      await saveAgents();
+      await saveMeetings();
       changed();
       await driveMeeting(meeting.id);
       return meetingOut(meeting, meetingAgentFor);
@@ -1451,8 +1489,8 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       const meeting = needMeeting(id);
       if (meeting.status !== 'open') throw conflict('That meeting is already closed.');
       meeting.status = 'closed';
-      for (const [name, mid] of meetingTurns) if (mid === meeting.id) meetingTurns.delete(name);
-      await saveAgents();
+      meeting.asked = null; // a turn still being answered finishes, and says nothing
+      await saveMeetings();
       changed();
       return meetingOut(meeting, meetingAgentFor);
     },
@@ -1480,27 +1518,33 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     return agent ? { name: agent.name, colour: agent.colour, role: agent.role, roleName: roleName(agent.role) } : { name, gone: true };
   };
 
-  // One agent's turn is done: its speech (or pass) joins the transcript, then the next turn is
-  // asked. Called from speak_in_meeting and from the driver below.
+  const STALE_TURN = 10 * 60 * 1000;
+
+  // One agent's turn is done: its speech (or a pass, for no words, blank ones or NO_REPLY) joins
+  // the transcript, then the next turn is asked. Says whether it spoke.
   async function recordTurn(meetingId, agentName, text) {
     const meeting = needMeeting(meetingId);
-    if (meeting.status !== 'open') return;
-    const pass = text == null || meetingQuiet(text);
-    const trimmed = pass ? null : speechOf(text);
-    meeting.turns += 1;
-    if (!pass && !trimmed) meeting.turns -= 1; // an empty speech is a pass, not a turn
-    speech(meeting, { from: agentName, text: trimmed, at: now(), pass });
+    if (meeting.status !== 'open') return false;
+    if (meeting.asked?.agent === agentName) meeting.asked = null;
+    const said = speechOf(text);
+    const pass = !said || meetingQuiet(said);
+    meeting.turns = (meeting.turns || 0) + 1;
+    speech(meeting, { from: agentName, text: pass ? null : said, at: now(), pass });
     meeting.lastPasses = pass ? (meeting.lastPasses || 0) + 1 : 0;
-    await saveAgents();
+    await saveMeetings();
     changed();
     await driveMeeting(meeting.id);
+    return !pass;
   }
 
-  // Ask the next participant to speak, unless the meeting should wait. Never asks an agent
-  // already mid-turn, and a paused agent's turn is skipped to the next.
+  // Ask the next participant to speak, unless the meeting should wait. One turn at a time per
+  // meeting (`asked`, kept with it, so a restart doesn't lose it), and a paused agent's turn is
+  // skipped to the next. An agent in two meetings answers each in turn.
   async function driveMeeting(meetingId) {
     const meeting = needMeeting(meetingId);
     if (meeting.status !== 'open' || closed) return;
+    if (meeting.asked && agents.has(meeting.asked.agent)) return; // its answer drives the next turn
+    meeting.asked = null; // asked an agent that's gone since
     const names = meeting.participants.filter(Boolean);
     const sinceHuman = meeting.turns || 0;
     const passed = meeting.lastPasses || 0;
@@ -1513,18 +1557,19 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     if (agent.paused) {
       // Skip a paused agent: record a pass so the round-robin moves on and the guards still hold.
       meeting.lastPasses = (meeting.lastPasses || 0) + 1;
-      speech(meeting, { from: next, text: null, at: now(), pass: true, skipped: true });
-      await saveAgents();
+      speech(meeting, { from: next, text: null, at: now(), pass: true });
+      await saveMeetings();
       return driveMeeting(meetingId);
     }
-    if (meetingTurns.has(next)) return; // already asked; its answer drives the next turn
-    meetingTurns.set(next, meeting.id);
+    meeting.asked = { agent: next, at: now(), turn: meeting.speeches.length };
+    await saveMeetings();
     const text = turnText(meeting, next, them());
     await (await conversationOf(agent)).submit({ type: 'input', content: text, whenBusy: 'followUp', entry: { kind: 'munin.meeting', data: { meeting: meeting.id, title: meeting.title, at: now() } } }, ctx);
   }
 
-  // When an agent answers its turn while its driver waits: speak_in_meeting calls recordTurn,
-  // which drives the next turn. The tool call itself isn't a run step (items.js keeps it quiet).
+  // An agent answers its turn with speak_in_meeting, or by ending the turn without it (the
+  // afterResponse hook): either way recordTurn drives the next one. The tool call itself isn't a
+  // run step (items.js keeps it quiet).
 
   // Routines ------------------------------------------------------------------------------
 

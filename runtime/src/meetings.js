@@ -1,10 +1,12 @@
 // Meetings: figbots talking with each other in turns, with you able to join (MUN-41). A meeting
-// is a list of participants (agents, plus you) and a transcript of short speeches. The
-// transcript lives in a session doc (munin.meetings), so it survives restarts like the agents'
-// settings do. Turns go round-robin: after the meeting is created, or anyone speaks, munin asks
-// the next participant's agent, as an input of munin's own kind in its own conversation, to
-// speak with speak_in_meeting. An agent with nothing to add passes (SILENCE), and guards — a cap
-// on turns in a row without you, and on passes in a row — end a meeting that's going nowhere.
+// is a list of participants (agents, plus you) and a transcript of short speeches. Meetings live
+// in a session doc of their own (munin.meetings), so they survive restarts, and who has been
+// asked to speak (`asked`) is kept with them. Turns go round-robin: after the meeting is created,
+// or anyone speaks, munin asks the next participant's agent, as an input of munin's own kind in
+// its own conversation, to speak with speak_in_meeting. A turn the agent ends without the tool
+// still counts: what it said is its speech, and nothing is a pass. An agent with nothing to add
+// passes (SILENCE), and guards (a cap on turns in a row without you, and on passes in a row) end
+// a meeting that's going nowhere. A lone agent waits for you after it speaks.
 
 export const SILENCE = 'NO_REPLY';
 const TURNS = 12; // agent speeches in a row without you before the meeting waits for you
@@ -34,18 +36,26 @@ export function speech(meeting, { from, text, at, pass = false }) {
 
 // The next agent to speak, from the last speech (round-robin over the participants, in the
 // order they joined). The human is in participants as null: they speak when they like, and munin
-// never asks them for a turn.
+// never asks them for a turn. Nobody speaks twice in a row: when the only agent left is the one
+// that just spoke, it's your turn, so null.
 export function nextSpeaker(meeting, agents) {
   const names = meeting.participants.filter(Boolean);
   if (!names.length) return null;
   const last = meeting.speeches.at(-1);
-  if (!last) return names[0];
+  if (!last) return names.find((name) => agents.has(name)) || null;
   const index = last.from === null ? -1 : names.indexOf(last.from);
   for (let step = 1; step <= names.length; step++) {
     const candidate = names[(index + step) % names.length];
-    if (agents.has(candidate)) return candidate;
+    if (agents.has(candidate)) return candidate === last.from ? null : candidate;
   }
   return null;
+}
+
+// Which meeting and which turn a turn input is for, from its text (turnText's first line), or null.
+const TURN = /^You're in a munin meeting called .* \(meeting ([\w-]+), turn (\d+)\)/;
+export function meetingOfTurn(text) {
+  const m = TURN.exec(String(text || ''));
+  return m ? { id: m[1], turn: Number(m[2]) } : null;
 }
 
 // Where the meeting stands after a speech: whether the next turn may be asked of an agent, and
@@ -80,14 +90,14 @@ export function meetingSummary(meeting, agentFor) {
 }
 
 // The prompt text munin sends an agent for its turn: what the meeting is, who's there, what's
-// been said (attributed to the speaker), and what to do.
+// been said (attributed to the speaker), and what to do. The turn is the meeting's `asked.turn`.
 export function turnText(meeting, agentName, nameOf) {
   const lines = meeting.speeches.slice(-20).map((s) => {
     const who = s.from === null ? nameOf : s.from;
     return s.pass ? `${who}: (passed)` : `${who}: ${s.text}`;
   });
   return [
-    `You're in a munin meeting called "${meeting.title}", with ${meeting.participants.map((p) => (p === null ? nameOf : p)).join(', ')}. The transcript so far, oldest first:`,
+    `You're in a munin meeting called "${meeting.title}" (meeting ${meeting.id}, turn ${meeting.asked?.turn ?? meeting.speeches.length}), with ${meeting.participants.map((p) => (p === null ? nameOf : p)).join(', ')}. The transcript so far, oldest first:`,
     ...(lines.length ? lines : ['(nothing said yet)']),
     '',
     `It's your turn, ${agentName}. Say what you have to say with speak_in_meeting — a few sentences at most, spoken to the others in the room, not a report to ${nameOf}. If you have nothing to add, call speak_in_meeting with no text to pass.`,

@@ -169,3 +169,80 @@ test('a meeting survives a restart, and closing stops the turns', async () => {
   await reopened.runtime.close();
 });
 const reply = (...content) => fauxAssistantMessage(content, { stopReason: content.some((c) => c.type === 'toolCall') ? 'toolUse' : 'stop' });
+test('nobody speaks twice in a row: a lone agent waits for you', () => {
+  const solo = { id: 'm2', title: 'Solo', participants: ['pip', null], status: 'open', speeches: [] };
+  assert.equal(nextSpeaker(solo, agents), 'pip');
+  assert.equal(nextSpeaker({ ...solo, speeches: [{ from: null }] }, agents), 'pip');
+  assert.equal(nextSpeaker({ ...solo, speeches: [{ from: null }, { from: 'pip' }] }, agents), null, 'your turn');
+});
+
+test('a lone agent and you take turns', async () => {
+  const { runtime, faux, made } = await setup();
+  await twoAgents(runtime, made);
+  faux.setResponses([...turn('Morning.'), ...turn('Sounds good.')], 'a');
+  const meeting = await runtime.createMeeting({ title: 'Standup', participants: ['pip', null], first: 'Morning, pip.' });
+  await runtime.waitForIdle();
+  assert.deepEqual((await runtime.meeting(meeting.id)).speeches.map((s) => s.from), [null, 'pip']);
+  await runtime.speakInMeetingAsHuman(meeting.id, 'Let us ship it.');
+  await runtime.waitForIdle();
+  assert.deepEqual((await runtime.meeting(meeting.id)).speeches.map((s) => s.from), [null, 'pip', null, 'pip']);
+  await runtime.close();
+});
+
+test('a turn ended without speak_in_meeting still counts, and the meeting moves on', async () => {
+  const { runtime, faux, made } = await setup();
+  await twoAgents(runtime, made);
+  // pip answers in plain words, no tool; later it has nothing to say, in plain words too.
+  faux.setResponses([reply(fauxText('We should ship it.')), reply(fauxText('   ')), ...turn(null)], 'a');
+  faux.setResponses([...turn('Agreed.'), ...turn(null)], 'b');
+  const meeting = await runtime.createMeeting({ title: 'Ship?', participants: ['pip', 'hugin', null], first: 'Ship it?' });
+  await runtime.waitForIdle();
+  const full = await runtime.meeting(meeting.id);
+  assert.deepEqual(full.speeches.slice(0, 4).map((s) => [s.from, s.pass ? 'pass' : s.text]),
+    [[null, 'Ship it?'], ['pip', 'We should ship it.'], ['hugin', 'Agreed.'], ['pip', 'pass']]);
+  assert.ok(!(await runtime.conversation('pip')).items.some((i) => i.kind === 'question'), 'nothing waits on you from it');
+  await runtime.close();
+});
+
+test('blank words are a pass, not an empty speech', async () => {
+  const { runtime, faux, made } = await setup();
+  await twoAgents(runtime, made);
+  faux.setResponses([...turn('   '), ...turn(null)], 'a');
+  faux.setResponses([...turn(null)], 'b');
+  const meeting = await runtime.createMeeting({ title: 'Blank', participants: ['pip', 'hugin', null] });
+  await runtime.waitForIdle();
+  const [first] = (await runtime.meeting(meeting.id)).speeches;
+  assert.deepEqual([first.from, first.pass, first.text], ['pip', true, null]);
+  await runtime.close();
+});
+
+test('an agent in two meetings answers both', async () => {
+  const { runtime, faux, made } = await setup();
+  await twoAgents(runtime, made);
+  faux.setResponses([...turn('In the first.'), ...turn('In the second.')], 'a');
+  const one = await runtime.createMeeting({ title: 'One', participants: ['pip', null] });
+  const two = await runtime.createMeeting({ title: 'Two', participants: ['pip', null] });
+  await runtime.waitForIdle();
+  assert.deepEqual((await runtime.meeting(one.id)).speeches.map((s) => s.text), ['In the first.']);
+  assert.deepEqual((await runtime.meeting(two.id)).speeches.map((s) => s.text), ['In the second.']);
+  await runtime.close();
+});
+
+test('who was asked to speak survives a restart, and meetings have a doc of their own', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'munin-meetings-asked-'));
+  const db = join(dir, 'runtime.db');
+  const { runtime, made } = await setup({ db });
+  await twoAgents(runtime, made);
+  // No scripted answer yet: hugin's turn is asked, and munin stops before it's answered.
+  const meeting = await runtime.createMeeting({ title: 'Later', participants: ['hugin', null], first: 'Over to you.' });
+  assert.equal((await runtime.meeting(meeting.id)).speeches.length, 1, 'asked, not answered yet');
+  await runtime.close().catch(() => {});
+
+  const again = await setup({ db });
+  again.faux.setResponses([...turn('Picked it up.')], 'b');
+  await again.runtime.resume('hugin').catch(() => {});
+  await again.runtime.waitForIdle();
+  const full = await again.runtime.meeting(meeting.id);
+  assert.deepEqual(full.speeches.map((s) => [s.from, s.text]), [[null, 'Over to you.'], ['hugin', 'Picked it up.']]);
+  await again.runtime.close();
+});
