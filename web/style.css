@@ -85,6 +85,10 @@ kbd {
   font: 11px/16px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
 }
 .chip:hover { border-color: var(--text); }
+.prop.prop-pulls { align-items: flex-start; padding: 7px 0; }
+.prop-value.pulls { flex-direction: column; gap: 6px; align-items: flex-start; }
+.prop-value.pulls .input.bare { flex: none; align-self: stretch; }
+.pull { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .chip.prio-high { border-style: solid; border-color: var(--text-2); }
 .chip.prio-urgent { border-style: solid; border-color: var(--text); background: var(--text); color: var(--ink); }
 
@@ -403,6 +407,7 @@ select option { background: var(--ink); color: var(--text); }
     margin-top: 24px; padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); border-left: 0;
   }
   .prop:nth-child(n + 3), .props .unassign { display: none !important; }
+  .props > .prop.prop-pulls { display: flex !important; grid-column: 1 / -1; margin-top: 8px; }
   .prop { flex-direction: column; align-items: stretch; gap: 2px; }
   .prop-key { width: auto; font: 11px/16px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
 }

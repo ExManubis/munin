@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy import and_, case, exists, func, select, update
 from sqlalchemy.orm import Session, aliased
 
-from munin.models import OPEN_STATUSES, PRIORITIES, STATUSES, Comment, Event, Issue, Project, utcnow
+from munin.models import OPEN_STATUSES, PRIORITIES, STATUSES, Comment, Event, Issue, Project, PullRequest, utcnow
 
 KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
 UNASSIGNED = ("", "none", "null", "nobody", "unassigned")
@@ -501,9 +501,58 @@ def describe_event(event: Event) -> str:
             return f"{who} edited the description"
         case "blocked_by":
             return f"{who} set it to wait for {new}" if new else f"{who} removed what it waited for"
+        case "pull_request":
+            number = (new or old or "").rstrip("/").rsplit("/", 1)[-1]
+            return f"{who} linked pull request #{number}" if new else f"{who} unlinked pull request #{number}"
         case "priority":
             return f"{who} made it {new}" if new != "normal" else f"{who} made it normal priority"
     return f"{who} changed {event.kind}"
+
+
+# Pull requests
+
+
+def link_pull_request(s: Session, actor: Actor, ref: str, url: str, found: dict | None = None) -> PullRequest:
+    """Link a pull request on GitHub to an issue. `found` is what GitHub said about it, if it was asked."""
+    from munin.github import GitHubError, parse_pull_url
+
+    issue = get_issue(s, ref)
+    try:
+        repo, number, clean = parse_pull_url(url)
+    except GitHubError as error:
+        raise Invalid(str(error)) from error
+    existing = next((pr for pr in issue.pull_requests if pr.url == clean), None)
+    if existing:
+        return existing
+    now = utcnow()
+    pull = PullRequest(
+        issue=issue, url=clean, repo=repo, number=number, added_by=actor.name, created_at=now,
+        title=(found or {}).get("title"), state=(found or {}).get("state"), checked_at=now if found else None,
+    )
+    s.add(pull)
+    issue.updated_at = now
+    _record(issue, actor, now, "pull_request", None, clean)
+    s.commit()
+    return pull
+
+
+def unlink_pull_request(s: Session, actor: Actor, ref: str, pull_id: int) -> None:
+    issue = get_issue(s, ref)
+    pull = next((pr for pr in issue.pull_requests if pr.id == pull_id), None)
+    if pull is None:
+        raise NotFound(f"{issue.ref} has no pull request {pull_id}.")
+    now = utcnow()
+    issue.pull_requests.remove(pull)
+    _record(issue, actor, now, "pull_request", pull.url, None)
+    s.commit()
+
+
+def pulls_to_check(s: Session) -> list[PullRequest]:
+    """Linked pull requests that may still change: open, or never asked about."""
+    statement = select(PullRequest).join(Issue).where(
+        (PullRequest.state.is_(None)) | (PullRequest.state == "open"), Issue.status.not_in(CLOSED_STATUSES)
+    )
+    return list(s.scalars(statement))
 
 
 # Comments and the inbox

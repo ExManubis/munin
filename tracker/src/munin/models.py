@@ -73,6 +73,9 @@ class Issue(Base):
     status_changed_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow)
 
     project: Mapped[Project] = relationship(back_populates="issues")
+    pull_requests: Mapped[list["PullRequest"]] = relationship(
+        back_populates="issue", order_by="PullRequest.id", cascade="all, delete-orphan"
+    )
     comments: Mapped[list["Comment"]] = relationship(
         back_populates="issue", order_by="Comment.id", cascade="all, delete-orphan"
     )
@@ -114,6 +117,27 @@ class Comment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     issue: Mapped[Issue] = relationship(back_populates="comments")
+
+
+class PullRequest(Base):
+    """A pull request on GitHub that carries an issue's work, with what GitHub last said about it."""
+
+    __tablename__ = "pull_requests"
+    __table_args__ = (UniqueConstraint("issue_id", "url"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(ForeignKey("issues.id"))
+    url: Mapped[str] = mapped_column(String(300))
+    repo: Mapped[str] = mapped_column(String(200))  # owner/name
+    number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str | None] = mapped_column(String(300), default=None)
+    # "open", "merged" or "closed" (without merging); empty until GitHub has been asked.
+    state: Mapped[str | None] = mapped_column(String(10), default=None)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    added_by: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    issue: Mapped[Issue] = relationship(back_populates="pull_requests")
 
 
 class Event(Base):

@@ -16,9 +16,9 @@ export const view = {
   title: () => 'Settings',
 
   async load() {
-    const [agents, providers, repos, about, apps, google] = await Promise.all([api.agents(), runtime.providers(), runtime.repos(), runtime.me(), runtime.apps(), runtime.google()]);
+    const [agents, providers, repos, about, apps, google, github] = await Promise.all([api.agents(), runtime.providers(), runtime.repos(), runtime.me(), runtime.apps(), runtime.google(), api.github()]);
     googleReturned();
-    return { agents, providers, repos, apps, google, sandbox: about.sandbox, me: store.me };
+    return { agents, providers, repos, apps, google, github, sandbox: about.sandbox, me: store.me };
   },
 
   leave() {
@@ -27,7 +27,7 @@ export const view = {
     keyFor = null;
   },
 
-  render({ agents, providers, repos, apps, google, sandbox, me }, ctx) {
+  render({ agents, providers, repos, apps, google, github, sandbox, me }, ctx) {
     const live = agents.filter((a) => !a.revoked);
     return h('div', { class: 'page' },
       topbar([h('span', { class: 'title' }, 'Settings')]),
@@ -36,6 +36,7 @@ export const view = {
         googleSection(google, ctx),
         appsSection(apps, ctx),
         codeSection(repos, sandbox, ctx),
+        githubSection(github, ctx),
         h('section', { class: 'section', id: 'outside-agents' },
           h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Outside agents'), h('span', { class: 'mono muted' }, `${live.length} connected`)),
           h('p', { class: 'lead' },
@@ -215,6 +216,30 @@ function googleSection(google, ctx) {
       json,
       h('div', { class: 'key-fields' }, h('button', { type: 'submit', class: 'btn small primary' }, 'Save client')),
       h('p', { class: 'hint' }, "munin keeps the client and your sign-in on the machine it runs on and never shows them again. Agents don't get them.")));
+}
+
+// GitHub: a token for reading pull requests linked to issues, for private repositories and more
+// than GitHub's 60 requests an hour without one. The tracker keeps it and shows its last four.
+function githubSection(github, ctx) {
+  const input = bindDraft(h('input', { class: 'input', type: 'password', placeholder: 'ghp_… or github_pat_…', autocomplete: 'off', spellcheck: false, 'aria-label': 'GitHub token' }), 'github:token');
+  const save = async (e) => {
+    e.preventDefault();
+    try {
+      await api.setGithubToken(input.value.trim() || null);
+      drafts.delete('github:token');
+      toast(input.value.trim() ? 'Saved. munin reads pull requests with it.' : 'Token removed.');
+      ctx.reload();
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  };
+  return h('section', { class: 'section', id: 'github' },
+    h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'GitHub'), h('span', { class: 'mono muted' }, github.token ? `token …${github.token.hint}` : 'no token')),
+    h('p', { class: 'lead' }, "Pull requests linked to issues show their title and whether they've merged. Public repositories need no token; private ones, and more than 60 checks an hour, do."),
+    h('form', { class: 'key-form', onsubmit: save },
+      h('div', { class: 'key-fields' }, input, h('button', { type: 'submit', class: 'btn small primary' }, github.token ? 'Replace' : 'Save'),
+        github.token ? h('button', { type: 'button', class: 'link', onclick: async () => { await api.setGithubToken(null); ctx.reload(); } }, 'Remove') : null),
+      h('p', { class: 'hint' }, 'A fine-grained token with read access to pull requests is enough. munin keeps it on the machine it runs on and never shows it again.')));
 }
 
 // Apps: MCP servers munin's agents use, like a calendar or mail. The runtime keeps each one's

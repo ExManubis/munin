@@ -299,6 +299,7 @@ function settingsSidebar() {
       jump('google', 'Google'),
       jump('apps', 'Apps'),
       store.projects.length ? jump('code', 'Code') : null,
+      jump('github', 'GitHub'),
       jump('outside-agents', 'Outside agents'),
       jump('notifications', 'Notifications'),
       jump('setup', 'Setup'),
