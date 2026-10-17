@@ -19,6 +19,7 @@ import { ROLES, ROUTINES_RULE, roleName, askFirstFor, ruleMatches, upgradeBrief 
 import { toItems, summarize } from './items.js';
 import { AppError, describeAppCall, openApps } from './apps.js';
 import { GoogleError, openGoogle } from './google.js';
+import { PushError, openPush } from './push.js';
 import { googleApps } from './googleapps.js';
 import { readPageTool, webSearchTool } from './web.js';
 import { identity, about, capabilities } from './prompt.js';
@@ -83,11 +84,11 @@ function trackerLink(value, current) {
   return link;
 }
 
-// `now`, `timers`, `costOf` and `google` are for tests: a clock to run routines and budgets by,
-// whether a timer runs routines, what a model response cost (the test model's are all free), and
-// Google's endpoints and fetch.
+// `now`, `timers`, `costOf`, `google` and `push` are for tests: a clock to run routines and
+// budgets by, whether a timer runs routines, what a model response cost (the test model's are
+// all free), Google's endpoints and fetch, and how pushes are sent.
 const costOfResponse = (message) => message.usage?.cost?.total || 0;
-export async function openRuntime(settings, { models, storage, now = Date.now, timers = true, costOf = costOfResponse, google: googleTest = {} } = {}) {
+export async function openRuntime(settings, { models, storage, now = Date.now, timers = true, costOf = costOfResponse, google: googleTest = {}, push: pushTest = {} } = {}) {
   storage ||= settings.db === ':memory:' ? new MemoryStorage() : await openNodeSqliteStorage(settings.db);
   const agents = new Map(); // name → settings
   const listeners = new Set();
@@ -104,7 +105,14 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
   const agentFor = (conversationId) => [...agents.values()].find((a) => a.conversationId === conversationId) || null;
   const conversationOf = async (agent) => harness.conversation(agent.conversationId, ctx);
-  const write = async (agent, kind, data) => (await conversationOf(agent)).submit({ type: 'write', entry: { kind, data: { at: now(), ...data } } }, ctx);
+  // Push notifications (push.js): questions, approvals, and what agents that don't code say.
+  const push = await openPush({ file: settings.pushFile || null, subject: settings.publicUrl || 'mailto:munin@localhost', ...pushTest });
+  const write = async (agent, kind, data) => {
+    const written = await (await conversationOf(agent)).submit({ type: 'write', entry: { kind, data: { at: now(), ...data } } }, ctx);
+    if (kind === 'munin.question') push.notify(agent, 'question', data).catch(() => {});
+    if (kind === 'munin.approval') push.notify(agent, 'approval', data).catch(() => {});
+    return written;
+  };
 
   // munin's extension: who the agent is and what it remembers, asking the human, remembering
   // things, and asking first before what its rules say.
@@ -241,6 +249,9 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         const spent = await spentThisMonth(agent);
         spent.total += costOf(message);
         if (agent.budget && spent.total >= agent.budget) await pauseForBudget(agent);
+        // A finished answer (not a step towards one) reaches your devices.
+        const text = message.stopReason === 'stop' ? (message.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim() : '';
+        if (text) push.notify(agent, 'message', { text }).catch(() => {});
       },
     }), hook(ToolTask, {
       beforeTool: async (call, api) => {
@@ -912,6 +923,24 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     async googleSignOut() {
       await google.signOut();
       apps.changed();
+    },
+
+    // Push notifications (push.js): the key a device subscribes with, and its devices.
+    push: () => push.status(),
+
+    async subscribePush(subscription) {
+      try {
+        await push.subscribe(subscription);
+        return push.status();
+      } catch (err) {
+        if (err instanceof PushError) throw invalid(err.message);
+        throw err;
+      }
+    },
+
+    async forgetPush(endpoint) {
+      await push.forget(endpoint);
+      return push.status();
     },
 
     // Apps (apps.js): MCP servers agents use, which you add in Settings.

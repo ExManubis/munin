@@ -6,6 +6,7 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.143",
     "mcp>=2.3",
+    "pywebpush==2.5.0",
     "sqlalchemy>=2.0",
     "uvicorn>=0.30",
 ]

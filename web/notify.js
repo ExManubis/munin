@@ -1,37 +1,106 @@
 // Telling the human something needs them: a count in the tab title, a dot on the favicon,
-// and (opt-in) desktop notifications for new questions and work ready for review.
+// and (opt-in) notifications. Where the browser can, they're push notifications that reach this
+// device with munin closed: each service pushes with keys of its own (the tracker its questions
+// and work for review, the runtime its agents' questions, approvals and assistants' messages),
+// through a service worker each (push/tracker/sw.js, push/runtime/sw.js). Elsewhere munin shows
+// notifications itself, while it's open in a tab.
 
 import { api } from './api.js';
+import { runtime } from './runtime/index.js';
 import { store, remember } from './store.js';
 import { firstLine, toast } from './ui.js';
 import { waitingItems } from './waiting.js';
 
 const SETTING = 'munin:notify';
 export const notificationsSupported = 'Notification' in window;
+export const pushSupported = notificationsSupported && 'serviceWorker' in navigator && 'PushManager' in window && window.isSecureContext;
 
 export function notificationsOn() {
   return notificationsSupported && remember(SETTING) === '1' && Notification.permission === 'granted';
 }
 
-// Returns the resulting permission ("granted", "denied", "default") or "off".
+// The services that push, as this page reaches them.
+const pushers = () => [
+  { name: 'tracker', status: () => api.push(), save: (s) => api.subscribePush(s), forget: (e) => api.forgetPush(e) },
+  ...(runtime.kind === 'runtime' ? [{ name: 'runtime', status: () => runtime.push(), save: (s) => runtime.subscribePush(s), forget: (e) => runtime.forgetPush(e) }] : []),
+];
+const keyBytes = (key) => Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (key.length % 4)) % 4)), (c) => c.charCodeAt(0));
+const sameKey = (buffer, bytes) => Boolean(buffer) && new Uint8Array(buffer).every((b, i) => b === bytes[i]) && buffer.byteLength === bytes.length;
+
+async function activated(registration) {
+  if (registration.active) return registration;
+  const worker = registration.installing || registration.waiting;
+  await new Promise((resolve) => worker.addEventListener('statechange', () => worker.state === 'activated' && resolve()));
+  return registration;
+}
+
+// This device, subscribed to every service that pushes, with each one's current key.
+async function subscribeAll() {
+  for (const pusher of pushers()) {
+    const { key } = await pusher.status();
+    if (!key) continue;
+    const registration = await activated(await navigator.serviceWorker.register(`push/${pusher.name}/sw.js`, { scope: `push/${pusher.name}/` }));
+    const wanted = keyBytes(key);
+    let subscription = await registration.pushManager.getSubscription();
+    if (subscription && !sameKey(subscription.options.applicationServerKey, wanted)) {
+      await subscription.unsubscribe(); // the service has new keys
+      subscription = null;
+    }
+    subscription ||= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: wanted });
+    await pusher.save(subscription.toJSON());
+  }
+}
+
+async function unsubscribeAll() {
+  for (const pusher of pushers()) {
+    const registration = await navigator.serviceWorker.getRegistration(`push/${pusher.name}/`);
+    const subscription = await registration?.pushManager.getSubscription();
+    if (!subscription) continue;
+    await pusher.forget(subscription.endpoint).catch(() => {});
+    await subscription.unsubscribe();
+  }
+}
+
+// Returns the resulting permission ("granted", "denied", "default"), "off", or "failed".
 export async function setNotifications(on) {
   if (!on || !notificationsSupported) {
     remember(SETTING, '0');
+    if (pushSupported) await unsubscribeAll().catch(() => {});
     return 'off';
   }
   const permission = await Notification.requestPermission();
+  if (permission === 'granted' && pushSupported) {
+    try {
+      await subscribeAll();
+    } catch (err) {
+      remember(SETTING, '0');
+      lastFailure = err.message;
+      return 'failed';
+    }
+  }
   remember(SETTING, permission === 'granted' ? '1' : '0');
   lastEventId = null; // start from now, not from old history
   return permission;
 }
+let lastFailure = null;
 
 // Flip the setting, saying what happened.
 export async function toggleNotifications() {
   const result = await setNotifications(!notificationsOn());
-  if (result === 'granted') toast('Notifications on. munin tells you when an agent asks something or finishes work.');
+  if (result === 'granted') toast(pushSupported ? 'Notifications on for this device: questions, approvals, work for review and your assistants\' messages reach it, even with munin closed.' : 'Notifications on. munin tells you when an agent asks something or finishes work, while it\'s open in a tab.');
   else if (result === 'denied') toast('Your browser blocks notifications from munin. Allow them in the site settings, then try again.', { error: true });
+  else if (result === 'failed') toast(`munin couldn't set up notifications on this device: ${lastFailure}`, { error: true });
   else if (result === 'off') toast('Notifications off.');
   return result;
+}
+
+// On start: keep this device's subscriptions current (the runtime may have come up since, or a
+// service has new keys), and go where a tapped notification points.
+if (pushSupported) {
+  if (notificationsOn()) subscribeAll().catch(() => {});
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data?.munin === 'open') location.hash = event.data.hash || '#/';
+  });
 }
 
 // Title and favicon -----------------------------------------------------------------
@@ -76,6 +145,7 @@ let knownQuestions = null;
 let lastEventId = null;
 
 function show(title, body, hash) {
+  if (pushSupported) return; // the services push it, so it isn't shown twice
   if (document.visibilityState === 'visible' && document.hasFocus()) return; // they're looking already
   const note = new Notification(title, { body, tag: hash, icon: 'android-chrome-192.png' });
   note.onclick = () => {

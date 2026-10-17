@@ -20,6 +20,8 @@ export function settingsFromEnv(env = process.env) {
     appsFile: db === ':memory:' ? null : join(dirname(db), 'apps.json'),
     // Your Google OAuth client and the Google sign-in (google.js), next to the database too.
     googleFile: db === ':memory:' ? null : join(dirname(db), 'google.json'),
+    // Push notifications' keys and devices (push.js).
+    pushFile: db === ':memory:' ? null : join(dirname(db), 'push.json'),
     host: env.MUNIN_RUNTIME_HOST || '127.0.0.1',
     port: Number(env.MUNIN_RUNTIME_PORT || 7779),
     // Each agent that can code gets a folder of its own under here.

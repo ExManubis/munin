@@ -113,3 +113,7 @@ tailscale serve --bg --set-path /runtime/api off; tailscale serve --bg --set-pat
 docker ps -aq --filter label=munin.agent | xargs docker rm -f
 # and, to drop the data too: rm -r ~/.munin
 ```
+
+## Notifications on your phone
+
+Turn on notifications under Settings → Notifications on each device. They're push notifications, so they need munin over HTTPS, which `tailscale serve` gives it. On an iPhone, open munin in Safari, add it to the home screen (Share → Add to Home Screen), open it from there, and turn notifications on there. An agent's question, an approval it waits for, work ready for review and what your assistants say then reach the phone with munin closed.
