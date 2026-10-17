@@ -20,7 +20,7 @@ function blank() {
 }
 
 export const view = {
-  title: () => 'New agent',
+  title: () => 'New figbot',
 
   async load() {
     catalog = await runtime.models();
@@ -38,10 +38,10 @@ export const view = {
     return h('div', { class: 'page' },
       topbar([
         h('a', { class: 'back phone-only', href: '#/agents', 'aria-label': 'All agents' }, '‹'),
-        h('span', { class: 'title' }, 'New agent'),
+        h('span', { class: 'title' }, 'New figbot'),
       ]),
       h('div', { class: 'profile new-agent' },
-        h('h1', { class: 'h1 wide-only' }, 'New agent'),
+        h('h1', { class: 'h1 wide-only' }, 'New figbot'),
         h('p', { class: 'lead' }, 'Pick a role to start from. You can change everything later.'),
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Role'),
@@ -64,7 +64,7 @@ export const view = {
           }), () => create(ctx))),
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Colour'),
-          h('p', { class: 'hint section-lead-hint' }, `How you'll tell ${name} apart. Names under a colour are agents already using it.`),
+          h('p', { class: 'hint section-lead-hint' }, `How you'll tell ${name} apart. Names under a colour are figbots already using it.`),
           h('div', { class: 'colour-grid' }, Object.keys(COLOURS).map((c) => colourCard(c, ctx)))),
         role?.abilities.tracker && store.projects.length ? projectPicker(name, ctx) : null,
         h('section', { class: 'profile-section' },
@@ -110,7 +110,7 @@ export const view = {
           }), () => create(ctx))),
         h('div', { class: 'create-row' },
           h('button', { type: 'button', class: 'btn primary', disabled: !form.role || !form.name.trim(), onclick: () => create(ctx) },
-            `Create ${form.name.trim() || 'agent'}`, h('span', { class: 'key' }, `${MOD}↵`)),
+            `Create ${form.name.trim() || 'figbot'}`, h('span', { class: 'key' }, `${MOD}↵`)),
           h('span', { class: 'hint' }, `Abilities, routines and a budget are in ${form.name.trim() || 'its'}${form.name.trim() ? "'s" : ''} profile.`))));
   },
 
@@ -132,7 +132,7 @@ export const view = {
 function modelHint(role) {
   const cost = costHint(catalog, chosen().provider, chosen().model);
   if (!role) return cost;
-  if (!form.model && movedForTeam(catalog, role, store.runtimeAgents)) return `On another maker's model than your other agents', so it sounds less like them. ${cost}`;
+  if (!form.model && movedForTeam(catalog, role, store.runtimeAgents)) return `On another maker's model than your other figbots', so it sounds less like them. ${cost}`;
   return chosen().model === role.model || (role.apart && !form.model && chosen().provider !== 'standin') ? role.hint : cost;
 }
 
