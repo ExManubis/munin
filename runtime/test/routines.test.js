@@ -192,7 +192,8 @@ test('an agent sets up, changes and removes its own routines when asked, without
   const turn = async (name, args) => {
     faux.setResponses([
       () => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: 'toolUse' }),
-      (context) => { heard = context.messages.at(-1).content.map((c) => c.text).join(''); return fauxAssistantMessage([fauxText('Done.')]); },
+      // The tool's answer: a routine changes the prompt, so a system message may come after it.
+      (context) => { heard = context.messages.findLast((m) => m.role === 'toolResult').content.map((c) => c.text).join(''); return fauxAssistantMessage([fauxText('Done.')]); },
     ]);
     await runtime.send('hugin', 'Please.');
     await runtime.waitForIdle();
