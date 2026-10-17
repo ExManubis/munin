@@ -35,12 +35,15 @@ async function calendar() {
     }
     if (message.method === 'tools/list') {
       return reply({ tools: [
-        { name: 'list_events', description: "Today's events", inputSchema: { type: 'object', properties: { day: { type: 'string' } } } },
+        { name: 'list_events', description: "Today's events", inputSchema: { type: 'object', properties: { day: { type: 'string' } } }, annotations: { readOnlyHint: true } },
         { name: 'add_event', description: 'Add an event', inputSchema: { type: 'object', properties: { title: { type: 'string' } } } },
       ] });
     }
     if (message.method === 'tools/call' && message.params.name === 'list_events') {
       return reply({ content: [{ type: 'text', text: `09:00 Standup (${message.params.arguments.day})` }] });
+    }
+    if (message.method === 'tools/call' && message.params.name === 'add_event') {
+      return reply({ content: [{ type: 'text', text: `Added ${message.params.arguments.title}` }] });
     }
     return reply({ content: [{ type: 'text', text: 'No such tool' }], isError: true });
   });
@@ -158,4 +161,60 @@ test("an app that doesn't answer, or refuses its token, says why", async (t) => 
   t.after(() => cal.close());
   const wrong = await runtime.addApp({ name: 'Calendar', url: cal.url, token: 'nope' });
   assert.match(wrong.detail, /Calendar doesn't accept this token/);
+});
+
+test('an app asks first before anything that changes something, and reading goes straight through', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'munin-apps-'));
+  const cal = await calendar();
+  t.after(() => cal.close());
+  const faux = fauxProvider({ provider: 'scripted', models: [{ id: 'model' }] });
+  const runtime = await open(dir, faux);
+  t.after(() => runtime.close());
+  await runtime.addApp({ name: 'Calendar', url: cal.url, token: 'cal-secret-1234' });
+  await runtime.createAgent({ name: 'hugin', role: 'assistant', provider: 'scripted', model: 'model' });
+  let agent = await runtime.updateAgent('hugin', { apps: ['calendar'] });
+  assert.deepEqual(agent.askFirst.map((r) => [r.id, r.label, r.on]), [['app:calendar', 'Calendar: sending, changing or deleting', true]]);
+
+  const heard = [];
+  const turn = async (...steps) => {
+    faux.setResponses(steps.map((step) => (context) => {
+      heard.push(JSON.stringify(context.messages.at(-1)));
+      return typeof step === 'string' ? fauxAssistantMessage([fauxText(step)]) : fauxAssistantMessage([fauxToolCall(step[0], step[1])], { stopReason: 'toolUse' });
+    }));
+    await runtime.send('hugin', 'Go.');
+    await runtime.waitForIdle();
+  };
+  const calls = () => cal.seen.filter(([method]) => method === 'tools/call').length;
+
+  await turn(['calendar__list_events', { day: 'today' }], 'Read it.');
+  assert.match(heard.at(-1), /09:00 Standup/, 'reading needs no asking');
+  const before = calls();
+
+  await turn(['calendar__add_event', { title: 'Lunch with Ann', when: '12:00' }], 'Asked.');
+  assert.match(heard.at(-1), /hasn't allowed this yet \(calendar: sending, changing or deleting\)/);
+  assert.equal(calls(), before, "the calendar never heard of it");
+  let { items } = await runtime.conversation('hugin');
+  const approval = items.find((i) => i.kind === 'approval');
+  assert.deepEqual([approval.what, approval.target], ['do something in Calendar', 'add event · title: Lunch with Ann · when: 12:00']);
+
+  faux.setResponses([
+    () => fauxAssistantMessage([fauxToolCall('calendar__add_event', { title: 'Lunch with Ann', when: '12:00' })], { stopReason: 'toolUse' }),
+    (context) => { heard.push(JSON.stringify(context.messages.at(-1))); return fauxAssistantMessage([fauxText('Added.')]); },
+  ]);
+  await runtime.decide('hugin', approval.id, 'once');
+  await runtime.waitForIdle();
+  assert.match(heard.at(-1), /Added Lunch with Ann/, 'allowed once, it goes through');
+  assert.equal(calls(), before + 1);
+
+  await turn(['calendar__add_event', { title: 'Dinner' }], 'Asked again.');
+  ({ items } = await runtime.conversation('hugin'));
+  const again = items.filter((i) => i.kind === 'approval').at(-1);
+  assert.equal(again.status, 'open', 'once was once');
+  faux.setResponses([(context) => { heard.push(JSON.stringify(context.messages.at(-1))); return fauxAssistantMessage([fauxText('Ok.')]); }]);
+  await runtime.decide('hugin', again.id, 'always');
+  await runtime.waitForIdle();
+  assert.equal((await runtime.agent('hugin')).askFirst.find((r) => r.id === 'app:calendar').on, false, 'always turns the rule off');
+
+  agent = await runtime.updateAgent('hugin', { apps: [] });
+  assert.deepEqual(agent.askFirst, [], 'no app, no rule');
 });

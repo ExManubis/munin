@@ -689,7 +689,17 @@ export const mock = {
     const agent = need(name);
     for (const key of ['role', 'colour', 'provider', 'model', 'thinking', 'brief', 'budget']) if (key in patch) agent[key] = patch[key];
     if (patch.abilities) Object.assign(agent.abilities, patch.abilities);
-    if (patch.apps) agent.apps = [...patch.apps];
+    if (patch.apps) {
+      // Like the runtime: each app picked gets an ask-first rule for anything that changes something.
+      agent.apps = [...patch.apps];
+      const names = Object.fromEntries((state.apps || []).map((app) => [app.id, app.name]));
+      agent.askFirst = agent.askFirst.filter((rule) => !rule.app || agent.apps.includes(rule.app));
+      for (const id of agent.apps) {
+        if (names[id] && !agent.askFirst.some((rule) => rule.app === id)) {
+          agent.askFirst.push({ id: `app:${id}`, app: id, label: `${names[id]}: sending, changing or deleting`, what: `do something in ${names[id]}`, third: `does things in ${names[id]}`, on: true });
+        }
+      }
+    }
     if (patch.askFirst) for (const rule of agent.askFirst) if (rule.id in patch.askFirst) rule.on = patch.askFirst[rule.id];
     if (patch.tracker?.projects && agent.tracker) agent.tracker.projects = [...patch.tracker.projects];
     changed();
