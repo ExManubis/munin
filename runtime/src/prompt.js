@@ -7,7 +7,7 @@
 // description, so each agent has examples of its own.
 
 import { ROLES, roleName } from './roles.js';
-import { remembered } from './memory.js';
+import { KINDS, remembered } from './memory.js';
 
 // What every munin agent leaves out. How it does sound is its own: its brief and its examples.
 // Kept short on purpose, since a long shared voice makes every agent sound the same.
@@ -88,7 +88,7 @@ export function capabilities(agent, name, { search = false, apps = { mine: [], o
   const you = name || 'the person you work for';
   const has = (ability) => Boolean(agent.abilities?.[ability]);
   const can = [];
-  can.push(`Talk things through with ${you}. When you need a decision, use ask_human; they may be away for hours. When you learn something that will still be true next week, use remember: about ${you}, about how the work is done here, or about how you work best. Each kind has room for a few notes. They're yours to keep in order: when one kind is full, make room yourself, without asking, by saying two notes in one with change_note or dropping one that matters less with forget_note.`);
+  can.push(`Talk things through with ${you}. When you need a decision, use ask_human; they may be away for hours. When you learn something that will still be true next week, use remember: about ${you}, about how the work is done here, about how you work best, or about a teammate. Each kind has room for a few notes. They're yours to keep in order: when one kind is full, make room yourself, without asking, by saying two notes in one with change_note or dropping one that matters less with forget_note.`);
   // What reaches a phone (push.js): questions and approvals from everyone, and what agents
   // that don't code say.
   const reaches = has('code') ? 'your questions and approvals reach' : 'what you say reaches';
@@ -138,28 +138,41 @@ export function capabilities(agent, name, { search = false, apps = { mine: [], o
   ].filter(Boolean).join('\n');
 }
 
-// What the agent remembers, as plain statements in its three kinds (memory.js): about you, about
-// how the work is done, and about how it works best, each with how full it is.
+// Who the agent is, repeated at the end of a long conversation's request (runtime.js): its name,
+// role and the first paragraph of its brief, which says who it is.
+export function reminder(agent) {
+  const who = String(agent.brief || '').split('\n\n')[0].trim().slice(0, 600);
+  return `This conversation is long, so a reminder of who you are: ${agent.name}, ${article(roleName(agent.role).toLowerCase())}. ${who} Keep sounding like yourself.`;
+}
+
+// What the agent remembers, as plain statements in its kinds (memory.js): about you, about how
+// the work is done, and about how it works best, each with how full it is. Its notes on
+// teammates are in its team section instead.
 export function about(agent, name) {
   return remembered(agent.memory || [], name || 'the person you work for');
 }
 
 // Who else is on the team: munin's other agents, what each does, and what each is on, so the
-// agent can say whose job something is. Only what changes now and then, since a section that
-// changes every turn is sent again every turn: whether an agent is paused, and the issue a coder
-// last took, but not whether it's busy this minute.
-export function team(others) {
+// agent can say whose job something is, with the agent's own notes on each (memory.js, kind
+// team). Only what changes now and then, since a section that changes every turn is sent again
+// every turn: whether an agent is paused, and the issue a coder last took, but not whether it's
+// busy this minute.
+export function team(others, notes = []) {
   if (!others.length) return undefined;
+  const mine = notes.filter((n) => n.kind === 'team');
+  const used = mine.reduce((sum, n) => sum + n.text.length, 0);
   const line = (other) => {
     const issue = other.abilities?.code && !other.work?.detached ? other.work?.issue : null;
     return [
       `- ${other.name}, ${article(roleName(other.role).toLowerCase())}: ${ROLES[other.role]?.does || 'one of the team'}.`,
       issue ? ` Last took ${issue.id}${issue.title ? ` · ${issue.title}` : ''}.` : '',
       other.paused ? ' Paused.' : '',
+      ...mine.filter((n) => n.about === other.name).map((n) => `\n  Your note: ${n.text} [${n.id}]`),
     ].join('');
   };
   return [
     "Your team: munin's other agents. You don't message them; coders and reviewers work together in the tracker. When something is another agent's job, say so, and whose.",
     ...others.map(line),
+    `Keep short notes on a teammate with remember (kind team, about them): how they work, what to check in their work. Judge their work on evidence, not on how sure they sound. ${used ? `Your team notes use ${used.toLocaleString('en')} of ${KINDS.team.cap.toLocaleString('en')} characters.` : ''}`.trim(),
   ].join('\n');
 }

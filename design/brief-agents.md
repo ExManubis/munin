@@ -442,3 +442,10 @@ forge  13:57
 - **A skill's approval card** quotes the skill between the target and the options, under its description, scrolling past 280 px. Its rows read `Save it`, `Always allow` and `Don't save it`.
 - **Agents' Markdown** shows headings, as short bold lines, and numbered lists.
 
+## Changed while giving agents a rhythm (MUN-37)
+
+- **SPEAKING UP, after ROUTINES:** a dotted select, `Only when asked`, `When it matters` or `Chatty`, with a line under it saying what it does.
+- **JOURNAL, after TRACK RECORD:** the newest three entries, each a date in Plex Mono 11 `#7A7A7A` over the entry in Red Hat 14/22 `#CFCFCF`, with a 1 px `#2A2A2A` rule on the left like MEMORY's notes, then tertiary `VIEW ALL`.
+- **In the conversation,** a journal entry is an action line, `wrote in its journal` and its first sentence. While the agent is idle, its sidebar line 2 is that sentence. A heartbeat that came to nothing shows nothing at all.
+- **MEMORY has a fourth kind,** `ABOUT THE TEAM`, each note led by the teammate's name in Plex Mono 11 `#7A7A7A`.
+

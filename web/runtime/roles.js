@@ -119,12 +119,13 @@ export const ABILITIES = [
 
 export const THINKING = ['off', 'low', 'medium', 'high'];
 
-// What an agent remembers, in three kinds, as the profile names them, with room for so many
+// What an agent remembers, in four kinds, as the profile names them, with room for so many
 // characters each (runtime/src/memory.js has the same, and a test checks).
 export const MEMORY_KINDS = {
   you: { label: 'About you', cap: 1500 },
   work: { label: 'About the work', cap: 1500 },
   self: { label: 'About itself', cap: 1000 },
+  team: { label: 'About the team', cap: 1000 },
 };
 export const kindOf = (note) => (MEMORY_KINDS[note.kind] ? note.kind : 'you');
 
