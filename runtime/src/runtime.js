@@ -17,6 +17,7 @@ import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { ROLES, SOULS, ROUTINES_RULE, SKILLS_RULE, roleName, askFirstFor, ruleMatches, upgradeBrief, examplesFor } from './roles.js';
 import { STALE_MS, SkillError, checkSkill, hasSkill, parseSkill, skillText, skillsSection } from './skills.js';
+import { SoulError, checkSoul, withVersion } from './soul.js';
 import { toItems, summarize } from './items.js';
 import { AppError, describeAppCall, openApps } from './apps.js';
 import { GoogleError, openGoogle } from './google.js';
@@ -220,6 +221,37 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     },
   });
 
+  // Its soul (soul.js): the agent may propose a change to its brief or examples, which always asks
+  // you, with the change on the card; allowing it applies it and keeps a version.
+  const proposeSoul = defineTool({
+    name: 'propose_soul_change',
+    description: "Propose a change to your own brief or examples, when you've noticed they get you wrong: how you work, what you care about, how you sound. Give the whole new text of what changes; what you leave out stays. It always asks first, so in your reply say in a sentence or two why you want it.",
+    parameters: Type.Object({
+      why: Type.String({ description: 'Why, in a sentence or two' }),
+      brief: Type.Optional(Type.String({ description: 'Your whole new brief' })),
+      examples: Type.Optional(Type.String({ description: 'Your whole new examples, with "You:" for the person and your name for you' })),
+    }),
+    execute: async (args, toolApi) => {
+      const agent = agentFor(toolApi.conversationId);
+      try {
+        const why = String(args.why || '').trim();
+        if (!why) throw new SoulError('Say why you want the change.');
+        const { items } = await readItems(agent);
+        if (items.some((i) => i.kind === 'approval' && i.soul && i.status === 'open')) throw new SoulError(`You've proposed a change already; wait for ${them()}'s answer.`);
+        const next = checkSoul({ brief: args.brief, examples: args.examples }, agent);
+        const parts = [next.brief !== agent.brief && 'its brief', next.examples !== (agent.examples || '') && 'how it talks'].filter(Boolean);
+        await write(agent, 'munin.approval', {
+          rule: 'soul', label: 'Changing who it is', what: 'change who it is', third: 'changes who it is', target: parts.join(' and '),
+          soul: { why: why.slice(0, 300), brief: next.brief, examples: next.examples, was: { brief: agent.brief, examples: agent.examples || '' } },
+        });
+        return say(`Asked ${them()} to look at the change. Their answer comes as a message; carry on meanwhile.`);
+      } catch (err) {
+        if (err instanceof SoulError) return say(err.message, true);
+        throw err;
+      }
+    },
+  });
+
   // Skills (skills.js): what the agent knows how to do here. It reads one when it fits, and saves
   // one when it has learned something it'll do again; SKILLS_RULE makes each save ask you first,
   // with the skill on the approval card, and saves it when you allow it.
@@ -360,7 +392,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
   const Munin = defineExtension({
     name: 'munin',
-    tools: [askHuman, remember, changeNoteTool, forgetNoteTool, readSkill, saveSkill, setExpression, ...routineTools],
+    tools: [askHuman, remember, changeNoteTool, forgetNoteTool, readSkill, saveSkill, setExpression, proposeSoul, ...routineTools],
     sections: [
       // Who the agent is, who it's talking with and how it talks, then what it can do, who else
       // is on the team and what it knows about you (prompt.js). The brief and the examples are
@@ -620,10 +652,15 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     // Notes from before memory had kinds are about you.
     const memory = (agent.memory || []).map((n) => ({ ...n, kind: kindOf(n) }));
     // Agents from before heartbeats don't start speaking up on their own: you switch it on.
-    agents.set(agent.name, {
+    // Its soul's history starts with the version from before munin kept one, and a role's newer
+    // words are a version of their own, by munin.
+    const loaded = {
       ...structuredClone(agent), brief, examples: agent.examples ?? examplesFor({ ...agent, brief }), memory,
       proactivity: agent.proactivity || 'off', rhythm: agent.rhythm || {}, journal: agent.journal || [],
-    });
+    };
+    loaded.soulHistory = agent.soulHistory || withVersion([], { brief: agent.brief, examples: agent.examples ?? loaded.examples }, null, now());
+    loaded.soulHistory = withVersion(loaded.soulHistory, loaded, 'munin', now());
+    agents.set(agent.name, loaded);
   }
   for (const agent of agents.values()) {
     syncAppRules(agent);
@@ -801,6 +838,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       ...await summaryOf(agent),
       brief: agent.brief, examples: agent.examples || '', thinking: agent.thinking, proactivity: agent.proactivity,
       journal: agent.journal.map((e) => ({ at: new Date(e.at).toISOString(), text: e.text })),
+      soulHistory: (agent.soulHistory || []).map((v) => ({ ...v, at: new Date(v.at).toISOString() })),
       abilities: { ...agent.abilities }, apps: [...agent.apps],
       askFirst: agent.askFirst.map(({ match, tool, tools, ...rule }) => rule),
       routines: agent.routines.map((r) => routineOut(r, agent)),
@@ -937,6 +975,21 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       if (approval.status !== 'open') throw conflict('That is already decided.');
       await write(agent, 'munin.decision', { approval: id, decision });
       const rule = agent.askFirst.find((r) => r.id === approval.permission);
+      // A change to its soul is on its card too: allowing it applies it and keeps a version. It
+      // always asks, so there's no always.
+      if (approval.soul) {
+        if (decision === 'deny') {
+          await decided(agent, `${them({ start: true })} wants your brief and examples to stay as they are, so they do. If they say why, take that on.`, id);
+          return;
+        }
+        agent.brief = approval.soul.brief;
+        agent.examples = approval.soul.examples;
+        agent.soulHistory = withVersion(agent.soulHistory || [], agent, agent.name, now(), approval.soul.why);
+        await saveAgents();
+        await write(agent, 'munin.action', { verb: 'changed who it is', object: approval.soul.why });
+        await decided(agent, `${them({ start: true })} accepted the change: your brief and examples are the new ones from now on.`, id);
+        return;
+      }
       // A skill is on its card, so allowing it saves it, and the agent doesn't send it again.
       if (approval.skill) {
         if (decision === 'deny') {
@@ -991,6 +1044,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         tracker: link ? trackerLink(link, null) : null,
       };
       agent.examples = examples === undefined ? examplesFor(agent) || null : String(examples || '').trim();
+      agent.soulHistory = withVersion([], agent, 'you', now());
       if (abilities.code) await mkdir(agent.folder, { recursive: true });
       const conversation = await harness.createConversation({ ownership: { kind: 'ownerless' }, agent: change(agent) }, ctx);
       agent.conversationId = conversation.id;
@@ -1009,6 +1063,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       for (const key of ['role', 'colour', 'provider', 'model', 'thinking', 'budget', 'proactivity']) if (key in patch) agent[key] = patch[key];
       if ('brief' in patch) agent.brief = String(patch.brief || '').trim() || agent.brief;
       if ('examples' in patch) agent.examples = String(patch.examples || '').trim();
+      if ('brief' in patch || 'examples' in patch) agent.soulHistory = withVersion(agent.soulHistory || [], agent, 'you', now(), patch.why ? String(patch.why).slice(0, 300) : null);
       if (patch.abilities) {
         Object.assign(agent.abilities, patch.abilities);
         if (agent.abilities.code && !agent.askFirst.some((rule) => rule.id === 'push')) agent.askFirst = [...askFirstFor(agent.abilities), ...agent.askFirst];

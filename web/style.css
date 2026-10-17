@@ -847,6 +847,14 @@ button.option-card:hover { border-color: var(--text); }
 .routine.stale .routine-name > .mono:first-child { color: var(--text-2); }
 .skill-text { min-height: 320px; font: 13px/20px var(--mono); }
 .skill-card { max-height: 280px; overflow: auto; }
+.skill-card > .label { margin-top: 10px; }
+.diff { margin: 4px 0 10px; color: var(--text-2); white-space: pre-wrap; }
+.diff del { color: var(--muted); text-decoration: line-through; }
+.diff ins { color: var(--text); text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 3px; }
+.soul-history { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.soul-version { display: flex; flex-direction: column; gap: 4px; }
+.soul-version-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.soul-version .diff { margin: 0; font-size: 13px; line-height: 20px; }
 .profile-section > .btn.small { align-self: flex-start; }
 .notes { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 2px 0 2px 16px; border-left: 1px solid var(--line); list-style: none; }
 .note { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; color: var(--text-2); }

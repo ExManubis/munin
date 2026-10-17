@@ -8,6 +8,7 @@ import { ABILITIES, MEMORY_KINDS, THINKING, costHint, kindOf } from '../runtime/
 import { connectToTracker, disconnectFromTracker, revokeTrackerToken, linkable } from '../runtime/tracker-link.js';
 import { store } from '../store.js';
 import { h, ago, bindDraft, drafts, onModEnter, toast, toggle, topbar } from '../ui.js';
+import { diffView } from '../diff.js';
 import { openDialog, closeDialog } from '../dialogs.js';
 import { agentFace, roleTag, hhmm } from './agents.js';
 import { modelPicker, searchState } from '../model-picker.js';
@@ -28,6 +29,8 @@ export const view = {
 
   leave() {
     allNotes = false;
+    allVersions = false;
+    openVersion = null;
     allEntries = false;
     search = searchState();
   },
@@ -41,7 +44,7 @@ export const view = {
       ]),
       h('div', { class: 'profile' },
         header(agent, ctx),
-        brief(agent, set),
+        brief(agent, set, ctx),
         examples(agent, set),
         model(agent, models, set, ctx),
         abilities(agent, apps, set, ctx),
@@ -118,7 +121,7 @@ function section(title, lead, ...body) {
     body);
 }
 
-function brief(agent, set) {
+function brief(agent, set, ctx) {
   const key = `brief:${agent.name}`;
   const box = bindDraft(h('textarea', { class: 'textarea brief-box', 'aria-label': 'Brief' }), key, agent.brief);
   const save = () => {
@@ -128,7 +131,43 @@ function brief(agent, set) {
   };
   box.addEventListener('blur', save);
   onModEnter(box, () => box.blur());
-  return section('Brief', `Who ${agent.name} is and how it works. It reads this before every conversation.`, box);
+  return section('Brief', `Who ${agent.name} is and how it works. It reads this before every conversation.`, box, history(agent, set, ctx));
+}
+
+// How the brief and examples got to be what they are: each version, newest first, with who changed
+// it and why, what changed from the one before, and a way back to it.
+let allVersions = false;
+let openVersion = null;
+function history(agent, set, ctx) {
+  const versions = agent.soulHistory || [];
+  if (versions.length < 2) return null;
+  const who = (v) => (v.by === 'you' ? 'You' : v.by === 'munin' ? "munin, from its role's newer words" : v.by === null ? 'Before munin kept history' : v.by);
+  const when = (v) => new Date(v.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const shown = allVersions ? versions : versions.slice(0, 4);
+  return h('div', { class: 'soul-history' },
+    h('div', { class: 'label' }, `History · ${versions.length} versions`),
+    shown.map((v, i) => {
+      const before = versions[i + 1];
+      const key = `${v.at}|${i}`;
+      const open = openVersion === key;
+      return h('div', { class: 'soul-version' },
+        h('div', { class: 'soul-version-head' },
+          h('span', { class: 'mono muted' }, when(v)),
+          h('span', {}, who(v)),
+          v.why ? h('span', { class: 'hint' }, `"${v.why}"`) : null,
+          before ? h('button', { type: 'button', class: 'link', onclick: () => { openVersion = open ? null : key; ctx.rerender(); } }, open ? 'Hide' : 'What changed') : null,
+          i > 0 ? h('button', {
+            type: 'button',
+            class: 'link',
+            onclick: () => {
+              if (confirm(`Go back to ${agent.name}'s brief and examples from ${when(v)}?`)) set({ brief: v.brief, examples: v.examples, why: `Back to the version from ${when(v)}` }, 'Went back to that version.');
+            },
+          }, 'Go back') : h('span', { class: 'mono muted' }, 'now')),
+        open && before
+          ? [v.brief !== before.brief ? diffView(before.brief, v.brief) : null, (v.examples || '') !== (before.examples || '') ? diffView(before.examples, v.examples) : null]
+          : null);
+    }),
+    versions.length > 4 ? h('button', { type: 'button', class: 'link', onclick: () => { allVersions = !allVersions; ctx.rerender(); } }, allVersions ? 'Show fewer' : 'View all') : null);
 }
 
 // A few made-up exchanges that show how the agent sounds; it reads them after its brief. Unlike

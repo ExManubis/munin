@@ -8,6 +8,7 @@ import { runtime } from '../runtime/index.js';
 import { store } from '../store.js';
 import { h, kbd, statusIcon, svg, avatar, bindDraft, drafts, toast, topbar, onEnterSend, SEND_KEY } from '../ui.js';
 import { markdown } from '../markdown.js';
+import { diffView } from '../diff.js';
 import { optionRow } from '../cards.js';
 import { agentFace, roleTag, hhmm } from './agents.js';
 import { workMessage } from '../runtime/tracker-link.js';
@@ -239,7 +240,12 @@ async function answerOption(agent, item, ctx) {
 }
 
 function approval(agent, item, ctx) {
-  const rows = item.skill
+  const rows = item.soul
+    ? [
+      ['once', 'Change it', `${agent.name}'s brief and examples become these.`],
+      ['deny', 'Keep it as it is', `Tell ${agent.name} why below.`],
+    ]
+    : item.skill
     ? [
       ['once', 'Save it', `Save this skill. Ask again for the next one.`],
       ['always', 'Always allow', `Stop asking before ${agent.name} ${item.third || item.what}.`],
@@ -257,6 +263,13 @@ function approval(agent, item, ctx) {
   // A skill is on its card: what it's for, then the skill itself, so you read what you allow.
   const skill = item.skill && item.status === 'open'
     ? h('div', { class: 'quote skill-card' }, h('p', { class: 'hint' }, item.skill.description), markdown(item.skill.body))
+    : null;
+  // A change to who the agent is: why, then what changes, word by word.
+  const soul = item.soul && item.status === 'open'
+    ? h('div', { class: 'quote skill-card' },
+      h('p', { class: 'hint' }, `"${item.soul.why}"`),
+      item.soul.brief !== item.soul.was.brief ? [h('div', { class: 'label' }, 'Brief'), diffView(item.soul.was.brief, item.soul.brief)] : null,
+      item.soul.examples !== item.soul.was.examples ? [h('div', { class: 'label' }, 'How it talks'), diffView(item.soul.was.examples, item.soul.examples)] : null)
     : null;
   if (item.status !== 'open') {
     const decided = item.status === 'denied' ? 'deny' : item.status;
@@ -277,6 +290,7 @@ function approval(agent, item, ctx) {
   return h('div', { class: 'ask-card approval' },
     head,
     skill,
+    soul,
     h('div', { class: 'options' }, rows.map(([decision, label, detail], i) => optionRow(i, { label, detail }, {
       onclick: () => decide(agent, item, decision, ctx),
     }))));
