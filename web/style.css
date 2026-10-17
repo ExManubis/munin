@@ -778,6 +778,7 @@ button.option-card:hover { border-color: var(--text); }
 .composer-input::placeholder { color: var(--muted); opacity: 1; }
 .composer .hint { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding-top: 8px; }
 .send { display: inline-flex; align-items: center; }
+.send kbd { padding-right: 2px; letter-spacing: 2px; } /* a little air between ⌘ and ↵ */
 .send-up { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 1px solid var(--line); font: 13px/16px var(--mono); color: var(--muted); }
 .about { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; border-left: 1px solid var(--line); }
 .about-head { display: flex; flex-shrink: 0; align-items: center; height: 56px; padding: 0 24px; border-bottom: 1px solid var(--line); }
