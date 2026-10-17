@@ -434,3 +434,11 @@ forge  13:57
 
 - **MEMORY is in three kinds,** each with a label in Plex Mono 11 caps and how full it is, `ABOUT YOU 620 / 1,500`, turning `#EDEDED` when the kind is full: about you, about the work, and about itself. Each note has tertiary `EDIT` and `FORGET` on hover; `EDIT` turns the note into a field (Return saves, Escape doesn't).
 - **TRACK RECORD, between ROUTINES and MEMORY,** as label/value rows like PROPERTIES: Shipped, Sent back, Reviewed, Works in and Last shipped, from the tracker. An agent with the Tracker ability that hasn't done anything there yet says so; one without it and with nothing in the tracker has no section.
+
+## Changed while giving agents skills (MUN-36)
+
+- **SKILLS, between ROUTINES and TRACK RECORD,** in routine rows: the skill's name in Plex Mono, its description, how often it's been used (`Used 6 times · 2d ago`, `Not used yet`, `Not used in a month`), whose it is when another agent shared it (`vera's`), and tertiary `SHARE` and `EDIT` (`READ` for another agent's). Then secondary `WRITE A SKILL`.
+- **Editing a skill** is a sheet with its SKILL.md in a Plex Mono text area; a new one starts from a template with When to use, Steps, Pitfalls and How to check. **Sharing** is a sheet of dotted checkbox rows like the Apps picker: "Every agent, now and later", then each agent.
+- **A skill's approval card** quotes the skill between the target and the options, under its description, scrolling past 280 px. Its rows read `Save it`, `Always allow` and `Don't save it`.
+- **Agents' Markdown** shows headings, as short bold lines, and numbered lists.
+

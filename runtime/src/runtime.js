@@ -15,7 +15,8 @@ import {
 import { createBashTool, createCodingTools } from '@earendil-works/pi-durable/tools';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
-import { ROLES, SOULS, ROUTINES_RULE, roleName, askFirstFor, ruleMatches, upgradeBrief, examplesFor } from './roles.js';
+import { ROLES, SOULS, ROUTINES_RULE, SKILLS_RULE, roleName, askFirstFor, ruleMatches, upgradeBrief, examplesFor } from './roles.js';
+import { STALE_MS, SkillError, checkSkill, hasSkill, parseSkill, skillText, skillsSection } from './skills.js';
 import { toItems, summarize } from './items.js';
 import { AppError, describeAppCall, openApps } from './apps.js';
 import { GoogleError, openGoogle } from './google.js';
@@ -44,7 +45,7 @@ const conflict = (message) => new RuntimeError(409, message);
 
 // Every agent's settings, where each project's code is, and what setup asked (your name, your
 // favourite models, whether it's done), in one session document next to the conversations.
-const AgentsDoc = defineDoc({ kind: 'munin.agents', version: 1, scope: 'session', initial: () => ({ agents: {}, repos: {}, prefs: {} }) });
+const AgentsDoc = defineDoc({ kind: 'munin.agents', version: 1, scope: 'session', initial: () => ({ agents: {}, repos: {}, prefs: {}, skills: {} }) });
 // What model responses cost while an agent worked on an issue: { 'MUN-12': { cost, tokens, agents: { forge: cost } } }.
 const CostsDoc = defineDoc({ kind: 'munin.costs', version: 1, scope: 'session', initial: () => ({ issues: {} }) });
 
@@ -94,6 +95,7 @@ const costOfResponse = (message) => message.usage?.cost?.total || 0;
 export async function openRuntime(settings, { models, storage, now = Date.now, timers = true, costOf = costOfResponse, google: googleTest = {}, push: pushTest = {} } = {}) {
   storage ||= settings.db === ':memory:' ? new MemoryStorage() : await openNodeSqliteStorage(settings.db);
   const agents = new Map(); // name → settings
+  const skills = new Map(); // id → skill (skills.js), each with its owner and who it's shared with
   const listeners = new Set();
   let harness = null;
   // From setup: what agents call you, your favourite OpenRouter models, and where setup is:
@@ -184,6 +186,79 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       return `Forgot ${old.id}.`;
     }),
   });
+  // Skills (skills.js): what the agent knows how to do here. It reads one when it fits, and saves
+  // one when it has learned something it'll do again; SKILLS_RULE makes each save ask you first,
+  // with the skill on the approval card, and saves it when you allow it.
+  const skillCall = (run) => async (args, toolApi) => {
+    const agent = agentFor(toolApi.conversationId);
+    try {
+      return say(await run(agent, args));
+    } catch (err) {
+      if (err instanceof SkillError) return say(err.message, true);
+      throw err;
+    }
+  };
+  const readSkill = defineTool({
+    name: 'read_skill',
+    description: 'Read one of your skills by its name: when to use it, the steps, the pitfalls and how to check. Read it before you start what it covers.',
+    parameters: Type.Object({ name: Type.String() }),
+    execute: skillCall(async (agent, { name }) => {
+      const key = String(name || '').trim().toLowerCase();
+      const theirs = [...skills.values()].filter((s) => hasSkill(agent, s));
+      const skill = theirs.find((s) => s.name === key && s.owner === agent.name) || theirs.find((s) => s.name === key);
+      if (!skill) throw new SkillError(`You have no skill called ${name}.${theirs.length ? ` Yours: ${theirs.map((s) => s.name).join(', ')}.` : ''}`);
+      skill.uses += 1;
+      skill.lastUsed = now();
+      await saveAgents();
+      return skillText(skill);
+    }),
+  });
+  const saveSkill = defineTool({
+    name: 'save_skill',
+    description: 'Save a skill: how to do something you\'ll do again, as a lesson for next time. The body has When to use, Steps, Pitfalls and How to check, in Markdown. Saving one with the name of one of yours changes it.',
+    parameters: Type.Object({
+      name: Type.String({ description: 'Lowercase words joined by dashes, like run-gateway-tests' }),
+      description: Type.String({ description: 'What it does and when to use it, in a sentence or two' }),
+      body: Type.String({ description: 'Markdown: When to use, Steps, Pitfalls, How to check' }),
+    }),
+    execute: skillCall(async (agent, args) => {
+      const skill = checkSkill(args);
+      const changes = [...skills.values()].some((s) => s.owner === agent.name && s.name === skill.name);
+      if (agent.askFirst.some((r) => r.id === SKILLS_RULE.id && r.on)) {
+        await write(agent, 'munin.approval', { rule: SKILLS_RULE.id, label: SKILLS_RULE.label, what: changes ? 'change a skill' : SKILLS_RULE.what, third: SKILLS_RULE.third, target: skill.name, skill });
+        return `Asked ${them()} to look at the skill ${skill.name}. When they allow it, munin saves it and tells you; carry on meanwhile.`;
+      }
+      const saved = await storeSkill(agent, skill);
+      return `Saved the skill ${saved.name}.`;
+    }),
+  });
+  // A skill the agent saved, or that you allowed: its own one of that name changes, or a new one.
+  async function storeSkill(agent, skill) {
+    const old = [...skills.values()].find((s) => s.owner === agent.name && s.name === skill.name);
+    const saved = old
+      ? Object.assign(old, { description: skill.description, body: skill.body, updatedAt: now() })
+      : { id: `s${randomUUID().slice(0, 8)}`, owner: agent.name, ...skill, sharedWith: [], uses: 0, lastUsed: null, createdAt: now(), updatedAt: now() };
+    skills.set(saved.id, saved);
+    await saveAgents();
+    await write(agent, 'munin.action', { verb: old ? 'changed skill' : 'saved skill', object: saved.name });
+    return saved;
+  }
+  const skillFrom = (text) => {
+    try {
+      return checkSkill(parseSkill(text));
+    } catch (err) {
+      if (err instanceof SkillError) throw invalid(err.message);
+      throw err;
+    }
+  };
+  const skillOut = (skill, agent) => ({
+    id: skill.id, name: skill.name, description: skill.description, body: skill.body, text: skillText(skill),
+    owner: skill.owner, mine: skill.owner === agent.name, sharedWith: [...skill.sharedWith],
+    uses: skill.uses, lastUsed: skill.lastUsed ? new Date(skill.lastUsed).toISOString() : null,
+    stale: now() - (skill.lastUsed || skill.createdAt) > STALE_MS,
+    createdAt: new Date(skill.createdAt).toISOString(), updatedAt: new Date(skill.updatedAt).toISOString(),
+  });
+
   // Routines the agent sets up for itself, when you ask it to: the same as on its profile, and
   // each change an action line in its conversation. ROUTINES_RULE can make them ask first.
   const routineSchema = {
@@ -251,7 +326,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
   const Munin = defineExtension({
     name: 'munin',
-    tools: [askHuman, remember, changeNoteTool, forgetNoteTool, ...routineTools],
+    tools: [askHuman, remember, changeNoteTool, forgetNoteTool, readSkill, saveSkill, ...routineTools],
     sections: [
       // Who the agent is, who it's talking with and how it talks, then what it can do, who else
       // is on the team and what it knows about you (prompt.js). The brief and the examples are
@@ -273,6 +348,11 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
           watches: { mail: Boolean(googleFor(agent, 'mail')), calendar: Boolean(googleFor(agent, 'calendar')) },
           devices: push.status().devices,
         });
+      }, { tag: false }),
+      // Its skills (skills.js): each by name and description, and how to save one.
+      section('skills', (input) => {
+        const agent = agentFor(input.conversationId);
+        return agent ? skillsSection(agent, [...skills.values()], agent.askFirst.some((r) => r.id === SKILLS_RULE.id && r.on)) : undefined;
       }, { tag: false }),
       // Who else is on the team (prompt.js), so the agent can say whose job something is.
       section('team', (input) => {
@@ -494,9 +574,11 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   for (const agent of agents.values()) {
     syncAppRules(agent);
     if (!agent.askFirst.some((rule) => rule.id === ROUTINES_RULE.id)) agent.askFirst.push({ ...ROUTINES_RULE });
+    if (!agent.askFirst.some((rule) => rule.id === SKILLS_RULE.id)) agent.askFirst.push({ ...SKILLS_RULE });
   }
   Object.assign(repos, structuredClone(saved?.repos || {}));
   Object.assign(prefs, structuredClone(saved?.prefs || {}));
+  for (const skill of Object.values(saved?.skills || {})) skills.set(skill.id, structuredClone(skill));
   Object.assign(issueCosts, structuredClone((await harness.snapshot(CostsDoc, ctx))?.issues || {}));
   workspace = createWorkspace({ dir: reposDir, agentsDir: settings.agentsDir, repos });
   tracker.connect(); // in the background: until the tracker answers, agents are told it's away
@@ -527,6 +609,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       for (const [name, agent] of agents) doc.agents[name] = structuredClone(agent);
       doc.repos = structuredClone(repos);
       doc.prefs = structuredClone(prefs);
+      doc.skills = Object.fromEntries([...skills].map(([id, skill]) => [id, structuredClone(skill)]));
     }, ctx);
   }
 
@@ -661,6 +744,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       askFirst: agent.askFirst.map(({ match, tool, tools, ...rule }) => rule),
       routines: agent.routines.map((r) => routineOut(r, agent)),
       memory: agent.memory.map((n) => ({ ...n, kind: kindOf(n) })), memoryCount: agent.memory.length, memoryRoom: room(agent.memory),
+      skills: [...skills.values()].filter((s) => hasSkill(agent, s)).toSorted((a, b) => a.name.localeCompare(b.name)).map((s) => skillOut(s, agent)),
       usage: usageOf(entries), budget: agent.budget,
       worksIn: agent.abilities.code ? {
         folder: tilde(agent.work?.folder || agent.folder), branch: agent.work?.branch || null,
@@ -690,6 +774,9 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   }
 
   const input = async (agent, content, entry) => (await conversationOf(agent)).submit({ type: 'input', content, whenBusy: 'steer', ...(entry ? { entry } : {}) }, ctx);
+  // What munin tells the agent about your decision on an approval. The card shows the decision,
+  // so this goes in as an entry of munin's own kind and doesn't show as a message from you.
+  const decided = (agent, content, approval) => input(agent, content, { kind: 'munin.decided', data: { approval, at: now() } });
 
   // The API --------------------------------------------------------------------------------
 
@@ -789,14 +876,25 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       if (approval.status !== 'open') throw conflict('That is already decided.');
       await write(agent, 'munin.decision', { approval: id, decision });
       const rule = agent.askFirst.find((r) => r.id === approval.permission);
+      // A skill is on its card, so allowing it saves it, and the agent doesn't send it again.
+      if (approval.skill) {
+        if (decision === 'deny') {
+          await decided(agent, `${them({ start: true })} doesn't want the skill ${approval.skill.name} saved, so it isn't. If they say why, take that on.`, id);
+          return;
+        }
+        if (decision === 'always' && rule) rule.on = false;
+        await storeSkill(agent, checkSkill(approval.skill));
+        await decided(agent, `${them({ start: true })} allowed the skill ${approval.skill.name}, and munin saved it${decision === 'always' ? '. From now on your skills save without asking' : ''}.`, id);
+        return;
+      }
       if (decision === 'deny') {
-        await input(agent, `${them({ start: true })} doesn't want you to ${approval.what} (${approval.target}). Don't; find another way or ask.`);
+        await decided(agent, `${them({ start: true })} doesn't want you to ${approval.what} (${approval.target}). Don't; find another way or ask.`, id);
         return;
       }
       if (decision === 'always' && rule) rule.on = false;
       else agent.allowances.push(approval.permission);
       await saveAgents();
-      await input(agent, `${them({ start: true })} allowed you to ${approval.what} (${approval.target})${decision === 'always' ? ', from now on without asking' : ', this once'}. Go ahead.`);
+      await decided(agent, `${them({ start: true })} allowed you to ${approval.what} (${approval.target})${decision === 'always' ? ', from now on without asking' : ', this once'}. Go ahead.`, id);
     },
 
     async undo(name, id) {
@@ -827,7 +925,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       const abilities = { ...ROLES[role].abilities };
       const agent = {
         name: clean, role, colour, provider: provider || 'standin', model: model || 'stand-in', thinking: 'low',
-        brief: String(brief || '').trim() || SOULS[role].brief(), examples: null, abilities, apps: [], askFirst: [...askFirstFor(abilities), { ...ROUTINES_RULE }], allowances: [],
+        brief: String(brief || '').trim() || SOULS[role].brief(), examples: null, abilities, apps: [], askFirst: [...askFirstFor(abilities), { ...ROUTINES_RULE }, { ...SKILLS_RULE }], allowances: [],
         routines: [], memory: [], budget: null, paused: false, createdAt: Date.now(), folder: join(settings.agentsDir, clean), conversationId: null,
         tracker: link ? trackerLink(link, null) : null,
       };
@@ -872,7 +970,48 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       await sandbox?.remove(agent);
       kept.delete(agent.conversationId);
       agents.delete(name);
+      // Its skills go with it, and it's no longer on anyone else's.
+      for (const skill of [...skills.values()]) {
+        if (skill.owner === name) skills.delete(skill.id);
+        else skill.sharedWith = skill.sharedWith.filter((n) => n !== name);
+      }
       await saveAgents();
+    },
+
+    // Skills you write or change yourself, as a SKILL.md (`text`), and who an agent's own skill is
+    // shared with: ['*'] for every agent, or their names.
+    async addSkill(name, { text } = {}) {
+      const agent = need(name);
+      const skill = skillFrom(text);
+      if ([...skills.values()].some((s) => s.owner === name && s.name === skill.name)) throw conflict(`${name} already has a skill called ${skill.name}.`);
+      await storeSkill(agent, skill);
+      return fullOf(agent);
+    },
+
+    async updateSkill(name, id, { text, sharedWith } = {}) {
+      const agent = need(name);
+      const skill = skills.get(id);
+      if (!skill || skill.owner !== name) throw new RuntimeError(404, `${name} has no skill ${id}.`);
+      if (text !== undefined) {
+        const changed = skillFrom(text);
+        if (changed.name !== skill.name && [...skills.values()].some((s) => s.owner === name && s.name === changed.name)) throw conflict(`${name} already has a skill called ${changed.name}.`);
+        Object.assign(skill, changed, { updatedAt: now() });
+      }
+      if (sharedWith !== undefined) {
+        if (!Array.isArray(sharedWith)) throw invalid('Share a skill with ["*"] for every agent, or with their names.');
+        skill.sharedWith = sharedWith.includes('*') ? ['*'] : [...new Set(sharedWith.filter((n) => n !== name && agents.has(n)))];
+      }
+      await saveAgents();
+      return fullOf(agent);
+    },
+
+    async deleteSkill(name, id) {
+      const agent = need(name);
+      const skill = skills.get(id);
+      if (!skill || skill.owner !== name) throw new RuntimeError(404, `${name} has no skill ${id}.`);
+      skills.delete(id);
+      await saveAgents();
+      return fullOf(agent);
     },
 
     async pause(name) {

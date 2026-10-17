@@ -34,6 +34,7 @@ export function describeCall(name, args = {}) {
     case 'events': return 'Read what changed in the tracker';
     case 'wait_for_work': return `Waited for work in ${args.project}`;
     case 'open_worktree': return args.issue ? `Opened ${args.issue}` : 'Went back to its own folder';
+    case 'read_skill': return `Read the skill ${args.name}`;
     default: {
       const app = /^([a-z0-9_]+?)__(.+)$/.exec(name); // an app's tool: calendar__list_events
       const what = app ? `${app[1].replace(/_/g, ' ')}: ${app[2].replace(/_/g, ' ')}` : name.replace(/_/g, ' ');
@@ -43,7 +44,7 @@ export function describeCall(name, args = {}) {
 }
 
 // Tool calls that show as something else (a question card, an action line) aren't run steps.
-const quiet = (call) => ['ask_human', 'remember', 'change_note', 'forget_note'].includes(call.name) || (call.name === 'add_comment' && call.arguments?.ask_human);
+const quiet = (call) => ['ask_human', 'remember', 'change_note', 'forget_note', 'save_skill'].includes(call.name) || (call.name === 'add_comment' && call.arguments?.ask_human);
 
 function resultDetail(message) {
   if (message.isError) return 'failed';
@@ -121,7 +122,7 @@ export function toItems(entries, { busy = false } = {}) {
         break;
       }
       case 'munin.approval': {
-        const item = { id, kind: 'approval', at: iso(entry.data.at), permission: entry.data.rule, label: entry.data.label, what: entry.data.what, third: entry.data.third, target: entry.data.target, status: 'open', answeredAt: null, undoUntil: null };
+        const item = { id, kind: 'approval', at: iso(entry.data.at), permission: entry.data.rule, label: entry.data.label, what: entry.data.what, third: entry.data.third, target: entry.data.target, skill: entry.data.skill || null, status: 'open', answeredAt: null, undoUntil: null };
         byApproval.set(id, item);
         items.push(item);
         break;
@@ -155,6 +156,9 @@ export function toItems(entries, { busy = false } = {}) {
         }
         break;
       }
+      case 'munin.decided':
+        closeRun(entry.data.at); // what munin told the agent about a decision: the card shows it
+        break;
       default:
         break; // system, compaction and reset entries don't show
     }
