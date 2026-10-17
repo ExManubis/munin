@@ -793,9 +793,10 @@ button.option-card:hover { border-color: var(--text); }
 .app-row { display: flex; align-items: center; gap: 10px; color: var(--text); }
 .about-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
 .about-actions .btn { justify-content: space-between; width: 100%; }
-/* The agent's Figbot at the foot of the panel, framed as on figment.engineering. */
-.about-bot { margin-top: auto; padding: 0 24px 24px; }
-.about-bot-frame { aspect-ratio: 1; overflow: hidden; border: 1px solid var(--line); background: var(--ink); }
+/* The agent's Figbot fills the foot of the panel: the panel's left border is its frame's, a
+   line above it is the rest, and the window's edges cut it like the model's own crop. */
+.about-bot { margin-top: auto; }
+.about-bot-frame { aspect-ratio: 1; overflow: hidden; border-top: 1px solid var(--line); background: var(--ink); }
 .about-bot-frame canvas { width: 100% !important; height: 100% !important; }
 @media (max-height: 640px) { .about-bot { display: none; } }
 @container (max-width: 1000px) {

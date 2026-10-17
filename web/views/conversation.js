@@ -399,9 +399,9 @@ function about(agent, ctx) {
         agent.paused
           ? h('button', { type: 'button', class: 'link', onclick: () => resume(agent, ctx) }, 'Resume')
           : h('button', { type: 'button', class: 'link', onclick: () => pause(agent, ctx) }, 'Pause'))),
-    // drawn at about the panel's width; CSS fits it to the frame
+    // drawn at the panel's width; CSS fits it to the frame
     h('div', { class: 'about-bot', 'aria-hidden': 'true' },
-      h('div', { class: 'about-bot-frame' }, agentFace(agent, 264))));
+      h('div', { class: 'about-bot-frame' }, agentFace(agent, 311))));
 }
 
 // The projects an agent works on in the tracker, each with a way to start it there.
