@@ -55,6 +55,7 @@ export function createRuntimeServer(runtime, settings) {
   route('POST', '/agents/([^/]+)/routines/([^/]+)/run', (m) => runtime.runRoutine(enc(m[1]), enc(m[2])));
   route('DELETE', '/agents/([^/]+)/memory/([^/]+)', (m) => runtime.forget(enc(m[1]), enc(m[2])));
   route('GET', '/waiting', () => runtime.waiting());
+  route('GET', '/issue-costs', (m, body, url) => runtime.issueCosts(url.searchParams.get('issues')?.split(',').filter(Boolean) || null));
   route('GET', '/providers', () => runtime.providers());
   route('PUT', '/providers/([^/]+)/key', (m, body) => runtime.setKey(enc(m[1]), body.key));
   route('DELETE', '/providers/([^/]+)/key', (m) => runtime.removeKey(enc(m[1])));

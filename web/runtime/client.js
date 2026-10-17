@@ -48,6 +48,7 @@ export function connect(base) {
       return call('GET', `${agent(name)}/conversation${query ? `?${query}` : ''}`);
     },
     waiting: () => call('GET', '/waiting'),
+    issueCosts: (ids) => call('GET', `/issue-costs${ids ? `?issues=${ids.map(encodeURIComponent).join(',')}` : ''}`),
     send: (name, text) => call('POST', `${agent(name)}/messages`, { text }),
     answer: (name, id, answer) => call('POST', `${agent(name)}/items/${enc(id)}/answer`, answer),
     decide: (name, id, decision) => call('POST', `${agent(name)}/items/${enc(id)}/decide`, { decision }),

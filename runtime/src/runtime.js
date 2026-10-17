@@ -44,6 +44,8 @@ const conflict = (message) => new RuntimeError(409, message);
 // Every agent's settings, where each project's code is, and what setup asked (your name, your
 // favourite models, whether it's done), in one session document next to the conversations.
 const AgentsDoc = defineDoc({ kind: 'munin.agents', version: 1, scope: 'session', initial: () => ({ agents: {}, repos: {}, prefs: {} }) });
+// What model responses cost while an agent worked on an issue: { 'MUN-12': { cost, tokens, agents: { forge: cost } } }.
+const CostsDoc = defineDoc({ kind: 'munin.costs', version: 1, scope: 'session', initial: () => ({ issues: {} }) });
 
 const NAME = /^[a-z][a-z0-9-]{1,23}$/;
 const COLOURS = ['white', 'ember', 'coral', 'rose', 'iris', 'sky', 'teal', 'moss', 'straw'];
@@ -248,6 +250,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         if (!agent) return;
         const spent = await spentThisMonth(agent);
         spent.total += costOf(message);
+        if (agent.onIssue) await countFor(agent.onIssue, agent, message);
         if (agent.budget && spent.total >= agent.budget) await pauseForBudget(agent);
         // A finished answer (not a step towards one) reaches your devices.
         const text = message.stopReason === 'stop' ? (message.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim() : '';
@@ -283,6 +286,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   const moveTo = (api, context) => (cwd) => api.commit((tx) => configure(tx, api.conversationId, { cwd }), context);
   async function enter(agent, opened, move) {
     agent.work = { issue: opened.issue, folder: opened.folder, branch: opened.branch, detached: Boolean(opened.detached) };
+    agent.onIssue = opened.issue?.id || agent.onIssue || null; // a review costs the issue too
     await saveAgents();
     await move(opened.folder);
   }
@@ -329,6 +333,30 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       ].filter(Boolean).join(' ');
     })],
   });
+
+  // Which issue an agent's model responses count towards: the one it took or opened, until it
+  // moves it on (to review, done, back to the pile). Responses on no issue are only the agent's.
+  async function onStatus(agent, issue, status) {
+    const next = status === 'in_progress' ? issue.id : agent.onIssue === issue.id ? null : agent.onIssue;
+    if (next === (agent.onIssue || null)) return;
+    agent.onIssue = next;
+    await saveAgents();
+  }
+  const issueCosts = {};
+  let costWrites = Promise.resolve();
+  function countFor(id, agent, message) {
+    const cost = costOf(message);
+    const entry = issueCosts[id] ||= { cost: 0, tokens: 0, agents: {} };
+    entry.cost += cost;
+    entry.tokens += message.usage?.totalTokens || 0;
+    entry.agents[agent.name] = (entry.agents[agent.name] || 0) + cost;
+    const saved = structuredClone(entry);
+    costWrites = costWrites.then(() => harness.commit(async (tx) => {
+      (await tx.doc(CostsDoc)).issues[id] = saved;
+    }, ctx)).catch(() => {});
+    return costWrites;
+  }
+  const rounded = (n) => Math.round(n * 10000) / 10000;
 
   // When a coder takes an issue, its worktree is ready before it reads the tracker's answer.
   async function onTake(agent, issue, move) {
@@ -380,7 +408,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   registry.install(WebSearch);
   registry.install(Munin);
   registry.install(Workspace);
-  const tracker = createTracker({ registry, agents: () => agents.values(), agentFor, write, user: who, onTake, mcpUrl: settings.trackerMcp || null });
+  const tracker = createTracker({ registry, agents: () => agents.values(), agentFor, write, user: who, onTake, onStatus, mcpUrl: settings.trackerMcp || null });
   // When apps change, or one starts or stops answering, every agent's conversation gets its tools.
   const reconfigure = async () => {
     if (!harness) return;
@@ -417,6 +445,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   }
   Object.assign(repos, structuredClone(saved?.repos || {}));
   Object.assign(prefs, structuredClone(saved?.prefs || {}));
+  Object.assign(issueCosts, structuredClone((await harness.snapshot(CostsDoc, ctx))?.issues || {}));
   workspace = createWorkspace({ dir: reposDir, agentsDir: settings.agentsDir, repos });
   tracker.connect(); // in the background: until the tracker answers, agents are told it's away
 
@@ -659,6 +688,14 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       }
       const start = Math.max(0, end - size);
       return { agent: await fullOf(agent, read), items: read.items.slice(start, end), more: start > 0 };
+    },
+
+    // What each issue cost, in model responses while agents worked on it. `ids` narrows it down.
+    issueCosts(ids = null) {
+      const wanted = ids ? new Set(ids.map((id) => String(id).toUpperCase())) : null;
+      return Object.fromEntries(Object.entries(issueCosts)
+        .filter(([id]) => !wanted || wanted.has(id))
+        .map(([id, c]) => [id, { cost: rounded(c.cost), tokens: c.tokens, agents: Object.fromEntries(Object.entries(c.agents).map(([name, cost]) => [name, rounded(cost)])) }]));
     },
 
     async waiting() {

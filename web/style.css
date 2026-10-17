@@ -323,6 +323,7 @@ a.q-meta:hover { color: var(--text); }
 .row.closed .row-title { color: var(--muted); }
 .who { display: flex; flex-shrink: 0; align-items: center; gap: 8px; font: 11px/16px var(--mono); color: var(--muted); }
 .who-name { max-width: 120px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.row .cost { flex-shrink: 0; font: 11px/16px var(--mono); }
 .when { flex-shrink: 0; min-width: 28px; font: 11px/16px var(--mono); color: var(--muted); text-align: right; white-space: nowrap; }
 .moves { display: flex; flex-shrink: 0; gap: 2px; opacity: 0; }
 .row:hover .moves, .row:focus-within .moves { opacity: 1; }
@@ -407,7 +408,7 @@ select option { background: var(--ink); color: var(--text); }
     margin-top: 24px; padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); border-left: 0;
   }
   .prop:nth-child(n + 3), .props .unassign { display: none !important; }
-  .props > .prop.prop-pulls { display: flex !important; grid-column: 1 / -1; margin-top: 8px; }
+  .props > .prop.prop-pulls, .props > .prop.prop-cost { display: flex !important; grid-column: 1 / -1; margin-top: 8px; }
   .prop { flex-direction: column; align-items: stretch; gap: 2px; }
   .prop-key { width: auto; font: 11px/16px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
 }

@@ -69,6 +69,7 @@ An agent's name is also its name in the tracker. That's how the frontend joins t
 | `undo(name, id)` | `POST /runtime/api/agents/{name}/items/{id}/undo` | Takes back an `always` for 8 seconds; the rule asks first again |
 | `stopRun(name, id)` | `POST /runtime/api/agents/{name}/runs/{id}/stop` | Stops after the step it's on |
 | `waiting()` | `GET /runtime/api/waiting` | Every open question and approval, as `{agent: Summary, item}`, oldest first |
+| `issueCosts(ids?)` | `GET /runtime/api/issue-costs?issues=MUN-1,MUN-2` | What each issue cost: `{"MUN-12": {cost, tokens, agents: {forge: cost}}}`, dollars. A model response counts towards the issue its agent is on: the one it took or opened a worktree for, until it moves that issue on (to review, done, or back to the pile). Responses on no issue count only in the agent's own usage, which has every response. The tracker knows nothing of cost; the frontend joins the two on the issue page and in the project's list. Without `issues`, every issue counted so far |
 
 An **item** is one of:
 
@@ -187,7 +188,7 @@ The runtime (`runtime/src/`) is a thin layer over pi-durable:
 
 ## What this version does
 
-Real: agents and their settings, conversations with runs, questions with options, ask-first approvals with undo, coding tools, a worktree and a branch per issue, the tracker for coders and reviewers, routines on a schedule or a tracker trigger, memory, pause and resume, usage, models, the live stream, and everything surviving a restart.
+Real: agents and their settings, conversations with runs, questions with options, ask-first approvals with undo, coding tools, a worktree and a branch per issue, the tracker for coders and reviewers, routines on a schedule or a tracker trigger, memory, pause and resume, usage and cost per issue, models, the live stream, and everything surviving a restart.
 
 An agent in the tracker starts work when you tell it to, from its projects in the ABOUT panel, or when a routine says so: "Weekdays 09:00: continue the MUN project" keeps a coder on the pile, and "When an issue moves to In review" puts a reviewer on what lands. It keeps going until `wait_for_work` says there's nothing left.
 
