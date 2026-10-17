@@ -71,6 +71,9 @@ export function connect(base) {
     searchModels: (q) => call('GET', `/models/search?q=${enc(q)}`),
     setFavourites: (models) => call('PUT', '/favourites', { models }),
     repos: () => call('GET', '/repos'),
+    apps: () => call('GET', '/apps'),
+    addApp: (fields) => call('POST', '/apps', fields),
+    removeApp: (id) => call('DELETE', `/apps/${enc(id)}`),
     setRepo: (key, fields) => call('PUT', `/repos/${enc(key)}`, fields),
     removeRepo: (key) => call('DELETE', `/repos/${enc(key)}`),
     subscribe(fn) {

@@ -34,7 +34,11 @@ export function describeCall(name, args = {}) {
     case 'events': return 'Read what changed in the tracker';
     case 'wait_for_work': return `Waited for work in ${args.project}`;
     case 'open_worktree': return args.issue ? `Opened ${args.issue}` : 'Went back to its own folder';
-    default: return `${name.replace(/_/g, ' ')}${Object.keys(args).length ? ` ${first(JSON.stringify(args), 80)}` : ''}`;
+    default: {
+      const app = /^([a-z0-9_]+?)__(.+)$/.exec(name); // an app's tool: calendar__list_events
+      const what = app ? `${app[1].replace(/_/g, ' ')}: ${app[2].replace(/_/g, ' ')}` : name.replace(/_/g, ' ');
+      return `${what}${Object.keys(args).length ? ` ${first(JSON.stringify(args), 80)}` : ''}`;
+    }
   }
 }
 

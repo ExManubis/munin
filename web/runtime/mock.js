@@ -846,6 +846,33 @@ export const mock = {
     changed();
   },
 
+  // Apps: MCP servers agents use. The mock pretends every app answers with a few tools.
+  async apps() {
+    state.apps ||= [
+      { id: 'calendar', name: 'Calendar', url: 'https://calendar.example.com/mcp', token: { hint: 'k3y9' } },
+      { id: 'gmail', name: 'Gmail', url: 'https://mail.example.com/mcp', token: { hint: 'm41l' } },
+    ];
+    return state.apps.map((app) => ({ ...app, connected: true, tools: 4, detail: '4 tools' }));
+  },
+
+  async addApp({ name, url, token } = {}) {
+    const title = String(name || '').trim();
+    if (!title) throw new Error('An app needs a name, like Calendar.');
+    if (!/^https?:\/\//.test(String(url || '').trim())) throw new Error("That isn't a URL. An app is an MCP server's address, like https://mcp.example.com/mcp.");
+    const id = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    await mock.apps();
+    if (state.apps.some((app) => app.id === id)) throw new Error(`There's already an app called ${title}.`);
+    state.apps.push({ id, name: title, url: url.trim(), token: token ? { hint: token.slice(-4) } : null });
+    changed();
+    return (await mock.apps()).find((app) => app.id === id);
+  },
+
+  async removeApp(id) {
+    await mock.apps();
+    state.apps = state.apps.filter((app) => app.id !== id);
+    changed();
+  },
+
   subscribe(fn) {
     listeners.add(fn);
     return () => listeners.delete(fn);

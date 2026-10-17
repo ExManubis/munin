@@ -8,67 +8,15 @@
 // filing an issue becomes an action line.
 
 import { configure, defineExtension, defineTool, section } from '@earendil-works/pi-durable';
+import { mcpClient, textOf } from './mcp.js';
 
-const PROTOCOL = '2025-06-18';
 const RETRY_MS = 30 * 1000;
 
 export class TrackerError extends Error {}
 
-// Just enough of MCP over HTTP for the tracker: it answers each request on its own, without a
-// session, in JSON (or as one server-sent event, which this reads too).
-export function mcpClient(url, token) {
-  let next = 0;
-  async function rpc(method, params, signal) {
-    let response;
-    try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json, text/event-stream',
-          'MCP-Protocol-Version': PROTOCOL,
-        },
-        body: JSON.stringify({ jsonrpc: '2.0', id: ++next, method, params }),
-        signal,
-      });
-    } catch (err) {
-      if (signal?.aborted) throw err;
-      throw new TrackerError(`Can't reach the tracker at ${url}.`);
-    }
-    if (response.status === 401 || response.status === 403) throw new TrackerError("The tracker doesn't accept this agent's token. It may have been revoked.");
-    if (!response.ok) throw new TrackerError(`The tracker answered ${response.status} ${response.statusText}.`);
-    const body = (response.headers.get('content-type') || '').includes('text/event-stream')
-      ? fromEvents(await response.text())
-      : await response.json();
-    if (body?.error) throw new TrackerError(body.error.message || 'The tracker refused that.');
-    return body?.result;
-  }
-  return {
-    initialize: () => rpc('initialize', { protocolVersion: PROTOCOL, capabilities: {}, clientInfo: { name: 'munin-runtime', version: '0.1.0' } }),
-    async tools() {
-      const tools = [];
-      let cursor;
-      do {
-        const page = await rpc('tools/list', cursor ? { cursor } : {});
-        tools.push(...page.tools);
-        cursor = page.nextCursor;
-      } while (cursor);
-      return tools;
-    },
-    call: (name, args, signal) => rpc('tools/call', { name, arguments: args }, signal),
-  };
-}
-
-function fromEvents(text) {
-  const messages = text.split(/\r?\n\r?\n/)
-    .map((block) => block.split(/\r?\n/).filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('\n'))
-    .filter(Boolean)
-    .map((data) => JSON.parse(data));
-  return messages.find((m) => 'result' in m || 'error' in m) || null;
-}
-
-const textOf = (result) => (result?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+// The tracker over MCP (mcp.js), with an agent's token: it answers each request on its own,
+// without a session.
+const trackerClient = (url, token) => mcpClient(url, { token, name: 'the tracker' });
 
 // "MUN-5 [in_progress] Retry rate-limited calls (assignee: forge)", as the tracker writes an
 // issue on one line.
@@ -123,7 +71,7 @@ export function createTracker({ registry, agents, agentFor, write, user, onTake,
         const agent = agentFor(api.conversationId);
         const fail = (text) => ({ output: [{ type: 'text', text }], isError: true });
         if (!agent?.tracker?.token) return fail(`You aren't connected to munin's tracker. Ask ${user()} to turn on the Tracker ability in your profile.`);
-        const client = mcpClient(urlOf(agent), agent.tracker.token);
+        const client = trackerClient(urlOf(agent), agent.tracker.token);
         let result;
         try {
           result = await client.call(spec.name, args, context.abortSignal);
@@ -185,7 +133,7 @@ export function createTracker({ registry, agents, agentFor, write, user, onTake,
     const linked = [...agents()].filter((a) => a.abilities.tracker && a.tracker?.token);
     for (const agent of linked) {
       try {
-        const client = mcpClient(urlOf(agent), agent.tracker.token);
+        const client = trackerClient(urlOf(agent), agent.tracker.token);
         const info = await client.initialize();
         const tools = await client.tools();
         if (closed) return false;
@@ -212,7 +160,7 @@ export function createTracker({ registry, agents, agentFor, write, user, onTake,
 
   // A tool call as the agent, outside a conversation: the routines read the event feed this way.
   async function call(agent, name, args) {
-    const result = await mcpClient(urlOf(agent), agent.tracker.token).call(name, args);
+    const result = await trackerClient(urlOf(agent), agent.tracker.token).call(name, args);
     if (result?.isError) throw new TrackerError(textOf(result));
     return textOf(result);
   }

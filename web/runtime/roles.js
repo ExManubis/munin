@@ -72,8 +72,6 @@ export const ABILITIES = [
   ['images', 'Images', 'Make pictures'],
 ];
 
-export const APPS = ['Calendar', 'Gmail', 'GitHub', 'Slack', 'Notion', 'Linear', 'Google Drive'];
-
 export const THINKING = ['off', 'low', 'medium', 'high'];
 
 // The provider and model to use from a catalog: the one asked for when it's offered, or
