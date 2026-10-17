@@ -9,12 +9,12 @@ import { fauxProvider, fauxAssistantMessage, fauxText, fauxToolCall } from '@ear
 import { buildModels } from '../src/models.js';
 import { openRuntime } from '../src/runtime.js';
 
-async function setup() {
+async function setup(options = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'munin-runtime-'));
   const settings = { db: ':memory:', agentsDir: join(dir, 'agents'), ollamaUrl: null, user: 'Mikkel' };
   const faux = fauxProvider({ provider: 'scripted', models: [{ id: 'model' }] });
   const models = await buildModels(settings, { extra: [faux.provider], env: {} });
-  const runtime = await openRuntime(settings, { models });
+  const runtime = await openRuntime(settings, { models, ...options });
   return { runtime, faux, dir };
 }
 
@@ -183,5 +183,62 @@ test('names, roles and colours are checked', async () => {
   await runtime.createAgent({ name: 'ok', role: 'writer' });
   await assert.rejects(runtime.createAgent({ name: 'ok', role: 'writer' }), /already an agent called ok/);
   await assert.rejects(runtime.agent('nobody'), /no agent called nobody/);
+  await runtime.close();
+});
+
+test('an agent pauses itself at its budget for the month, and resumes with a bigger budget or a new month', async () => {
+  let clock = new Date(2026, 9, 17, 12).getTime(); // 17 October
+  const { runtime, faux } = await setup({ now: () => clock, costOf: () => 0.4 }); // every response costs 40 cents
+  await runtime.createAgent({ name: 'hugin', role: 'assistant', provider: 'scripted', model: 'model' });
+  await runtime.updateAgent('hugin', { budget: 1 });
+
+  faux.setResponses([reply(fauxText('One.')), reply(fauxText('Two.'))]);
+  await runtime.send('hugin', 'Count.');
+  await runtime.waitForIdle();
+  await runtime.send('hugin', 'Again.');
+  await runtime.waitForIdle();
+  let agent = await runtime.agent('hugin');
+  assert.equal(agent.paused, false, '80 cents of a dollar');
+  assert.equal(agent.usage.month, 0.8);
+
+  faux.setResponses([reply(fauxToolCall('remember', { note: 'Mikkel counts things.' })), reply(fauxText('Three.'))]);
+  await runtime.send('hugin', 'Once more.');
+  await runtime.waitForIdle();
+  agent = await runtime.agent('hugin');
+  assert.equal(agent.paused, true, 'a dollar and twenty cents');
+  assert.deepEqual(agent.memory, [], 'the tool call in the response that crossed the budget is blocked');
+  assert.equal(agent.usage.month, 1.6, 'and the agent answers once more and stops');
+  assert.equal(agent.pausedFor, 'budget');
+  assert.equal(agent.state, 'paused');
+  assert.equal((await runtime.agents()).find((a) => a.name === 'hugin').preview, 'Paused at its budget');
+  const { items } = await runtime.conversation('hugin');
+  assert.deepEqual(items.filter((i) => i.kind === 'action' && i.verb === 'paused').map((i) => i.object), ['at its $1 budget for October']);
+  await assert.rejects(runtime.send('hugin', 'Hello?'), /paused/);
+  await assert.rejects(runtime.resume('hugin'), /hugin has spent \$1\.60 of its \$1 budget this month\. Raise the budget/);
+
+  await runtime.updateAgent('hugin', { budget: 5 });
+  assert.equal((await runtime.agent('hugin')).paused, true, "a bigger budget doesn't resume it by itself");
+  await runtime.resume('hugin');
+  agent = await runtime.agent('hugin');
+  assert.equal(agent.paused, false);
+  assert.equal(agent.pausedFor, null);
+
+  await runtime.updateAgent('hugin', { budget: 1 });
+  await runtime.pause('hugin');
+  assert.equal((await runtime.agent('hugin')).pausedFor, 'you');
+  await assert.rejects(runtime.resume('hugin'), /budget/, 'still over it this month');
+  clock = new Date(2026, 10, 1, 9).getTime(); // 1 November
+  await runtime.resume('hugin');
+  assert.equal((await runtime.agent('hugin')).usage.month, 0, 'a new month starts at nothing');
+  await runtime.close();
+});
+
+test('an agent with no budget never pauses itself', async () => {
+  const { runtime, faux } = await setup({ costOf: () => 50 });
+  await runtime.createAgent({ name: 'pip', role: 'companion', provider: 'scripted', model: 'model' });
+  faux.setResponses([reply(fauxText('Hi.'))]);
+  await runtime.send('pip', 'Hi');
+  await runtime.waitForIdle();
+  assert.equal((await runtime.agent('pip')).paused, false);
   await runtime.close();
 });

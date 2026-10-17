@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { BACKGROUND_CONTEXT as ctx } from '@earendil-works/chord/context';
 import { Type } from '@earendil-works/pi-ai';
 import {
-  Harness, LiveDoc, MemoryStorage, ToolTask, configure, createRegistry, defineDoc, defineExtension, defineTool, hook, section,
+  GenerationTask, Harness, LiveDoc, MemoryStorage, ToolTask, configure, createRegistry, defineDoc, defineExtension, defineTool, hook, section,
 } from '@earendil-works/pi-durable';
 import { createBashTool, createCodingTools } from '@earendil-works/pi-durable/tools';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
@@ -78,8 +78,10 @@ function trackerLink(value, current) {
   return link;
 }
 
-// `now` and `timers` are for tests: a clock to run routines by, and whether a timer runs them.
-export async function openRuntime(settings, { models, storage, now = Date.now, timers = true } = {}) {
+// `now`, `timers` and `costOf` are for tests: a clock to run routines and budgets by, whether a
+// timer runs routines, and what a model response cost (the test model's are all free).
+const costOfResponse = (message) => message.usage?.cost?.total || 0;
+export async function openRuntime(settings, { models, storage, now = Date.now, timers = true, costOf = costOfResponse } = {}) {
   storage ||= settings.db === ':memory:' ? new MemoryStorage() : await openNodeSqliteStorage(settings.db);
   const agents = new Map(); // name → settings
   const listeners = new Set();
@@ -141,9 +143,26 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         return agent ? about(agent, named()) : undefined;
       }, { tag: false }),
     ],
-    hooks: [hook(ToolTask, {
+    hooks: [hook(GenerationTask, {
+      // Before a request, so this month's spend is known before the response adds to it.
+      beforeRequest: async (request, api) => {
+        const agent = agentFor(api.conversationId);
+        if (agent?.budget) await spentThisMonth(agent);
+        return undefined;
+      },
+      afterResponse: async (message, api) => {
+        const agent = agentFor(api.conversationId);
+        if (!agent) return;
+        const spent = await spentThisMonth(agent);
+        spent.total += costOf(message);
+        if (agent.budget && spent.total >= agent.budget) await pauseForBudget(agent);
+      },
+    }), hook(ToolTask, {
       beforeTool: async (call, api) => {
         const agent = agentFor(api.conversationId);
+        if (agent?.pausedFor === 'budget' && agent.paused) {
+          return { block: "You've reached your budget for this month, so munin has paused you. Don't call any more tools: say in a line or two where you got to, and stop." };
+        }
         const rule = agent?.askFirst.find((r) => r.on && ruleMatches(r, call.name, call.arguments));
         if (!rule) return undefined;
         const allowed = agent.allowances.indexOf(rule.id);
@@ -316,24 +335,53 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     return { entries, items: toItems(entries, { busy }), busy };
   }
 
+  // `month` is this calendar month, the period a budget covers.
   function usageOf(entries) {
-    const now = Date.now();
+    const at = now();
     const out = { today: 0, week: 0, month: 0, tokens: 0 };
-    const today = new Date();
+    const today = new Date(at);
     today.setHours(0, 0, 0, 0);
+    const month = new Date(today);
+    month.setDate(1);
     for (const entry of entries) {
       const message = entry.kind === 'pi.assistant' ? entry.model?.[0] : null;
       if (!message?.usage) continue;
-      const cost = message.usage.cost?.total || 0;
+      const cost = costOf(message);
       if (message.timestamp >= today.getTime()) {
         out.today += cost;
         out.tokens += message.usage.totalTokens || 0;
       }
-      if (now - message.timestamp < 7 * DAY) out.week += cost;
-      if (now - message.timestamp < 30 * DAY) out.month += cost;
+      if (at - message.timestamp < 7 * DAY) out.week += cost;
+      if (message.timestamp >= month.getTime()) out.month += cost;
     }
     for (const key of ['today', 'week', 'month']) out[key] = Math.round(out[key] * 1000) / 1000;
     return out;
+  }
+
+  // What each agent's model responses cost this calendar month: read from its conversation the
+  // first time it's needed in a month, then added to as responses arrive.
+  const spend = new Map(); // name → { month: 'YYYY-MM', total }
+  const monthOf = (at) => { const d = new Date(at); return `${d.getFullYear()}-${d.getMonth() + 1}`; }; // local, like usageOf
+  async function spentThisMonth(agent) {
+    const month = monthOf(now());
+    let spent = spend.get(agent.name);
+    if (!spent || spent.month !== month) {
+      spent = { month, total: usageOf((await readItems(agent)).entries).month };
+      spend.set(agent.name, spent);
+    }
+    return spent;
+  }
+
+  // An agent pauses itself at its budget and says why. The turn it's in ends rather than being
+  // cut off: its next tool calls are blocked (beforeTool), so it answers once more and stops.
+  // It stays paused until you resume it, which takes a bigger budget or a new month.
+  async function pauseForBudget(agent) {
+    if (agent.paused) return;
+    agent.paused = true;
+    agent.pausedFor = 'budget';
+    await saveAgents();
+    const month = new Date(now()).toLocaleString('en', { month: 'long' });
+    await write(agent, 'munin.action', { verb: 'paused', object: `at its $${agent.budget} budget for ${month}` });
   }
 
   async function summaryOf(agent) {
@@ -341,7 +389,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     const s = summarize(items, { busy, paused: agent.paused });
     return {
       name: agent.name, role: agent.role, roleName: roleName(agent.role), colour: agent.colour,
-      state: s.state, waiting: s.waiting, preview: agent.paused ? 'Paused' : s.preview, lastAt: s.lastAt || new Date(agent.createdAt).toISOString(),
+      state: s.state, waiting: s.waiting, preview: agent.paused ? (agent.pausedFor === 'budget' ? 'Paused at its budget' : 'Paused') : s.preview, lastAt: s.lastAt || new Date(agent.createdAt).toISOString(),
       typing: s.typing, provider: agent.provider, model: agent.model,
     };
   }
@@ -366,7 +414,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         projects: [...(agent.tracker?.projects || [])], takes: agent.role === 'reviewer' ? 'reviews' : 'issues',
         connected: Boolean(agent.tracker?.token), reachable: tracker.reachable(),
       } : null,
-      paused: agent.paused, createdAt: new Date(agent.createdAt).toISOString(),
+      paused: agent.paused, pausedFor: agent.paused ? agent.pausedFor || 'you' : null, createdAt: new Date(agent.createdAt).toISOString(),
       run: s.run ? { id: s.run.id, issue: s.run.issue || null, startedAt: s.run.startedAt, step: s.run.steps[s.run.steps.length - 1]?.text || null } : null,
     };
   }
@@ -547,6 +595,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     async pause(name) {
       const agent = need(name);
       agent.paused = true;
+      agent.pausedFor = 'you';
       await saveAgents();
       await (await conversationOf(agent)).abort(ctx);
       await write(agent, 'munin.action', { verb: 'paused', object: 'by you' });
@@ -554,7 +603,12 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
     async resume(name) {
       const agent = need(name);
+      if (agent.budget) {
+        const { total } = await spentThisMonth(agent);
+        if (total >= agent.budget) throw conflict(`${name} has spent $${total.toFixed(2)} of its $${agent.budget} budget this month. Raise the budget on its profile to resume it, or wait for next month.`);
+      }
       agent.paused = false;
+      agent.pausedFor = null;
       await saveAgents();
       await write(agent, 'munin.action', { verb: 'resumed', object: 'by you' });
     },
