@@ -4,6 +4,7 @@
 import { api } from './api.js';
 import { store, kindOf, isBusy } from './store.js';
 import { figbot } from './figbot.js';
+import { claudeMark, isClaude } from './claude-mark.js';
 
 export const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl ';
 
@@ -96,14 +97,19 @@ export function icon(name, { color = C.muted, size = 12 } = {}) {
 }
 
 // Agents are Figbots, in their colour when they're munin's own and white when they connect
-// from outside. People are solid squares with an initial, and nobody (unassigned) is a
-// dotted square.
+// from outside, except Claude, which gets its own spark. People are solid squares with an
+// initial, and nobody (unassigned) is a dotted square.
 export function avatar(name, { kind, idle = false, size = 18, state } = {}) {
   if (!name) return svg(size, '0 0 18 18', [frame18(C.muted, { 'stroke-dasharray': '1 1' })], { cls: 'avatar', label: 'Unassigned' });
-  if ((kind || kindOf(name)) === 'agent') return figbot({ size, state: state || (idle ? 'idle' : 'working'), animate: false });
+  if ((kind || kindOf(name)) === 'agent') {
+    if (isClaude(name, ownNames())) return claudeMark({ size });
+    return figbot({ size, state: state || (idle ? 'idle' : 'working'), animate: false });
+  }
   const style = size === 18 ? null : `width:${size}px;height:${size}px;font-size:${size < 16 ? 9 : 10}px`;
   return h('span', { class: 'avatar person', 'aria-hidden': 'true', style }, (name.trim()[0] || '?').toUpperCase());
 }
+
+const ownNames = () => store.runtimeAgents.map((a) => a.name);
 
 // What an agent is doing, for its face: the runtime knows for its own agents; for the rest,
 // the tracker does (working on something, or waiting for an answer).
@@ -117,6 +123,7 @@ export function agentState(name) {
 
 // An agent's face, in its colour and with the expression for what it's doing.
 export function agentAvatar(name, { size = 18, state } = {}) {
+  if (isClaude(name, ownNames())) return claudeMark({ size, label: name });
   const own = store.runtimeAgents.find((a) => a.name === name);
   return figbot({ colour: own?.colour || 'white', state: state || agentState(name), size, seed: name, label: name });
 }
