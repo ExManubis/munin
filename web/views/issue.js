@@ -1,6 +1,7 @@
 // One issue: title and description (editable), status and assignee, what it waits for and
 // blocks, and one timeline of comments and history.
 
+import { withCosts, dollars } from '../runtime/costs.js';
 import { api } from '../api.js';
 import { store, liveAgents, displayName, quietAgent } from '../store.js';
 import { markdown } from '../markdown.js';
@@ -19,7 +20,9 @@ export const view = {
   title: (data) => `${data.issue.id} ${data.issue.title}`,
 
   async load({ id }) {
-    return { issue: await api.issue(id) };
+    const issue = await api.issue(id);
+    await withCosts([issue]);
+    return { issue };
   },
 
   leave() {
@@ -353,9 +356,20 @@ function properties(issue, project, ctx) {
       h('datalist', { id: 'assignee-options' }, names.map((n) => h('option', { value: n })))),
     prop('Project', h('a', { href: `#/projects/${encodeURIComponent(issue.project)}` }, project ? project.name : issue.project)),
     pullRequests(issue, ctx),
+    cost(issue),
     prop('Created', h('span', {}, `${displayName(issue.created_by)}, `, time(issue.created_at, { long: true }))),
     prop('Updated', time(issue.updated_at, { long: true })),
     prompts(issue, 'props-prompts'));
+}
+
+// What its agents' models cost while they worked on it, from the runtime; who spent what when several did.
+function cost(issue) {
+  if (!issue.cost?.cost) return null;
+  const agents = Object.entries(issue.cost.agents).sort((a, b) => b[1] - a[1]);
+  return h('div', { class: 'prop prop-cost' },
+    h('span', { class: 'prop-key' }, 'Cost'),
+    h('span', { class: 'prop-value', title: `${issue.cost.tokens.toLocaleString()} tokens` }, dollars(issue.cost.cost),
+      agents.length > 1 ? h('span', { class: 'muted' }, agents.map(([name, spent]) => `${name} ${dollars(spent)}`).join(', ')) : null));
 }
 
 // Pull requests on GitHub that carry the issue's work, with what GitHub last said about them.

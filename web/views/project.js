@@ -1,6 +1,7 @@
 // A project's issues, as a list grouped by status or as a board, with its brief and the
 // reorderable Todo pile. Also the plain list of projects that the phone tab bar opens.
 
+import { withCosts, dollars } from '../runtime/costs.js';
 import { api, ApiError } from '../api.js';
 import { store, openCount, quietAgent, remember } from '../store.js';
 import { markdown } from '../markdown.js';
@@ -34,7 +35,7 @@ export const view = {
   async load({ key }) {
     const project = store.projects.find((p) => p.key === key);
     if (!project) throw new ApiError(`No project with key ${key}.`, 404);
-    const issues = await api.issues({ project: key, status: 'all' });
+    const issues = await withCosts(await api.issues({ project: key, status: 'all' }));
     return { project, issues };
   },
 
@@ -321,6 +322,7 @@ function row(issue, pile) {
     h('span', { class: 'spacer' }),
     pile ? moveButtons(pile) : null,
     quietHint(issue),
+    issue.cost?.cost ? h('span', { class: 'cost mono muted', title: 'What its agents\' models cost while they worked on it' }, dollars(issue.cost.cost)) : null,
     h('span', { class: 'who', title: issue.assignee ? `Assigned to ${issue.assignee}` : 'Unassigned' },
       personAvatar(issue.assignee),
       h('span', { class: 'who-name' }, issue.assignee || '')),

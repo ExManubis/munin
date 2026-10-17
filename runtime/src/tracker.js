@@ -52,10 +52,10 @@ export function actionFor(agentName, args, resultText) {
 // `agents()` lists every agent, `agentFor(conversationId)` finds the calling one, and
 // `write(agent, kind, data)` adds an entry to its conversation. `onTake(agent, issue, move)`
 // hears that an agent took an issue, can `move(folder)` its tools there, and returns a line
-// for the agent. `connect()` lists the
+// for the agent. `onStatus(agent, issue, status)` hears every move the agent makes. `connect()` lists the
 // tracker's tools with any connected agent's token and installs them in place of the empty
 // extension, retrying every half minute until the tracker answers.
-export function createTracker({ registry, agents, agentFor, write, user, onTake, mcpUrl = null }) {
+export function createTracker({ registry, agents, agentFor, write, user, onTake, onStatus, mcpUrl = null }) {
   const urlOf = (agent) => mcpUrl || agent.tracker.url; // the agent's token works at either
   let listed = null; // the tracker's tools, once it has answered
   let instructions = '';
@@ -104,6 +104,7 @@ export function createTracker({ registry, agents, agentFor, write, user, onTake,
     } else if (name === 'update_issue') {
       const action = actionFor(agent.name, args, text);
       if (action) await write(agent, 'munin.action', action);
+      if (action && onStatus) await onStatus(agent, action.issue, action.status);
       if (action?.status === 'in_progress' && onTake) return onTake(agent, action.issue, move);
     } else if (name === 'create_issue') {
       const m = /^Created (\S+): (.*)$/m.exec(text);
