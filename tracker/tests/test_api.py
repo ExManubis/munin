@@ -129,6 +129,10 @@ def test_the_frontend_is_served_from_the_checkout_unless_turned_off(client, sett
     page = client.get("/")
     assert page.status_code == 200
     assert "<title>munin</title>" in page.text
+    # Checked with the server every time, so an update reaches the page on its next load.
+    module = client.get("/app.js")
+    assert (page.headers["cache-control"], module.headers["cache-control"]) == ("no-cache", "no-cache")
+    assert client.get("/app.js", headers={"If-None-Match": module.headers["etag"]}).status_code == 304
 
     with TestClient(create_app(replace(settings, web_dir=None)), base_url="http://localhost") as api_only:
         assert api_only.get("/").status_code == 404
