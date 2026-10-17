@@ -143,6 +143,7 @@ The screens needed three things from the tracker. Every agent can use them, so i
 The runtime (`runtime/src/`) is a thin layer over pi-durable:
 
 - **A conversation** is a pi-durable conversation, one per agent, in the runtime's SQLite file. The agents' settings are one session document next to them (`munin.agents`).
+- **Who's talking.** Every agent's prompt says that the messages in its conversation are from you, the person it works for, so it talks to you as "you" and reads "my calendar" as yours. It uses the name from setup. While there's none it says "the person you work for", since `MUNIN_USER`'s default, `me`, isn't a name. Role briefs call you "the person you work for" too, so they stay right when the name changes, and the runtime updates the wording of briefs made before that, which named you, when it starts.
 - **Messages and runs** come from its entries (`items.js`).
   - `pi.user` and `pi.assistant` text become messages.
   - A run is the tool calls from one input to the answer. Each call is a step, and its result gives the step's detail line: the last line a command printed, or `failed`.

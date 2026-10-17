@@ -58,7 +58,7 @@ export const view = {
             dataset: { keep: 'new-agent:name' },
             oninput: (e) => {
               form.name = e.target.value;
-              if (form.role && !form.briefEdited) form.brief = roleOf(form.role).brief(form.name.trim() || 'it', store.human);
+              if (form.role && !form.briefEdited) form.brief = roleOf(form.role).brief(form.name.trim() || 'it');
               ctx.rerender();
             },
           }), () => create(ctx))),
@@ -123,7 +123,7 @@ function pickRole(id, ctx) {
   const role = roleOf(id);
   form.model = role.model;
   form.provider = 'openrouter';
-  if (!form.briefEdited) form.brief = role.brief(form.name.trim() || 'it', store.human);
+  if (!form.briefEdited) form.brief = role.brief(form.name.trim() || 'it');
   ctx.rerender();
 }
 
@@ -187,7 +187,7 @@ async function create(ctx) {
       role: form.role,
       colour: form.colour,
       ...chosen(),
-      brief: form.brief.trim() || roleOf(form.role).brief(form.name.trim(), store.human),
+      brief: form.brief.trim() || roleOf(form.role).brief(form.name.trim()),
     });
     if (agent.tracker) await joinTracker(agent.name, chosenProjects());
     form = blank();

@@ -12,6 +12,15 @@ export const ROLES = {
 
 export const roleName = (role) => ROLES[role]?.name || role;
 
+// Briefs from before the runtime told agents who they work for named you in them ("Mikkel's
+// assistant"), or said "your human" while munin had no name. Their template sentences now say
+// "the person you work for"; anything else in a brief, and a brief you wrote yourself, stays.
+const OLD_BRIEFS = [
+  [/^You're ([^,\s]+), .+?'s assistant\. Keep their calendar and inbox in order/, "You're $1, the assistant of the person you work for. Keep their calendar and inbox in order"],
+  [/Keep replies short\. When .+? seems busy, let them be\./, 'Keep replies short. When the person you work for seems busy, let them be.'],
+];
+export const upgradeBrief = (brief) => OLD_BRIEFS.reduce((out, [from, to]) => out.replace(from, to), brief);
+
 // Ask-first rules match a tool, and optionally its arguments. `what` and `third` are for the
 // approval card: "hugin wants to push to git", "Stop asking before hugin pushes to git".
 export function askFirstFor(abilities) {
