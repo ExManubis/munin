@@ -100,7 +100,7 @@ test('sign in with Google: your client, the consent page, and back to Settings',
   );
   assert.deepEqual(asked.get('scope').split(' '), [
     'openid', 'email',
-    'https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.compose',
+    'https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.compose', 'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/calendar.calendarlist.readonly', 'https://www.googleapis.com/auth/calendar.events',
   ]);
 
@@ -113,7 +113,7 @@ test('sign in with Google: your client, the consent page, and back to Settings',
   assert.equal(`${back.origin}${back.pathname}${back.hash}`, 'http://127.0.0.1:7777/#/settings');
   assert.deepEqual([back.searchParams.get('google'), back.searchParams.get('message')], ['ok', 'Signed in with Google as mikkel@example.com.']);
   const signedIn = (await call('GET', '/google')).body;
-  assert.deepEqual(signedIn.account, { email: 'mikkel@example.com', services: ['gmail', 'calendar'], working: true, problem: null });
+  assert.deepEqual(signedIn.account, { email: 'mikkel@example.com', services: ['gmail', 'calendar'], organise: false, working: true, problem: null }, "Gmail without gmail.modify: it works, it just can't organise");
   assert.ok(!JSON.stringify(signedIn).includes('refresh-1') && !JSON.stringify(signedIn).includes('GOCSPX'), 'no secret comes back');
 
   const again = await call('GET', `/google/callback?state=${state}&code=the-code`);

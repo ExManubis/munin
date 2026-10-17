@@ -178,7 +178,12 @@ function googleSection(google, ctx) {
         h('span', { class: ['label', google.account.working && 'on'] }, google.account.working ? 'Connected' : 'Stopped'),
         h('span', { class: 'agent-action' }, google.account.working
           ? h('button', { type: 'button', class: 'link', onclick: signOut }, 'Sign out')
-          : h('button', { type: 'button', class: 'link', onclick: signIn }, 'Sign in again')))));
+          : h('button', { type: 'button', class: 'link', onclick: signIn }, 'Sign in again')))),
+      // A sign-in from before munin asked for gmail.modify: Gmail works, but can't organise.
+      google.account.working && google.account.services.includes('gmail') && !google.account.organise
+        ? h('p', { class: 'hint' }, 'To let agents label, archive and clean up your mail, Google needs one more permission (gmail.modify). Add it under Data Access in your Google Cloud project, then ',
+          h('button', { type: 'button', class: 'link', onclick: signIn }, 'sign in again'), '.')
+        : null);
   }
   if (google.client.configured) {
     return h('section', { class: 'section', id: 'google' }, head, lead,
