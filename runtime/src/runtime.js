@@ -101,7 +101,8 @@ const costOfResponse = (message) => message.usage?.cost?.total || 0;
 export async function openRuntime(settings, { models, storage, now = Date.now, timers = true, costOf = costOfResponse, google: googleTest = {}, push: pushTest = {} } = {}) {
   storage ||= settings.db === ':memory:' ? new MemoryStorage() : await openNodeSqliteStorage(settings.db);
   const meetings = new Map(); // id → meeting (meetings.js)
-  const meetingNow = new Map(); // agent name → the meeting whose turn it's answering right now
+  const meetingNow = new Map(); // conversation id → the meeting whose turn it's answering right now
+  const meetingSessions = new Map(); // conversation id → agent name, for each agent's session in a meeting
   const agents = new Map(); // name → settings
   const skills = new Map(); // id → skill (skills.js), each with its owner and who it's shared with
   const turns = new Map(); // agent name → 'heartbeat' or 'journal', while munin's own input is being answered (rhythm.js)
@@ -118,7 +119,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   const them = ({ start = false } = {}) => named() || (start ? 'The person you work for' : 'the person you work for');
   const favourites = () => prefs.favourites || FAVOURITES;
 
-  const agentFor = (conversationId) => [...agents.values()].find((a) => a.conversationId === conversationId) || null;
+  // An agent's own conversation, or one of its meeting sessions (each its own conversation, so a
+  // meeting never sees its chats with you): either way, the agent.
+  const agentFor = (conversationId) => [...agents.values()].find((a) => a.conversationId === conversationId)
+    || agents.get(meetingSessions.get(conversationId)) || null;
   const conversationOf = async (agent) => harness.conversation(agent.conversationId, ctx);
   // Push notifications (push.js): questions, approvals, and what agents that don't code say.
   const push = await openPush({ file: settings.pushFile || null, subject: settings.publicUrl || 'mailto:munin@localhost', ...pushTest });
@@ -270,12 +274,12 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     execute: async (args, toolApi) => {
       const agent = agentFor(toolApi.conversationId);
       const asking = [...meetings.values()].filter((m) => m.status === 'open' && m.asked?.agent === agent.name);
-      const id = args.meeting || meetingNow.get(agent.name) || (asking.length === 1 ? asking[0].id : null);
+      const id = args.meeting || meetingNow.get(toolApi.conversationId) || (asking.length === 1 ? asking[0].id : null);
       const meeting = id ? meetings.get(id) : null;
       if (!meeting || meeting.status !== 'open' || meeting.asked?.agent !== agent.name) {
         return say(asking.length > 1 ? `Say which meeting: ${asking.map((m) => `${m.id} ("${m.title}")`).join(', ')}.` : "You haven't been asked to speak in a meeting.", true);
       }
-      meetingNow.delete(agent.name);
+      meetingNow.delete(toolApi.conversationId);
       const text = args.text == null ? null : String(args.text);
       const spoke = await recordTurn(meeting.id, agent.name, text);
       return say(spoke ? 'Said in the meeting.' : 'You passed.');
@@ -471,8 +475,8 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
           const said = request.messages.findLast((m) => m.role === 'user');
           const turn = meetingOfTurn(typeof said?.content === 'string' ? said.content : (said?.content || []).map((c) => c.text || '').join(''));
           const asked = turn && meetings.get(turn.id)?.asked;
-          if (asked?.agent === agent.name && asked.turn === turn.turn) meetingNow.set(agent.name, turn.id);
-          else meetingNow.delete(agent.name);
+          if (asked?.agent === agent.name && asked.turn === turn.turn) meetingNow.set(api.conversationId, turn.id);
+          else meetingNow.delete(api.conversationId);
         }
         // In a long conversation, who the agent is gets repeated at the end, for this request
         // only: a persona drifts as attention leaves the system prompt (prompt.js, reminder).
@@ -489,9 +493,9 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         // A meeting turn the agent ended without speak_in_meeting (it answered in plain words,
         // failed or was stopped): what it said is its speech, nothing is a pass. The meeting
         // moves on either way, and its words aren't pushed as a message to you.
-        const answering = message.stopReason !== 'toolUse' ? meetingNow.get(agent.name) : null;
+        const answering = message.stopReason !== 'toolUse' ? meetingNow.get(api.conversationId) : null;
         if (answering) {
-          meetingNow.delete(agent.name);
+          meetingNow.delete(api.conversationId);
           const words = message.stopReason === 'stop' ? (message.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n') : null;
           if (meetings.get(answering)?.asked?.agent === agent.name) await recordTurn(answering, agent.name, words);
           return;
@@ -720,7 +724,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   Object.assign(prefs, structuredClone(saved?.prefs || {}));
   for (const skill of Object.values(saved?.skills || {})) skills.set(skill.id, structuredClone(skill));
   Object.assign(issueCosts, structuredClone((await harness.snapshot(CostsDoc, ctx))?.issues || {}));
-  for (const meeting of Object.values((await harness.snapshot(MeetingsDoc, ctx))?.meetings || {})) meetings.set(meeting.id, structuredClone(meeting));
+  for (const meeting of Object.values((await harness.snapshot(MeetingsDoc, ctx))?.meetings || {})) {
+    meetings.set(meeting.id, structuredClone(meeting));
+    for (const [name, id] of Object.entries(meeting.sessions || {})) meetingSessions.set(id, name);
+  }
   workspace = createWorkspace({ dir: reposDir, agentsDir: settings.agentsDir, repos });
   tracker.connect(); // in the background: until the tracker answers, agents are told it's away
 
@@ -1562,9 +1569,31 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       return driveMeeting(meetingId);
     }
     meeting.asked = { agent: next, at: now(), turn: meeting.speeches.length };
+    const text = turnText(meeting, next, them(), meeting.seen?.[next] || 0);
+    meeting.seen = { ...meeting.seen, [next]: meeting.speeches.length };
+    const session = await sessionFor(meeting, agent);
     await saveMeetings();
-    const text = turnText(meeting, next, them());
-    await (await conversationOf(agent)).submit({ type: 'input', content: text, whenBusy: 'followUp', entry: { kind: 'munin.meeting', data: { meeting: meeting.id, title: meeting.title, at: now() } } }, ctx);
+    await session.submit({ type: 'input', content: text, whenBusy: 'followUp', entry: { kind: 'munin.meeting', data: { meeting: meeting.id, title: meeting.title, at: now() } } }, ctx);
+  }
+
+  // A meeting session talks, nothing else: the agent's model and who it is (munin's own
+  // extension), without its code, tracker, apps or the web.
+  const meetingChange = (agent) => ({ ...change(agent), extensions: [Munin], cwd: null });
+
+  // The agent's session for a meeting, made the first time it's asked to speak there; its own
+  // conversation gets one line saying it went, not a line per turn.
+  async function sessionFor(meeting, agent) {
+    const id = meeting.sessions?.[agent.name];
+    if (id) {
+      const session = await harness.conversation(id, ctx);
+      await session.configure(meetingChange(agent), ctx).catch(() => {}); // its model may have changed since
+      return session;
+    }
+    const session = await harness.createConversation({ ownership: { kind: 'ownerless' }, agent: meetingChange(agent) }, ctx);
+    meeting.sessions = { ...meeting.sessions, [agent.name]: session.id };
+    meetingSessions.set(session.id, agent.name);
+    await write(agent, 'munin.action', { verb: 'went to a meeting', object: meeting.title });
+    return session;
   }
 
   // An agent answers its turn with speak_in_meeting, or by ending the turn without it (the

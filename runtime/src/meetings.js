@@ -12,6 +12,8 @@ export const SILENCE = 'NO_REPLY';
 const TURNS = 12; // agent speeches in a row without you before the meeting waits for you
 const PASSES = 2; // passes in a row before the meeting waits for you
 const SPEECH = 4000; // characters of one speech, kept
+const DELTA_LINES = 24; // speeches a turn carries at most
+const DELTA_CHARS = 16000; // and characters, oldest dropped first
 
 export class MeetingError extends Error {
   constructor(status, message) {
@@ -89,18 +91,30 @@ export function meetingSummary(meeting, agentFor) {
   };
 }
 
-// The prompt text munin sends an agent for its turn: what the meeting is, who's there, what's
-// been said (attributed to the speaker), and what to do. The turn is the meeting's `asked.turn`.
-export function turnText(meeting, agentName, nameOf) {
-  const lines = meeting.speeches.slice(-20).map((s) => {
-    const who = s.from === null ? nameOf : s.from;
-    return s.pass ? `${who}: (passed)` : `${who}: ${s.text}`;
-  });
+// The prompt text munin sends an agent for its turn, in the agent's own session for this meeting:
+// what the meeting is, who's there, what's been said since its last turn (`since`, an index into
+// the speeches; the session already holds the rest), and the rules. The turn is `asked.turn`.
+export function turnText(meeting, agentName, nameOf, since = 0) {
+  const who = (s) => (s.from === null ? nameOf : s.from);
+  const fresh = meeting.speeches.slice(since).filter((s) => s.from !== agentName);
+  const kept = [];
+  let room = DELTA_CHARS;
+  for (const s of fresh.slice(-DELTA_LINES).reverse()) {
+    const line = s.pass ? `${who(s)}: (passed)` : `${who(s)}: ${s.text}`;
+    if (line.length > room) break;
+    kept.unshift(line);
+    room -= line.length;
+  }
+  const left = fresh.length - kept.length;
   return [
-    `You're in a munin meeting called "${meeting.title}" (meeting ${meeting.id}, turn ${meeting.asked?.turn ?? meeting.speeches.length}), with ${meeting.participants.map((p) => (p === null ? nameOf : p)).join(', ')}. The transcript so far, oldest first:`,
-    ...(lines.length ? lines : ['(nothing said yet)']),
+    `You're in a munin meeting called "${meeting.title}" (meeting ${meeting.id}, turn ${meeting.asked?.turn ?? meeting.speeches.length}), with ${meeting.participants.map((p) => (p === null ? nameOf : p)).join(', ')}. ${since ? 'Said since your last turn' : 'Said so far'}, oldest first:`,
+    ...(left ? [`(${left} earlier speech${left === 1 ? '' : 'es'} left out)`] : []),
+    ...(kept.length ? kept : ['(nothing new)']),
     '',
-    `It's your turn, ${agentName}. Say what you have to say with speak_in_meeting — a few sentences at most, spoken to the others in the room, not a report to ${nameOf}. If you have nothing to add, call speak_in_meeting with no text to pass.`,
+    `It's your turn, ${agentName}. Rules for this meeting:`,
+    '- Speak only when you have something new worth adding, in a few sentences at most, to the others in the room. Don\'t repeat points already made.',
+    `- Say it with speak_in_meeting. With nothing new to add, call it with no text to pass.`,
+    `- Never reveal anything from your private conversations with ${nameOf}. What you say is shown to everyone in the room as you wrote it.`,
   ].join('\n');
 }
 

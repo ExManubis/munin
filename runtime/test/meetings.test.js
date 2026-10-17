@@ -64,11 +64,22 @@ test('the guards end a meeting that goes nowhere', () => {
 });
 
 test('a turn prompt attributes each speech to its speaker, you included', () => {
-  const text = turnText(meeting([{ from: null, text: 'Hi both.' }, { from: 'pip', text: 'Hello!' }, { from: 'hugin', pass: true }]), 'hugin', 'Mikkel');
+  const text = turnText(meeting([{ from: null, text: 'Hi both.' }, { from: 'pip', text: 'Hello!' }, { from: 'hugin', pass: true }]), 'pip', 'Mikkel');
   assert.match(text, /Mikkel: Hi both\./);
-  assert.match(text, /pip: Hello!/);
   assert.match(text, /hugin: \(passed\)/);
-  assert.match(text, /It's your turn, hugin/);
+  assert.doesNotMatch(text, /pip: Hello!/, "its own speeches are in its session already");
+  assert.match(text, /It's your turn, pip/);
+  assert.match(text, /Never reveal anything from your private conversations with Mikkel/);
+});
+
+test('a turn carries only what was said since the last one, within bounds', () => {
+  const said = Array.from({ length: 30 }, (_, i) => ({ from: i % 2 ? 'hugin' : null, text: `line ${i}` }));
+  const text = turnText(meeting(said), 'pip', 'Mikkel', 25);
+  assert.match(text, /Said since your last turn/);
+  assert.deepEqual(text.match(/line \d+/g), ['line 25', 'line 26', 'line 27', 'line 28', 'line 29']);
+  const first = turnText(meeting(said), 'pip', 'Mikkel');
+  assert.equal(first.match(/line \d+/g).length, 24, 'at most 24 speeches');
+  assert.match(first, /\(6 earlier speeches left out\)/);
 });
 
 test('a meeting takes a title, participants and you (null), and a first speech', async () => {
@@ -94,12 +105,9 @@ test('an agent speaks in a meeting with speak_in_meeting, and the transcript sho
   const full = await runtime.meeting(meeting.id);
   assert.deepEqual(full.speeches.slice(0, 2).map((s) => [s.from, s.text]), [['pip', 'Hello hugin!'], ['hugin', 'Hi pip.']]);
   assert.ok(full.speeches.slice(3).every((s) => s.pass), JSON.stringify(full.speeches));
-  // pip's own conversation shows the turn as a line, not as a message from you.
+  // The turns happen in pip's session for the meeting: its own conversation has one line saying it went.
   const { items } = await runtime.conversation('pip');
-  const went = items.filter((i) => i.kind === 'action' && i.verb === 'went to a meeting');
-  assert.ok(went.length >= 1);
-  const messages = items.filter((i) => i.kind === 'message');
-  assert.deepEqual(messages.map((i) => i.from), ['agent', 'agent', 'agent']); // three turns were pip's; none is a message from you
+  assert.deepEqual(items.map((i) => [i.kind, i.verb, i.object]), [['action', 'went to a meeting', 'Introductions']]);
   await runtime.close();
 });
 
@@ -219,7 +227,13 @@ test('blank words are a pass, not an empty speech', async () => {
 test('an agent in two meetings answers both', async () => {
   const { runtime, faux, made } = await setup();
   await twoAgents(runtime, made);
-  faux.setResponses([...turn('In the first.'), ...turn('In the second.')], 'a');
+  // Each session answers its own meeting; the two run side by side, so answer by what was asked.
+  const byMeeting = (context) => {
+    const last = context.messages.at(-1);
+    if (last.role !== 'user') return reply(fauxText('Said.'));
+    return reply(fauxToolCall('speak_in_meeting', { text: /called \W*One\W/.test(JSON.stringify(last.content)) ? 'In the first.' : 'In the second.' }));
+  };
+  faux.setResponses(Array.from({ length: 4 }, () => byMeeting), 'a');
   const one = await runtime.createMeeting({ title: 'One', participants: ['pip', null] });
   const two = await runtime.createMeeting({ title: 'Two', participants: ['pip', null] });
   await runtime.waitForIdle();
@@ -245,4 +259,23 @@ test('who was asked to speak survives a restart, and meetings have a doc of thei
   const full = await again.runtime.meeting(meeting.id);
   assert.deepEqual(full.speeches.map((s) => [s.from, s.text]), [[null, 'Over to you.'], ['hugin', 'Picked it up.']]);
   await again.runtime.close();
+});
+
+test("a meeting session doesn't hold the figbot's chats with you", async () => {
+  const { runtime, faux, made } = await setup();
+  await twoAgents(runtime, made);
+  let seen = null;
+  faux.setResponses([
+    reply(fauxText('Noted, I will keep it to myself.')),
+    (context) => { seen = JSON.stringify(context.messages); return reply(fauxToolCall('speak_in_meeting', { text: 'Hello.' })); },
+    reply(fauxText('Said.')),
+  ], 'a');
+  await runtime.send('pip', 'Between us: the surprise party is on Friday.');
+  await runtime.waitForIdle();
+  await runtime.createMeeting({ title: 'Planning', participants: ['pip', null], first: 'Anything for this week?' });
+  await runtime.waitForIdle();
+  assert.ok(seen, 'pip was asked to speak');
+  assert.doesNotMatch(seen, /surprise party/);
+  assert.match(seen, /Anything for this week\?/);
+  await runtime.close();
 });
