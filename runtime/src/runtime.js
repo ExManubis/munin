@@ -44,6 +44,7 @@ const NAME = /^[a-z][a-z0-9-]{1,23}$/;
 const COLOURS = ['white', 'ember', 'coral', 'rose', 'iris', 'sky', 'teal', 'moss', 'straw'];
 const THINKING = ['off', 'low', 'medium', 'high'];
 const UNDO_MS = 8000;
+const JOURNAL = 1000; // numbered events kept for reconnecting streams
 const DAY = 24 * 60 * 60 * 1000;
 const PROJECT = /^[A-Z][A-Z0-9]{0,9}$/;
 const HOME = homedir();
@@ -314,8 +315,24 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     };
   };
 
-  const changed = () => {
-    for (const fn of listeners) fn();
+  // Every commit is a numbered event for the stream, naming the agents it was about. Ids are
+  // "<boot>.<n>": a client that reconnects with one from before a restart, or one older than the
+  // last JOURNAL events, is told to reload everything instead of being sent what it missed.
+  const boot = randomUUID().slice(0, 8);
+  const journal = []; // { id, n, agents }, oldest first
+  let numbered = 0;
+  const changed = (publication) => {
+    const names = new Set();
+    for (const change of publication?.changes || []) {
+      const conversation = change.conversationId ?? change.entry?.conversationId ?? change.record?.conversationId;
+      const agent = conversation && agentFor(conversation);
+      if (agent) names.add(agent.name);
+    }
+    numbered += 1;
+    const event = { id: `${boot}.${numbered}`, n: numbered, agents: [...names] };
+    journal.push(event);
+    if (journal.length > JOURNAL) journal.shift();
+    for (const fn of listeners) fn(event);
   };
   harness.subscribeCommits(changed);
   harness.resume(); // carry on with anything the last process left unfinished
@@ -760,6 +777,18 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     subscribe(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);
+    },
+
+    // The newest event's id, to number a fresh stream from.
+    lastEventId: () => `${boot}.${numbered}`,
+
+    // What a stream that last saw `id` missed: the events since, or reset when they're gone.
+    eventsSince(id) {
+      const [from, at] = String(id || '').split('.');
+      const n = Number(at);
+      if (from !== boot || !Number.isInteger(n) || n > numbered) return { reset: true, events: [] };
+      if (n < numbered && (journal[0]?.n ?? Infinity) > n + 1) return { reset: true, events: [] };
+      return { reset: false, events: journal.filter((event) => event.n > n) };
     },
 
     async waitForIdle() {

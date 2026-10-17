@@ -27,6 +27,7 @@ export function connect(base) {
     if (stream) return;
     stream = new EventSource(`${root}/stream`);
     stream.addEventListener('changed', () => listeners.forEach((fn) => fn()));
+    stream.addEventListener('reset', () => listeners.forEach((fn) => fn())); // missed too much: reload it all
     // A reconnect may have missed changes, so say something changed once it's back.
     let opened = false;
     stream.addEventListener('open', () => {

@@ -66,18 +66,63 @@ test('only pages on this machine get in', async () => {
   await close();
 });
 
-test('the stream says when something changed', async () => {
+// Server-sent events as they arrive: [{ id, event, data }], comments left out.
+function events(reader) {
+  let buffer = '';
+  return async (count) => {
+    const out = [];
+    while (out.length < count) {
+      const end = buffer.indexOf('\n\n');
+      if (end < 0) {
+        buffer += new TextDecoder().decode((await reader.read()).value);
+        continue;
+      }
+      const block = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      const fields = Object.fromEntries(block.split('\n').filter((l) => !l.startsWith(':')).map((l) => [l.slice(0, l.indexOf(': ')), l.slice(l.indexOf(': ') + 2)]));
+      if (Object.keys(fields).length) out.push(fields);
+    }
+    return out;
+  };
+}
+
+test('the stream numbers what changed, and a reconnect gets what it missed', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'munin-server-'));
-  const { base, call, close } = await serve(await settingsIn(dir));
-  const controller = new AbortController();
-  const stream = await fetch(`${base}/stream`, { signal: controller.signal });
-  const reader = stream.body.getReader();
-  await reader.read(); // ": connected"
+  const { base, call, runtime, close } = await serve(await settingsIn(dir));
+  const open = async (headers = {}) => {
+    const controller = new AbortController();
+    const response = await fetch(`${base}/stream`, { signal: controller.signal, headers });
+    return { next: events(response.body.getReader()), stop: () => controller.abort() };
+  };
+
+  let stream = await open();
+  const [start] = await stream.next(1);
+  assert.match(start.id, /^[0-9a-f]{8}\.\d+$/, 'numbered from the newest event');
   await call('POST', '/agents', { name: 'pip', role: 'companion' });
-  let text = '';
-  while (!text.includes('event: changed')) text += new TextDecoder().decode((await reader.read()).value);
-  assert.match(text, /event: changed/);
-  controller.abort();
+  const [made] = await stream.next(1);
+  assert.equal(made.event, 'changed');
+  assert.ok(Number(made.id.split('.')[1]) > Number(start.id.split('.')[1]));
+  await call('POST', '/agents/pip/messages', { text: 'Hi pip' });
+  await runtime.waitForIdle();
+  const [talked] = await stream.next(1);
+  assert.deepEqual(JSON.parse(talked.data).agents, ['pip'], 'it says which agent');
+  stream.stop();
+
+  // Away while pip answers again: a reconnect gets it, as one event with the newest id.
+  await call('POST', '/agents/pip/messages', { text: 'Again' });
+  await runtime.waitForIdle();
+  stream = await open({ 'Last-Event-ID': talked.id });
+  const [missed] = await stream.next(1);
+  assert.equal(missed.event, 'changed');
+  assert.equal(missed.id, runtime.lastEventId());
+  assert.deepEqual(JSON.parse(missed.data).agents, ['pip']);
+  stream.stop();
+
+  // From before a restart, or unknown: reload everything.
+  stream = await open({ 'Last-Event-ID': '00000000.3' });
+  const [reset] = await stream.next(1);
+  assert.deepEqual([reset.event, reset.id], ['reset', runtime.lastEventId()]);
+  stream.stop();
   await close();
 });
 
