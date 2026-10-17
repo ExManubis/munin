@@ -1,5 +1,5 @@
-// An agent's profile: its brief, model, what it can reach, what it asks first, its routines,
-// what it remembers about you, and what it costs.
+// An agent's profile: its brief and how it talks, its model, what it can reach, what it asks
+// first, its routines, what it remembers about you, and what it costs.
 
 import { runtime } from '../runtime/index.js';
 import { ABILITIES, THINKING, costHint } from '../runtime/roles.js';
@@ -38,6 +38,7 @@ export const view = {
       h('div', { class: 'profile' },
         header(agent, ctx),
         brief(agent, set),
+        examples(agent, set),
         model(agent, models, set, ctx),
         abilities(agent, apps, set, ctx),
         askFirst(agent, set),
@@ -119,7 +120,22 @@ function brief(agent, set) {
   };
   box.addEventListener('blur', save);
   onModEnter(box, () => box.blur());
-  return section('Brief', `What ${agent.name} reads before every conversation.`, box);
+  return section('Brief', `Who ${agent.name} is and how it works. It reads this before every conversation.`, box);
+}
+
+// A few made-up exchanges that show how the agent sounds; it reads them after its brief. Unlike
+// the brief, they can be emptied.
+function examples(agent, set) {
+  const key = `examples:${agent.name}`;
+  const box = bindDraft(h('textarea', { class: 'textarea brief-box', 'aria-label': 'How it talks', placeholder: `You: How's it going?\n${agent.name}: …` }), key, agent.examples || '');
+  const save = () => {
+    const value = box.value.trim();
+    drafts.delete(key);
+    if (value !== (agent.examples || '')) set({ examples: value }, value ? 'Saved how it talks.' : 'Cleared how it talks.');
+  };
+  box.addEventListener('blur', save);
+  onModEnter(box, () => box.blur());
+  return section('How it talks', `A few made-up exchanges that show how ${agent.name} sounds. "You:" is you; ${agent.name} knows they didn't happen.`, box);
 }
 
 function select(options, value, label, onchange) {

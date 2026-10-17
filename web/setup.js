@@ -182,9 +182,12 @@ function render(fresh = false) {
   }
 }
 
+// Who the agent is, from its brief: the first paragraph says it; the rest is how it works.
+const firstParagraph = (brief) => brief.split('\n\n')[0];
+
 // What's typed shows up elsewhere on the page as it's typed, without a redraw.
 function sync() {
-  const values = { name: S.name.trim() || 'you', initial: (S.name.trim()[0] || '?').toUpperCase(), agent: agentName(), brief: roleOf(S.role).brief(agentName()) };
+  const values = { name: S.name.trim() || 'you', initial: (S.name.trim()[0] || '?').toUpperCase(), agent: agentName(), brief: firstParagraph(roleOf(S.role).brief(agentName())) };
   for (const el of layer.querySelectorAll('[data-bind]')) {
     const v = values[el.dataset.bind];
     if (v !== undefined && el.textContent !== v) el.textContent = v;
@@ -420,7 +423,7 @@ const PAGES = {
           h('div', { class: 'su-bob', id: 'su-big-bot' }), h('span', { class: 'su-shadow', 'aria-hidden': 'true' }),
           h('div', { class: 'su-portrait-name' }, h('span', { class: 'su-big' }, bound('agent', name)), h('span', { class: 'label' }, role.name))),
         h('div', { class: 'su-facts' }, facts.map(([k, v]) => h('div', {}, h('span', { class: 'label' }, k), h('span', {}, v)))),
-        h('p', { class: 'su-brief' }, bound('brief', role.brief(name))),
+        h('p', { class: 'su-brief' }, bound('brief', firstParagraph(role.brief(name)))),
         h('p', { class: 'hint' }, `Abilities, routines and a budget are on `, bound('agent', name), "'s profile."),
       ],
       after() {
@@ -615,7 +618,7 @@ async function toggleFavourite(id, button) {
 // Wakes the agent up, the first time; after that, changes to it are saved.
 async function wakeAgent() {
   const role = roleOf(S.role);
-  const fields = { role: S.role, colour: S.colour, provider: S.provider, model: S.model, brief: role.brief(agentName()) };
+  const fields = { role: S.role, colour: S.colour, provider: S.provider, model: S.model, brief: role.brief(agentName()), examples: role.examples(agentName()) };
   try {
     if (S.created) {
       await runtime.updateAgent(S.created, fields);

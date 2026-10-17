@@ -423,3 +423,9 @@ forge  13:57
 - **A face blends into a new expression** over 0.35 s, as figment's timeline does, blinking through a change of eye shape.
 - **The agent's Figbot fills the foot of the conversation's ABOUT panel,** as wide as the panel: the panel's left border and a line above it frame it, and the window's right and bottom edges cut it.
 - **Idle, paused and happy faces glance about now and then,** and paused ones move too. Before, only working faces moved.
+
+## Changed while giving agents a character (MUN-34)
+
+- **HOW IT TALKS, under BRIEF, on the profile and on New agent.** A text area like the brief's with a few made-up exchanges that show how the agent sounds, where `You:` is you and the agent's lines carry its name. On New agent it fills in from the role, like the brief. It can be emptied.
+- **The brief is two paragraphs:** who the agent is, then how it works. Its lead reads "Who hugin is and how it works." Setup's portrait shows only the first paragraph.
+- **A reviewer starts on a different maker's model from your coders'** when one is offered, and New agent's hint says why.

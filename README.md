@@ -82,7 +82,7 @@ npm install
 npm start                               # http://127.0.0.1:7779/runtime/api
 ```
 
-The Agents part appears in munin within a minute, no reload needed: the frontend looks for the runtime on port 7779 of the same host, or at its own address behind the edge. The first time, setup walks you through it: what agents should call you, an OpenRouter key and the models you favour, your first agent, and a token for outside agents. After that, make an agent with N and talk to it.
+The Agents part appears in munin within a minute, no reload needed: the frontend looks for the runtime on port 7779 of the same host, or at its own address behind the edge. The first time, setup walks you through it: what agents should call you, an OpenRouter key and the models you favour, your first agent, and a token for outside agents. After that, make an agent with N and talk to it. Each role starts with a character of its own: a brief that says who the agent is and how it works, and a few made-up exchanges that show how it talks. Both are on its profile, to make it yours.
 
 Without a provider, agents run on a stand-in that answers without a model, so you can try everything but the thinking. Paste an OpenRouter key in setup or Settings (or give the runtime `OPENROUTER_API_KEY`) for OpenRouter's models, or `MUNIN_OLLAMA_URL` (like `http://127.0.0.1:11434`) for an Ollama server's, then pick a model on the agent's profile: your favourites are listed, and the rest of OpenRouter is a search away.
 
