@@ -990,7 +990,7 @@ button.option-card:hover { border-color: var(--text); }
 .setup.solo .su-shell { grid-template-columns: minmax(0, 1fr); }
 .setup.solo .su-rail, .setup.solo .su-aside { display: none; }
 .setup canvas.figbot { outline: 1px solid #333; }
-.setup .su-colour canvas.figbot { outline: 0; }
+.setup .su-colour canvas.figbot, .setup canvas.claude-mark { outline: 0; }
 @keyframes su-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 .su-rail { display: flex; flex-direction: column; gap: 2px; padding: 36px 28px 28px; border-right: 1px solid var(--line); overflow: auto; }

@@ -88,7 +88,7 @@ Every agent is a **Figbot**: the halftone sphere with two eyes from `figment-eng
 | moss | `#9CCB6B` |
 | straw | `#E3CF6E` |
 
-White is the default for a new agent and can be kept like any other colour. Outside agents (claude-code, codex, figbot) are always white: the original Figbot.
+White is the default for a new agent and can be kept like any other colour. Outside agents (codex, figbot) are always white: the original Figbot. Claude (claude-code, or claude-1 and on from `munin run`) gets Claude's spark instead, in its terracotta and the brand's dither.
 
 **Expression shows state.** The expressions are Figbot's own poses (`POSES` in `figbot/src/model.ts`):
 

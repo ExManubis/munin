@@ -12,6 +12,7 @@ import { connectToTracker, linkable } from './runtime/tracker-link.js';
 import { store, remember } from './store.js';
 import { h, svg, toast, copyButton, toggle, MOD } from './ui.js';
 import { figbot, COLOURS } from './figbot.js';
+import { claudeMark, isClaude } from './claude-mark.js';
 import { notificationsSupported, notificationsOn, setNotifications } from './notify.js';
 import { modelPicker, searchState } from './model-picker.js';
 import { playIntro } from './intro.js';
@@ -451,9 +452,10 @@ const PAGES = {
         h('div', { class: 'label' }, 'Who works here'),
         h('div', { class: 'su-who-list' },
           own ? h('div', { class: 'su-who-row' }, figbot({ colour: own.colour, size: 24, state: 'idle', seed: own.name }), h('span', {}, own.name), h('span', { class: 'role-tag own-tag' }, 'Own'), h('span', { class: 'su-st' }, 'idle')) : null,
-          S.token ? h('div', { class: 'su-who-row' }, figbot({ colour: 'white', size: 24, state: S.connected ? 'idle' : 'paused', seed: S.outside }), h('span', {}, S.outside),
+          S.token ? h('div', { class: 'su-who-row' },
+            isClaude(S.outside) ? claudeMark({ size: 24 }) : figbot({ colour: 'white', size: 24, state: S.connected ? 'idle' : 'paused', seed: S.outside }), h('span', {}, S.outside),
             h('span', { class: 'su-st' }, S.connected ? 'connected · just now' : [h('span', { class: 'su-pulse' }), 'waiting for it to connect'])) : null),
-        h('p', { class: 'hint' }, S.token ? `This ticks over by itself once ${S.outside} first calls munin. Outside agents are always white.` : 'Outside agents show up here once they have a token.'),
+        h('p', { class: 'hint' }, S.token ? `This ticks over by itself once ${S.outside} first calls munin. Outside agents are white Figbots, and Claude gets its spark.` : 'Outside agents show up here once they have a token.'),
         h('div', { class: 'label su-aside-gap' }, 'Then, in Claude Code'),
         h('div', { class: 'su-cmd' }, '/mcp__munin__continue ', h('span', { class: 'muted' }, '<project key>')),
         h('p', { class: 'hint' }, 'Point it at a project, and it reads the brief and takes the top of the pile.'),
