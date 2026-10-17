@@ -46,7 +46,7 @@ export function describeCall(name, args = {}) {
 }
 
 // Tool calls that show as something else (a question card, an action line) aren't run steps.
-const quiet = (call) => ['ask_human', 'remember', 'change_note', 'forget_note', 'save_skill'].includes(call.name) || (call.name === 'add_comment' && call.arguments?.ask_human);
+const quiet = (call) => ['ask_human', 'remember', 'change_note', 'forget_note', 'save_skill', 'set_expression'].includes(call.name) || (call.name === 'add_comment' && call.arguments?.ask_human);
 
 function resultDetail(message) {
   if (message.isError) return 'failed';

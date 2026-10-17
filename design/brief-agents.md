@@ -449,3 +449,8 @@ forge  13:57
 - **In the conversation,** a journal entry is an action line, `wrote in its journal` and its first sentence. While the agent is idle, its sidebar line 2 is that sentence. A heartbeat that came to nothing shows nothing at all.
 - **MEMORY has a fourth kind,** `ABOUT THE TEAM`, each note led by the teammate's name in Plex Mono 11 `#7A7A7A`.
 
+## Changed while letting faces show how the work is going (MUN-39)
+
+- **Expression shows state, or for a minute how the work is going** (Mikkel, 2026-10-17). An agent can set a passing expression with its `set_expression` tool, in one of Figbot's own poses: `excited` (until now the spare one), `happy` or `worried`. It shows wherever the agent's face does, then the face goes back to its status. Asking you something (`curious`) and being paused (`sleepy`) always win, so a face never hides that you're needed. Faces already blend into a new expression with a blink, so a passing one fades in and out the same way.
+- **It reads best at 36 px and up:** the conversation header, the profile and the ABOUT panel's big face. At 18 px the colour reads but the expression barely does, as before.
+
