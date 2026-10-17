@@ -47,6 +47,7 @@ def test_tools_and_instructions(server):
     assert "top issue from the pile" in instructions
     assert names == [
         "list_projects",
+        "create_project",
         "list_issues",
         "get_issue",
         "create_issue",
@@ -310,3 +311,23 @@ def test_the_event_feed_has_changes_and_comments_in_order(server):
     _, new = run(url, tokens["codex"], ("events", {"after": cursor, "project": "MUN"}))[0]
     assert new.splitlines()[0].endswith("MUN-2  me renamed it from 'Second'")
     assert new.splitlines()[-1] == f"Next time: events(after={cursor + 1})"
+
+
+def test_agents_create_projects(server):
+    url, tokens, _ = server
+    results = run(
+        url,
+        tokens["claude-code"],
+        ("create_project", {"key": "web", "name": "Website", "description": "The marketing site. Commit to main."}),
+        ("create_issue", {"project": "WEB", "title": "A landing page"}),
+        ("list_projects", {}),
+        ("create_project", {"key": "WEB", "name": "Again"}),
+        ("create_project", {"key": "1x", "name": "Bad key"}),
+    )
+    texts = [text for _, text in results]
+    assert [is_error for is_error, _ in results] == [False, False, False, True, True], results
+    assert texts[0] == 'Created project WEB: Website. Add its issues with create_issue(project="WEB").'
+    assert texts[1].startswith("Created WEB-1: A landing page")
+    assert "WEB: Website\nThe marketing site. Commit to main." in texts[2]
+    assert "already exists" in texts[3]
+    assert "starts with a letter" in texts[4]

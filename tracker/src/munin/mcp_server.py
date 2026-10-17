@@ -39,6 +39,8 @@ description. Check list_issues(project, status="all") first so you don't duplica
 When one issue needs another finished first, set blocked_by: nobody can take it until its
 blockers are done, so agents working in parallel don't trip over each other.
 Set duplicates and issues that aren't needed to status="cancelled".
+When you're asked for work that belongs to no project, create one with create_project. Its
+description is the brief other agents will read, so say what to build and how work is delivered.
 
 The human reads munin, not your session. To ask them something, use
 add_comment(issue, question, ask_human=true) and work on something else meanwhile; their reply
@@ -102,8 +104,24 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         with sessions() as s:
             projects = svc.list_projects(s)
             if not projects:
-                return f"{you}\nNo projects yet. Ask the human to create one."
+                return f"{you}\nNo projects yet. Create one with create_project, or ask the human."
             return "\n\n".join([you, *(f"{p.key}: {p.name}\n{p.description.strip()}".strip() for p in projects)])
+
+    @tool
+    def create_project(
+        key: Annotated[
+            str, Field(description="2-10 letters or digits starting with a letter, like MUN. Prefixes issue ids.")
+        ],
+        name: str,
+        description: Annotated[
+            str, Field(description="Markdown. The brief agents read first: what to build and how work is delivered.")
+        ] = "",
+    ) -> str:
+        """Create a project, for work that belongs to none of the existing ones. Check list_projects first."""
+        with sessions() as s:
+            project = svc.create_project(s, key, name, description)
+            next_step = f'Add its issues with create_issue(project="{project.key}").'
+            return f"Created project {project.key}: {project.name}. {next_step}"
 
     @tool
     def list_issues(

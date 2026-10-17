@@ -37,6 +37,7 @@ Everything else (reviewing someone else's work, unassigning yourself when you gi
 | Tool | Does |
 |---|---|
 | `list_projects` | Projects and their descriptions |
+| `create_project` | A new project, with a key, a name and a description that's its brief. For work that belongs to none of the existing ones |
 | `list_issues` | Issues, active first and then the pile in order. Filter by project, status, assignee (`me`, or `none` for unassigned) or a search query. Says what each issue is blocked by |
 | `get_issue` | An issue with its description, what it waits for and blocks, its history and comments |
 | `create_issue` | A new issue at the bottom of a project's pile, optionally waiting for others. Points out open issues with similar titles, so parallel agents notice duplicates |
