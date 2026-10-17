@@ -120,7 +120,7 @@ kbd {
 /* Layout ------------------------------------------------------------------- */
 
 .app { display: grid; flex: 1; grid-template-columns: 232px minmax(0, 1fr); min-height: 0; }
-.app.section-agents { grid-template-columns: 288px minmax(0, 1fr); }
+.app.section-agents, .app.section-meetings { grid-template-columns: 288px minmax(0, 1fr); }
 .main { position: relative; min-width: 0; min-height: 0; overflow-y: auto; }
 .page { display: flex; flex-direction: column; min-height: 100%; }
 
@@ -942,7 +942,7 @@ button.option-card:hover { border-color: var(--text); }
   .wide-only { display: none !important; }
 }
 @media (max-width: 720px) {
-  .app, .app.section-agents { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .app, .app.section-agents, .app.section-meetings { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
   .appbar, .sidebar { display: none; }
   body.in-conversation .tabbar { display: none; }
   .tab .figbot { margin-top: -1px; }
@@ -1308,4 +1308,29 @@ button.option-card:hover { border-color: var(--text); }
   .live-head { flex-wrap: wrap; }
   .live-work .run-steps { padding-left: 12px; }
   .live-work .run-step { gap: 10px; }
+}
+
+/* Meetings: figbots talking in turns, with you in the room. */
+.meeting-faces { display: inline-flex; flex-shrink: 0; align-items: center; gap: 2px; }
+.meeting-faces.big { gap: 10px; margin-bottom: 8px; }
+.meeting-item > .meeting-faces { width: 58px; margin-top: 1px; }
+.meeting-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
+.meetings-icon { display: inline-flex; gap: 1px; align-items: center; height: 18px; }
+.meetings-icon.dim { opacity: 0.55; }
+.meeting-room { grid-column: 1 / -1; }
+.meeting-state { flex-shrink: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.meeting-state.live { color: var(--text-2); }
+.calls-you { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 10px 28px; border-bottom: 1px solid var(--line); font: 13px/18px var(--sans); color: var(--text-2); }
+.calls-you strong { font-weight: 500; color: var(--text); }
+.msg.mentions-you .msg-body { border-left: 1px solid var(--text); padding-left: 10px; }
+.meeting-settled { padding-left: 28px; }
+.mention-row { align-items: center; }
+.mention-chip { text-transform: none; letter-spacing: 0; }
+.meeting-pick { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.pick-figbot { display: inline-flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px dotted var(--line); color: var(--text-2); font: 13px/18px var(--sans); }
+.pick-figbot:hover { border-color: var(--muted); }
+.pick-figbot.on { border: 1px solid var(--text); color: var(--text); background: var(--selected); }
+.meeting-first { min-height: 88px; }
+@media (max-width: 720px) {
+  .calls-you { padding: 10px 20px; }
 }
