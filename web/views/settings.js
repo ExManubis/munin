@@ -169,7 +169,7 @@ function googleSection(google, ctx) {
   };
   const head = h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Google'),
     h('span', { class: 'mono muted' }, google.account ? (google.account.working ? 'Signed in' : 'Sign in again') : google.client.configured ? 'Not signed in' : 'Not set up'));
-  const lead = h('p', { class: 'lead' }, "Gmail and Google Calendar for munin's agents. Reading needs no asking; drafting mail and changing your calendar ask you first.");
+  const lead = h('p', { class: 'lead' }, "Gmail and Google Calendar for munin's agents: pick them under Apps on an agent's profile. Reading and drafting need no asking; sending mail and changing your calendar ask you first.");
   if (google.account) {
     return h('section', { class: 'section', id: 'google' }, head, lead,
       h('div', { class: 'provider-list' }, h('div', { class: 'agent-row provider-row' },
@@ -216,7 +216,7 @@ function googleSection(google, ctx) {
 // token on its machine and only ever shows its last four characters.
 function appsSection(apps, ctx) {
   const field = (name, attrs) => bindDraft(h('input', { class: 'input', autocomplete: 'off', spellcheck: false, ...attrs }), `app:${name}`);
-  const name = field('name', { placeholder: 'Calendar', 'aria-label': 'App name' });
+  const name = field('name', { placeholder: 'Linear', 'aria-label': 'App name' });
   const url = field('url', { placeholder: 'https://mcp.example.com/mcp', 'aria-label': 'MCP server URL' });
   const token = field('token', { type: 'password', placeholder: 'Token, if it needs one', 'aria-label': 'Token' });
   const button = h('button', { type: 'submit', class: 'btn small primary' }, 'Add');
@@ -251,9 +251,11 @@ function appsSection(apps, ctx) {
     h('p', { class: 'lead' }, "MCP servers munin's agents can use: a calendar, mail, Linear. An agent gets an app's tools once you pick the app on its profile."),
     apps.length ? h('div', { class: 'provider-list' }, apps.map((app) => h('div', { class: 'agent-row provider-row' },
       h('span', { class: 'agent-name' }, h('span', {}, app.name)),
-      h('span', { class: 'agent-seen' }, `${app.url} · ${app.detail}${app.token ? ` · token …${app.token.hint}` : ''}`),
+      h('span', { class: 'agent-seen' }, app.builtin ? `Comes with munin · ${app.detail}` : `${app.url} · ${app.detail}${app.token ? ` · token …${app.token.hint}` : ''}`),
       h('span', { class: ['label', app.connected && 'on'] }, app.connected ? 'Connected' : 'Off'),
-      h('span', { class: 'agent-action' }, h('button', { type: 'button', class: 'link', onclick: () => remove(app) }, 'Remove'))))) : null,
+      h('span', { class: 'agent-action' }, app.builtin
+        ? h('a', { class: 'link', href: '#google', onclick: (e) => { e.preventDefault(); document.getElementById('google')?.scrollIntoView({ behavior: 'smooth' }); } }, 'Google')
+        : h('button', { type: 'button', class: 'link', onclick: () => remove(app) }, 'Remove'))))) : null,
     h('form', { class: 'key-form', onsubmit: add },
       h('div', { class: 'key-fields' }, name, url, token, button),
       h('p', { class: 'hint' }, "An app is an MCP server reached over HTTP. munin keeps its token on the machine it runs on and never shows it again; agents use the app's tools through munin, without the token.")));

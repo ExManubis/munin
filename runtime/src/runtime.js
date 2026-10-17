@@ -19,6 +19,7 @@ import { ROLES, roleName, askFirstFor, ruleMatches, upgradeBrief } from './roles
 import { toItems, summarize } from './items.js';
 import { AppError, describeAppCall, openApps } from './apps.js';
 import { GoogleError, openGoogle } from './google.js';
+import { googleApps } from './googleapps.js';
 import { readPageTool, webSearchTool } from './web.js';
 import { identity, about } from './prompt.js';
 import { createTracker } from './tracker.js';
@@ -296,7 +297,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     for (const agent of agents.values()) await (await conversationOf(agent)).configure(change(agent), ctx).catch(() => {});
   };
   const google = await openGoogle({ file: settings.googleFile || null, now, ...googleTest });
-  const apps = await openApps({ file: settings.appsFile || null, registry, onChange: () => { reconfigure(); } });
+  const apps = await openApps({
+    file: settings.appsFile || null, registry, onChange: () => { reconfigure(); },
+    builtins: googleApps({ google, ...googleTest.apis }), // Gmail and Google Calendar, once you sign in
+  });
   harness = await Harness.open(storage, {
     models: models.models,
     registry,
@@ -793,7 +797,9 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     google: (redirect) => google.status(redirect),
 
     async setGoogleClient(input) {
-      return googleCall(() => google.setClient(input?.json ?? input));
+      const status = await googleCall(() => google.setClient(input?.json ?? input));
+      apps.changed(); // a new client signs the old account out
+      return status;
     },
 
     async googleSignIn(fields) {
@@ -804,6 +810,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     async googleFinish(query) {
       try {
         const { back, email } = await google.finish(query);
+        apps.changed();
         return { back, ok: true, message: `Signed in with Google as ${email || 'your account'}.` };
       } catch (err) {
         return { back: err.back || null, ok: false, message: err.message };
@@ -812,6 +819,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
     async googleSignOut() {
       await google.signOut();
+      apps.changed();
     },
 
     // Apps (apps.js): MCP servers agents use, which you add in Settings.

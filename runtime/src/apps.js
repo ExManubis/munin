@@ -34,7 +34,10 @@ export function describeAppCall(tool, args = {}) {
 
 // `registry` gets each app's tools as an extension once it answers; `onChange()` hears that
 // the apps, or which of them answer, changed, so conversations can be given the new tools.
-export async function openApps({ file, registry, onChange = () => {} }) {
+// `builtins` are apps that come with munin (Gmail and Calendar, googleapps.js): { id, name,
+// ready() → { ok, detail }, tools: [{ name, description, inputSchema, annotations, run(args,
+// signal) }] }. They're always listed, can't be removed, and answer while ready() says so.
+export async function openApps({ file, registry, onChange = () => {}, builtins = [] }) {
   let saved = [];
   if (file) {
     try {
@@ -53,6 +56,32 @@ export async function openApps({ file, registry, onChange = () => {} }) {
 
   const live = new Map(); // id → { client, tools, extension, error, timer }
   let closed = false;
+  const all = () => [...builtins, ...saved];
+  // A built-in app's tools run here; it answers while it's ready.
+  for (const app of builtins) {
+    const extension = defineExtension({
+      name: `app-${app.id}`,
+      tools: app.tools.map((spec) => defineTool({
+        name: toolName(app.id, spec.name),
+        description: `${app.name}: ${spec.description}`,
+        parameters: spec.inputSchema,
+        async execute(args, api, context) {
+          try {
+            return { output: [{ type: 'text', text: await spec.run(args, context.abortSignal) }] };
+          } catch (err) {
+            if (context.abortSignal?.aborted) throw err;
+            return { output: [{ type: 'text', text: err.message }], isError: true };
+          }
+        },
+      })),
+    });
+    registry.install(extension);
+    live.set(app.id, { tools: app.tools, extension, builtin: true });
+  }
+  const answers = (app) => {
+    const state = live.get(app.id);
+    return Boolean(state?.extension) && (!state.builtin || app.ready().ok);
+  };
 
   function extensionOf(app, tools, client) {
     return defineExtension({
@@ -97,6 +126,10 @@ export async function openApps({ file, registry, onChange = () => {} }) {
 
   const describe = (app) => {
     const state = live.get(app.id) || {};
+    if (state.builtin) {
+      const ready = app.ready();
+      return { id: app.id, name: app.name, builtin: true, url: null, token: null, connected: ready.ok, tools: app.tools.length, detail: ready.detail };
+    }
     return {
       id: app.id,
       name: app.name,
@@ -109,19 +142,20 @@ export async function openApps({ file, registry, onChange = () => {} }) {
   };
 
   // An agent's apps, by id or (for picks made before apps were real) by name.
-  const appsOf = (agent) => (agent.abilities?.apps ? saved.filter((app) => (agent.apps || []).some((pick) => pick === app.id || pick.toLowerCase() === app.name.toLowerCase())) : []);
+  const picked = (agent) => all().filter((app) => (agent.apps || []).some((pick) => pick === app.id || pick.toLowerCase() === app.name.toLowerCase()));
+  const appsOf = (agent) => (agent.abilities?.apps ? picked(agent) : []);
 
   for (const app of saved) connect(app); // in the background: agents get an app's tools once it answers
 
   return {
-    list: () => saved.map(describe),
+    list: () => all().map(describe),
 
     async add({ name, url, token } = {}) {
       const title = String(name || '').trim();
       if (!title) throw new AppError('An app needs a name, like Calendar.');
       const id = slug(title);
       if (!id) throw new AppError('Give the app a name with some letters in it.');
-      if (saved.some((app) => app.id === id)) throw new AppError(`There's already an app called ${title}.`);
+      if (all().some((app) => app.id === id)) throw new AppError(`There's already an app called ${title}.`);
       let where;
       try {
         where = new URL(String(url || '').trim());
@@ -137,6 +171,8 @@ export async function openApps({ file, registry, onChange = () => {} }) {
     },
 
     async remove(id) {
+      const builtin = builtins.find((a) => a.id === id);
+      if (builtin) throw new AppError(`${builtin.name} comes with munin. To turn it off, sign out of Google in Settings.`);
       const app = saved.find((a) => a.id === id);
       if (!app) throw new AppError(`There's no app ${id}.`);
       saved = saved.filter((a) => a !== app);
@@ -147,17 +183,19 @@ export async function openApps({ file, registry, onChange = () => {} }) {
     },
 
     // The tools an agent gets: its own apps that answer.
-    extensionsFor: (agent) => appsOf(agent).map((app) => live.get(app.id)?.extension).filter(Boolean),
+    extensionsFor: (agent) => appsOf(agent).filter(answers).map((app) => live.get(app.id).extension),
     // What the prompt says: the names of the agent's apps that answer.
-    namesFor: (agent) => appsOf(agent).filter((app) => live.get(app.id)?.extension).map((app) => app.name),
+    namesFor: (agent) => appsOf(agent).filter(answers).map((app) => app.name),
+    // A built-in app started or stopped answering (signing in or out of Google, say).
+    changed: () => onChange(),
 
     // The ask-first rule an app gets on an agent that has it: anything that changes something.
     ruleFor: (id) => {
-      const app = saved.find((a) => a.id === id);
+      const app = all().find((a) => a.id === id);
       return app && { id: `app:${app.id}`, app: app.id, label: `${app.name}: sending, changing or deleting`, what: `do something in ${app.name}`, third: `does things in ${app.name}`, on: true };
     },
     // The agent's apps by id, picks from before apps were real included.
-    idsFor: (agent) => saved.filter((app) => (agent.apps || []).some((pick) => pick === app.id || pick.toLowerCase() === app.name.toLowerCase())).map((app) => app.id),
+    idsFor: (agent) => picked(agent).map((app) => app.id),
     // The tool behind a call's name, when it's one of `app`'s and changes something.
     changing(app, name) {
       const spec = live.get(app)?.tools?.find((tool) => toolName(app, tool.name) === name);
