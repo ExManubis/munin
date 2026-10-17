@@ -296,6 +296,7 @@ function settingsSidebar() {
     h('div', { class: 'label nav-heading first' }, 'Settings'),
     h('nav', { class: 'nav', 'aria-label': 'Settings' },
       jump('providers', 'Models and providers'),
+      jump('apps', 'Apps'),
       store.projects.length ? jump('code', 'Code') : null,
       jump('outside-agents', 'Outside agents'),
       jump('notifications', 'Notifications'),

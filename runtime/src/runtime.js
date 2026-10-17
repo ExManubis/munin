@@ -17,6 +17,7 @@ import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { ROLES, roleName, askFirstFor, ruleMatches, upgradeBrief } from './roles.js';
 import { toItems, summarize } from './items.js';
+import { AppError, openApps } from './apps.js';
 import { identity, about } from './prompt.js';
 import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
@@ -137,7 +138,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       // (prompt.js). The brief is part of the first section, so it comes before munin's own notes.
       section('munin', (input) => {
         const agent = agentFor(input.conversationId);
-        return agent ? identity(agent, named()) : undefined;
+        return agent ? identity(agent, named(), { apps: apps.namesFor(agent) }) : undefined;
       }, { tag: false }),
       section('about', (input) => {
         const agent = agentFor(input.conversationId);
@@ -278,6 +279,12 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   registry.install(Munin);
   registry.install(Workspace);
   const tracker = createTracker({ registry, agents: () => agents.values(), agentFor, write, user: who, onTake, mcpUrl: settings.trackerMcp || null });
+  // When apps change, or one starts or stops answering, every agent's conversation gets its tools.
+  const reconfigure = async () => {
+    if (!harness) return;
+    for (const agent of agents.values()) await (await conversationOf(agent)).configure(change(agent), ctx).catch(() => {});
+  };
+  const apps = await openApps({ file: settings.appsFile || null, registry, onChange: () => { reconfigure(); } });
   harness = await Harness.open(storage, {
     models: models.models,
     registry,
@@ -310,7 +317,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     return {
       model: { provider, modelId: model },
       thinkingLevel: agent.thinking,
-      extensions: [Munin, ...(agent.abilities.code ? [CodingTools, Workspace] : []), ...(agent.abilities.tracker ? [tracker.extension()] : [])],
+      extensions: [Munin, ...(agent.abilities.code ? [CodingTools, Workspace] : []), ...(agent.abilities.tracker ? [tracker.extension()] : []), ...apps.extensionsFor(agent)],
       cwd: agent.abilities.code ? (agent.work?.folder || agent.folder) : null,
     };
   };
@@ -747,6 +754,27 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       await saveAgents();
     },
 
+    // Apps (apps.js): MCP servers agents use, which you add in Settings.
+    apps: () => apps.list(),
+
+    async addApp(fields) {
+      try {
+        return await apps.add(fields);
+      } catch (err) {
+        if (err instanceof AppError) throw invalid(err.message);
+        throw err;
+      }
+    },
+
+    async removeApp(id) {
+      try {
+        await apps.remove(id);
+      } catch (err) {
+        if (err instanceof AppError) throw new RuntimeError(404, err.message);
+        throw err;
+      }
+    },
+
     async models() {
       const inUse = [...agents.values()].filter((a) => a.provider === 'openrouter').map((a) => a.model);
       return models.catalog({ favourites: favourites(), inUse });
@@ -801,6 +829,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       clearTimeout(timer);
       listeners.clear();
       tracker.close();
+      apps.close();
       await harness.close(ctx);
     },
   };

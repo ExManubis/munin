@@ -16,8 +16,8 @@ export const view = {
   title: () => 'Settings',
 
   async load() {
-    const [agents, providers, repos, about] = await Promise.all([api.agents(), runtime.providers(), runtime.repos(), runtime.me()]);
-    return { agents, providers, repos, sandbox: about.sandbox, me: store.me };
+    const [agents, providers, repos, about, apps] = await Promise.all([api.agents(), runtime.providers(), runtime.repos(), runtime.me(), runtime.apps()]);
+    return { agents, providers, repos, apps, sandbox: about.sandbox, me: store.me };
   },
 
   leave() {
@@ -26,12 +26,13 @@ export const view = {
     keyFor = null;
   },
 
-  render({ agents, providers, repos, sandbox, me }, ctx) {
+  render({ agents, providers, repos, apps, sandbox, me }, ctx) {
     const live = agents.filter((a) => !a.revoked);
     return h('div', { class: 'page' },
       topbar([h('span', { class: 'title' }, 'Settings')]),
       h('div', { class: 'agents-page' },
         providerSection(providers, ctx),
+        appsSection(apps, ctx),
         codeSection(repos, sandbox, ctx),
         h('section', { class: 'section', id: 'outside-agents' },
           h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Outside agents'), h('span', { class: 'mono muted' }, `${live.length} connected`)),
@@ -139,6 +140,53 @@ function keyForm(provider, ctx) {
       "munin keeps it on the machine it runs on, uses it in place of any in the runtime's environment, and never shows it again. Agents don't get it."));
 }
 
+// Apps: MCP servers munin's agents use, like a calendar or mail. The runtime keeps each one's
+// token on its machine and only ever shows its last four characters.
+function appsSection(apps, ctx) {
+  const field = (name, attrs) => bindDraft(h('input', { class: 'input', autocomplete: 'off', spellcheck: false, ...attrs }), `app:${name}`);
+  const name = field('name', { placeholder: 'Calendar', 'aria-label': 'App name' });
+  const url = field('url', { placeholder: 'https://mcp.example.com/mcp', 'aria-label': 'MCP server URL' });
+  const token = field('token', { type: 'password', placeholder: 'Token, if it needs one', 'aria-label': 'Token' });
+  const button = h('button', { type: 'submit', class: 'btn small primary' }, 'Add');
+  const add = async (e) => {
+    e.preventDefault();
+    if (!name.value.trim()) return name.focus();
+    if (!url.value.trim()) return url.focus();
+    button.disabled = true;
+    button.textContent = 'Connecting…';
+    try {
+      const app = await runtime.addApp({ name: name.value, url: url.value, token: token.value });
+      for (const key of ['name', 'url', 'token']) drafts.delete(`app:${key}`);
+      toast(app.connected ? `${app.name} is connected, with ${app.detail}. Pick it on an agent's profile.` : `${app.name} is added, but doesn't answer yet: ${app.detail}`, { error: !app.connected });
+      ctx.reload();
+    } catch (err) {
+      button.disabled = false;
+      button.textContent = 'Add';
+      toast(err.message, { error: true });
+    }
+  };
+  const remove = async (app) => {
+    if (!confirm(`Remove ${app.name}? Agents that use it lose its tools.`)) return;
+    try {
+      await runtime.removeApp(app.id);
+      ctx.reload();
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  };
+  return h('section', { class: 'section', id: 'apps' },
+    h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Apps'), h('span', { class: 'mono muted' }, `${apps.filter((a) => a.connected).length} connected`)),
+    h('p', { class: 'lead' }, "MCP servers munin's agents can use: a calendar, mail, Linear. An agent gets an app's tools once you pick the app on its profile."),
+    apps.length ? h('div', { class: 'provider-list' }, apps.map((app) => h('div', { class: 'agent-row provider-row' },
+      h('span', { class: 'agent-name' }, h('span', {}, app.name)),
+      h('span', { class: 'agent-seen' }, `${app.url} · ${app.detail}${app.token ? ` · token …${app.token.hint}` : ''}`),
+      h('span', { class: ['label', app.connected && 'on'] }, app.connected ? 'Connected' : 'Off'),
+      h('span', { class: 'agent-action' }, h('button', { type: 'button', class: 'link', onclick: () => remove(app) }, 'Remove'))))) : null,
+    h('form', { class: 'key-form', onsubmit: add },
+      h('div', { class: 'key-fields' }, name, url, token, button),
+      h('p', { class: 'hint' }, "An app is an MCP server reached over HTTP. munin keeps its token on the machine it runs on and never shows it again; agents use the app's tools through munin, without the token.")));
+}
+
 // Where each tracker project's code is. The runtime keeps a clone, and each coder gets a
 // worktree per issue, on a branch named after the issue.
 function codeSection(repos, sandbox, ctx) {
@@ -149,7 +197,7 @@ function codeSection(repos, sandbox, ctx) {
       "Where each project's code lives. munin keeps a clone of it, and a coder that takes an issue gets a worktree of its own, ",
       'on a branch named after the issue, so agents working side by side never share a checkout.'),
     runtime.kind === 'runtime' ? h('p', { class: 'hint sandbox-note' }, sandbox
-      ? `Coders run in a container each, from ${sandbox.image}: they see their own folder and munin's clones, and nothing else of this machine.`
+      ? `Coders run in a container each, from ${sandbox.image}: they see their own folder and nothing else of this machine, behind a firewall that keeps them off munin and the tailnet.`
       : "Coders run on this machine, as the runtime's own user. Their shells don't get the runtime's keys, but they can read its files. "
         + 'Start the runtime with MUNIN_AGENT_SANDBOX=docker to give each a container of its own.') : null,
     h('div', { class: 'repo-list' }, store.projects.map((project) => repoRow(project, repos.find((r) => r.project === project.key), ctx))));
