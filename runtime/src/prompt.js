@@ -7,6 +7,7 @@
 // description, so each agent has examples of its own.
 
 import { ROLES, roleName } from './roles.js';
+import { remembered } from './memory.js';
 
 // What every munin agent leaves out. How it does sound is its own: its brief and its examples.
 // Kept short on purpose, since a long shared voice makes every agent sound the same.
@@ -87,7 +88,7 @@ export function capabilities(agent, name, { search = false, apps = { mine: [], o
   const you = name || 'the person you work for';
   const has = (ability) => Boolean(agent.abilities?.[ability]);
   const can = [];
-  can.push(`Talk things through with ${you}. When you need a decision, use ask_human; they may be away for hours. When you learn something about ${you} that will still be true next week, use remember.`);
+  can.push(`Talk things through with ${you}. When you need a decision, use ask_human; they may be away for hours. When you learn something that will still be true next week, use remember: about ${you}, about how the work is done here, or about how you work best. Each kind has room for a few notes. They're yours to keep in order: when one kind is full, make room yourself, without asking, by saying two notes in one with change_note or dropping one that matters less with forget_note.`);
   // What reaches a phone (push.js): questions and approvals from everyone, and what agents
   // that don't code say.
   const reaches = has('code') ? 'your questions and approvals reach' : 'what you say reaches';
@@ -135,10 +136,10 @@ export function capabilities(agent, name, { search = false, apps = { mine: [], o
   ].filter(Boolean).join('\n');
 }
 
-// What the agent remembers about you, as plain statements, after the identity.
+// What the agent remembers, as plain statements in its three kinds (memory.js): about you, about
+// how the work is done, and about how it works best, each with how full it is.
 export function about(agent, name) {
-  const notes = agent.memory || [];
-  return notes.length ? [`What you know about ${name || 'the person you work for'}:`, ...notes.map((n) => `- ${n.text}`)].join('\n') : undefined;
+  return remembered(agent.memory || [], name || 'the person you work for');
 }
 
 // Who else is on the team: munin's other agents, what each does, and what each is on, so the

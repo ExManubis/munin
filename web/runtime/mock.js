@@ -7,7 +7,7 @@
 // Every exported function is something the runtime serves over HTTP too;
 // docs/runtime-api.md lists them. The two marked "mock only" are glue for the dummy.
 
-import { roleOf } from './roles.js';
+import { MEMORY_KINDS, kindOf, roleOf } from './roles.js';
 
 const KEY = 'munin:mock-runtime:v2';
 
@@ -145,8 +145,9 @@ function seed(now) {
       { id: 'r2', name: 'Fix what vera flags', trigger: 'tracker', when: "When vera requests changes on forge's work", does: 'Pick the issue back up and fix what she found.', last: ago(21 * HOUR) },
     ],
     memory: [
-      { id: 'm1', text: 'Tests run with pytest; the gateway ones need TELEGRAM_TEST_TOKEN.' },
-      { id: 'm2', text: 'Mikkel prefers small PRs, one per issue.' },
+      { id: 'm1', kind: 'work', text: 'Tests run with pytest; the gateway ones need TELEGRAM_TEST_TOKEN.' },
+      { id: 'm2', kind: 'you', text: 'Mikkel prefers small PRs, one per issue.' },
+      { id: 'm3', kind: 'self', text: "Measure before changing anything that's slow." },
     ],
     memoryCount: 9, usage: { today: 1.92, week: 9.4, month: 31.2, tokens: 640000 }, budget: 60,
   });
@@ -215,7 +216,7 @@ function seed(now) {
     name: 'quill', role: 'writer', colour: 'rose', provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5', createdAt: ago(12 * 24 * HOUR),
     brief: `${roleOf('writer').brief('quill')} Most of what you write is munin's docs and site.`, examples: roleOf('writer').examples('quill'),
     abilities: { web: true }, usage: { today: 0.22, week: 1.9, month: 6.1, tokens: 86000 }, memoryCount: 6,
-    memory: [{ id: 'm1', text: 'House style: short sentences, no exclamation marks.' }],
+    memory: [{ id: 'm1', kind: 'work', text: 'House style: short sentences, no exclamation marks.' }],
   });
   you('quill', ago(26 * HOUR), 'Can you tighten "Why munin"? It’s too long and the Hermes bit doesn’t land.');
   say('quill', ago(26 * HOUR - MIN), 'On it.');
@@ -337,8 +338,10 @@ function full(agent) {
     apps: [...agent.apps],
     askFirst: agent.askFirst.map((rule) => ({ ...rule })),
     routines: agent.routines.map((r) => ({ ...r, last: r.last ? iso(r.last) : null })),
-    memory: agent.memory.map((note) => ({ ...note })),
+    memory: agent.memory.map((note) => ({ ...note, kind: kindOf(note) })),
     memoryCount: Math.max(agent.memoryCount || 0, agent.memory.length),
+    memoryRoom: Object.fromEntries(Object.entries(MEMORY_KINDS).map(([kind, { cap }]) => [kind,
+      { used: agent.memory.filter((n) => kindOf(n) === kind).reduce((sum, n) => sum + n.text.length, 0), cap }])),
     usage: { ...agent.usage },
     budget: agent.budget,
     worksIn: agent.worksIn,
@@ -524,7 +527,7 @@ function reply(agent, text) {
   if (role === 'assistant') {
     if (/remember/i.test(text)) {
       const note = text.replace(/^.*?remember( that)?/i, '').trim().replace(/^./, (c) => c.toUpperCase());
-      agent.memory.unshift({ id: `m${Date.now()}`, text: note || text });
+      agent.memory.unshift({ id: `m${Date.now()}`, kind: 'you', text: note || text });
       agent.memoryCount = (agent.memoryCount || 0) + 1;
       act(name, 'remembered', note || text);
       return say(name, "I'll remember that.");
@@ -775,6 +778,16 @@ export const mock = {
     const agent = need(name);
     agent.routines = agent.routines.filter((r) => r.id !== id);
     changed();
+  },
+
+  async changeNote(name, noteId, { text, kind } = {}) {
+    const agent = need(name);
+    const note = agent.memory.find((n) => n.id === noteId);
+    if (!note) throw new Error(`There's no note ${noteId}.`);
+    if (text !== undefined) note.text = String(text).trim() || note.text;
+    if (kind) note.kind = kind;
+    changed();
+    return full(agent);
   },
 
   async forget(name, noteId) {
