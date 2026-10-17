@@ -18,6 +18,7 @@ import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite
 import { ROLES, roleName, askFirstFor, ruleMatches, upgradeBrief } from './roles.js';
 import { toItems, summarize } from './items.js';
 import { AppError, describeAppCall, openApps } from './apps.js';
+import { GoogleError, openGoogle } from './google.js';
 import { identity, about } from './prompt.js';
 import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
@@ -80,10 +81,11 @@ function trackerLink(value, current) {
   return link;
 }
 
-// `now`, `timers` and `costOf` are for tests: a clock to run routines and budgets by, whether a
-// timer runs routines, and what a model response cost (the test model's are all free).
+// `now`, `timers`, `costOf` and `google` are for tests: a clock to run routines and budgets by,
+// whether a timer runs routines, what a model response cost (the test model's are all free), and
+// Google's endpoints and fetch.
 const costOfResponse = (message) => message.usage?.cost?.total || 0;
-export async function openRuntime(settings, { models, storage, now = Date.now, timers = true, costOf = costOfResponse } = {}) {
+export async function openRuntime(settings, { models, storage, now = Date.now, timers = true, costOf = costOfResponse, google: googleTest = {} } = {}) {
   storage ||= settings.db === ':memory:' ? new MemoryStorage() : await openNodeSqliteStorage(settings.db);
   const agents = new Map(); // name → settings
   const listeners = new Set();
@@ -286,6 +288,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     if (!harness) return;
     for (const agent of agents.values()) await (await conversationOf(agent)).configure(change(agent), ctx).catch(() => {});
   };
+  const google = await openGoogle({ file: settings.googleFile || null, now, ...googleTest });
   const apps = await openApps({ file: settings.appsFile || null, registry, onChange: () => { reconfigure(); } });
   harness = await Harness.open(storage, {
     models: models.models,
@@ -304,6 +307,15 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   Object.assign(prefs, structuredClone(saved?.prefs || {}));
   workspace = createWorkspace({ dir: reposDir, agentsDir: settings.agentsDir, repos });
   tracker.connect(); // in the background: until the tracker answers, agents are told it's away
+
+  const googleCall = async (fn) => {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err instanceof GoogleError) throw invalid(err.message);
+      throw err;
+    }
+  };
 
   // Each app an agent has gets an ask-first rule (apps.ruleFor), on until you turn it off; an
   // app it no longer has, or that's gone, takes its rule with it.
@@ -766,6 +778,32 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     async removeRepo(key) {
       workspace.removeRepo(String(key || '').toUpperCase());
       await saveAgents();
+    },
+
+    // Google (google.js): your OAuth client, and signing in for Gmail and Calendar. `redirect` is
+    // the runtime's callback as the browser reaches it; the server works it out.
+    google: (redirect) => google.status(redirect),
+
+    async setGoogleClient(input) {
+      return googleCall(() => google.setClient(input?.json ?? input));
+    },
+
+    async googleSignIn(fields) {
+      return googleCall(() => google.signIn(fields));
+    },
+
+    // Google's redirect back. Never throws: the page to go back to, and how it went.
+    async googleFinish(query) {
+      try {
+        const { back, email } = await google.finish(query);
+        return { back, ok: true, message: `Signed in with Google as ${email || 'your account'}.` };
+      } catch (err) {
+        return { back: err.back || null, ok: false, message: err.message };
+      }
+    },
+
+    async googleSignOut() {
+      await google.signOut();
     },
 
     // Apps (apps.js): MCP servers agents use, which you add in Settings.

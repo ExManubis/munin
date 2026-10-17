@@ -16,8 +16,9 @@ export const view = {
   title: () => 'Settings',
 
   async load() {
-    const [agents, providers, repos, about, apps] = await Promise.all([api.agents(), runtime.providers(), runtime.repos(), runtime.me(), runtime.apps()]);
-    return { agents, providers, repos, apps, sandbox: about.sandbox, me: store.me };
+    const [agents, providers, repos, about, apps, google] = await Promise.all([api.agents(), runtime.providers(), runtime.repos(), runtime.me(), runtime.apps(), runtime.google()]);
+    googleReturned();
+    return { agents, providers, repos, apps, google, sandbox: about.sandbox, me: store.me };
   },
 
   leave() {
@@ -26,12 +27,13 @@ export const view = {
     keyFor = null;
   },
 
-  render({ agents, providers, repos, apps, sandbox, me }, ctx) {
+  render({ agents, providers, repos, apps, google, sandbox, me }, ctx) {
     const live = agents.filter((a) => !a.revoked);
     return h('div', { class: 'page' },
       topbar([h('span', { class: 'title' }, 'Settings')]),
       h('div', { class: 'agents-page' },
         providerSection(providers, ctx),
+        googleSection(google, ctx),
         appsSection(apps, ctx),
         codeSection(repos, sandbox, ctx),
         h('section', { class: 'section', id: 'outside-agents' },
@@ -138,6 +140,76 @@ function keyForm(provider, ctx) {
         ? ['Make one at ', h('a', { href: 'https://openrouter.ai/settings/keys', target: '_blank', rel: 'noopener noreferrer' }, 'openrouter.ai/settings/keys'), '. ']
         : null,
       "munin keeps it on the machine it runs on, uses it in place of any in the runtime's environment, and never shows it again. Agents don't get it."));
+}
+
+// Google: your own OAuth client, then signing in, for Gmail and Calendar. Google sends the
+// browser back to the runtime, which comes back here with ?google=ok|failed&message=….
+function googleReturned() {
+  const query = new URLSearchParams(location.search);
+  if (!query.has('google')) return;
+  toast(query.get('message') || 'Back from Google.', { error: query.get('google') !== 'ok' });
+  history.replaceState(null, '', `${location.pathname}${location.hash}`);
+}
+
+function googleSection(google, ctx) {
+  const step = (...parts) => h('li', {}, ...parts);
+  const link = (href, text) => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text);
+  const signIn = async () => {
+    try {
+      const { url } = await runtime.googleSignIn({ services: ['gmail', 'calendar'], back: location.href });
+      location.href = url;
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  };
+  const signOut = async () => {
+    if (!confirm(`Sign out ${google.account.email || 'of Google'}? Agents lose Gmail and Calendar until you sign in again.`)) return;
+    await runtime.googleSignOut();
+    ctx.reload();
+  };
+  const head = h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Google'),
+    h('span', { class: 'mono muted' }, google.account ? (google.account.working ? 'Signed in' : 'Sign in again') : google.client.configured ? 'Not signed in' : 'Not set up'));
+  const lead = h('p', { class: 'lead' }, "Gmail and Google Calendar for munin's agents. Reading needs no asking; drafting mail and changing your calendar ask you first.");
+  if (google.account) {
+    return h('section', { class: 'section', id: 'google' }, head, lead,
+      h('div', { class: 'provider-list' }, h('div', { class: 'agent-row provider-row' },
+        h('span', { class: 'agent-name' }, h('span', {}, google.account.email || 'Your Google account')),
+        h('span', { class: 'agent-seen' }, google.account.working ? google.account.services.map((s) => (s === 'gmail' ? 'Gmail' : 'Calendar')).join(' and ') : google.account.problem),
+        h('span', { class: ['label', google.account.working && 'on'] }, google.account.working ? 'Connected' : 'Stopped'),
+        h('span', { class: 'agent-action' }, google.account.working
+          ? h('button', { type: 'button', class: 'link', onclick: signOut }, 'Sign out')
+          : h('button', { type: 'button', class: 'link', onclick: signIn }, 'Sign in again')))));
+  }
+  if (google.client.configured) {
+    return h('section', { class: 'section', id: 'google' }, head, lead,
+      h('p', { class: 'hint' }, `Your OAuth client: ${google.client.id}. Google's page asks you to allow Gmail and Calendar, then sends you back here.`),
+      h('div', { class: 'key-fields' }, h('button', { type: 'button', class: 'btn small primary', onclick: signIn }, 'Sign in with Google')));
+  }
+  const json = bindDraft(h('textarea', { class: 'input', rows: 4, placeholder: '{"web":{"client_id":"….apps.googleusercontent.com","client_secret":"…"}}', 'aria-label': 'OAuth client JSON', spellcheck: false }), 'google:client');
+  const save = async (e) => {
+    e.preventDefault();
+    if (!json.value.trim()) return json.focus();
+    try {
+      await runtime.setGoogleClient(json.value);
+      drafts.delete('google:client');
+      ctx.reload();
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  };
+  return h('section', { class: 'section', id: 'google' }, head, lead,
+    h('p', { class: 'hint' }, 'munin signs in with an OAuth client of your own, from Google Cloud. Once, about five minutes:'),
+    h('ol', { class: 'steps' },
+      step('Make a project: ', link('https://console.cloud.google.com/projectcreate', 'console.cloud.google.com/projectcreate'), '.'),
+      step('Turn on the ', link('https://console.cloud.google.com/apis/library/gmail.googleapis.com', 'Gmail API'), ' and the ', link('https://console.cloud.google.com/apis/library/calendar-json.googleapis.com', 'Google Calendar API'), '.'),
+      step('Set up the consent screen under ', link('https://console.cloud.google.com/auth/overview', 'Google Auth Platform'), ': Internal if your Google Workspace allows it; otherwise External, and add yourself under Audience → Test users. (An External app in Testing has to sign in again every 7 days.)'),
+      step('Under ', link('https://console.cloud.google.com/auth/clients', 'Clients'), ', create a client of type Web application, with this as an authorized redirect URI: ',
+        h('code', {}, google.redirect), ' ', copyButton(() => google.redirect)),
+      step('Download its JSON and paste it here.')),
+    h('form', { class: 'key-form', onsubmit: save },
+      json,
+      h('div', { class: 'key-fields' }, h('button', { type: 'submit', class: 'btn small primary' }, 'Save client')),
+      h('p', { class: 'hint' }, "munin keeps the client and your sign-in on the machine it runs on and never shows them again. Agents don't get them.")));
 }
 
 // Apps: MCP servers munin's agents use, like a calendar or mail. The runtime keeps each one's
