@@ -434,3 +434,23 @@ forge  13:57
 
 - **MEMORY is in three kinds,** each with a label in Plex Mono 11 caps and how full it is, `ABOUT YOU 620 / 1,500`, turning `#EDEDED` when the kind is full: about you, about the work, and about itself. Each note has tertiary `EDIT` and `FORGET` on hover; `EDIT` turns the note into a field (Return saves, Escape doesn't).
 - **TRACK RECORD, between ROUTINES and MEMORY,** as label/value rows like PROPERTIES: Shipped, Sent back, Reviewed, Works in and Last shipped, from the tracker. An agent with the Tracker ability that hasn't done anything there yet says so; one without it and with nothing in the tracker has no section.
+
+## Changed while giving agents skills (MUN-36)
+
+- **SKILLS, between ROUTINES and TRACK RECORD,** in routine rows: the skill's name in Plex Mono, its description, how often it's been used (`Used 6 times · 2d ago`, `Not used yet`, `Not used in a month`), whose it is when another agent shared it (`vera's`), and tertiary `SHARE` and `EDIT` (`READ` for another agent's). Then secondary `WRITE A SKILL`.
+- **Editing a skill** is a sheet with its SKILL.md in a Plex Mono text area; a new one starts from a template with When to use, Steps, Pitfalls and How to check. **Sharing** is a sheet of dotted checkbox rows like the Apps picker: "Every agent, now and later", then each agent.
+- **A skill's approval card** quotes the skill between the target and the options, under its description, scrolling past 280 px. Its rows read `Save it`, `Always allow` and `Don't save it`.
+- **Agents' Markdown** shows headings, as short bold lines, and numbered lists.
+
+## Changed while giving agents a rhythm (MUN-37)
+
+- **SPEAKING UP, after ROUTINES:** a dotted select, `Only when asked`, `When it matters` or `Chatty`, with a line under it saying what it does.
+- **JOURNAL, after TRACK RECORD:** the newest three entries, each a date in Plex Mono 11 `#7A7A7A` over the entry in Red Hat 14/22 `#CFCFCF`, with a 1 px `#2A2A2A` rule on the left like MEMORY's notes, then tertiary `VIEW ALL`.
+- **In the conversation,** a journal entry is an action line, `wrote in its journal` and its first sentence. While the agent is idle, its sidebar line 2 is that sentence. A heartbeat that came to nothing shows nothing at all.
+- **MEMORY has a fourth kind,** `ABOUT THE TEAM`, each note led by the teammate's name in Plex Mono 11 `#7A7A7A`.
+
+## Changed while letting faces show how the work is going (MUN-39)
+
+- **Expression shows state, or for a minute how the work is going** (Mikkel, 2026-10-17). An agent can set a passing expression with its `set_expression` tool, in one of Figbot's own poses: `excited` (until now the spare one), `happy` or `worried`. It shows wherever the agent's face does, then the face goes back to its status. Asking you something (`curious`) and being paused (`sleepy`) always win, so a face never hides that you're needed. Faces already blend into a new expression with a blink, so a passing one fades in and out the same way.
+- **It reads best at 36 px and up:** the conversation header, the profile and the ABOUT panel's big face. At 18 px the colour reads but the expression barely does, as before.
+

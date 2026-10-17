@@ -1,5 +1,6 @@
-// What an agent remembers, in three kinds: about you, about how the work is done, and about how
-// it works best itself. Each kind has room for so many characters, and the agent sees how full
+// What an agent remembers, in four kinds: about you, about how the work is done, about how it
+// works best itself, and about its teammates, each note on one of them (shown under them in the
+// prompt's team section, prompt.js). Each kind has room for so many characters, and the agent sees how full
 // each is. When one is full it makes room itself, by changing or forgetting notes one at a time,
 // before it can add more. Hermes Agent caps its memory the same way and never compacts it for
 // the agent; ACE found that letting a model rewrite a whole memory at once can collapse it, so
@@ -11,6 +12,7 @@ export const KINDS = {
   you: { cap: 1500, heading: (who) => `What you know about ${who}` },
   work: { cap: 1500, heading: () => 'How the work is done here' },
   self: { cap: 1000, heading: () => "What you've learned about how you work best" },
+  team: { cap: 1000, heading: () => "What you've noticed about your teammates" },
 };
 const LONGEST = 300; // one note, in characters
 
@@ -31,7 +33,7 @@ const newId = () => `m${randomBytes(3).toString('hex')}`;
 const chars = (n) => n.toLocaleString('en');
 
 function check(notes, kind, text, without = null) {
-  if (!KINDS[kind]) throw new MemoryError(`A note is about you, work or self, not ${kind}.`);
+  if (!KINDS[kind]) throw new MemoryError(`A note is about you, work, self or team, not ${kind}.`);
   if (!text) throw new MemoryError('Say what to remember, in a sentence.');
   if (text.length > LONGEST) throw new MemoryError(`Keep a note under ${LONGEST} characters: one short sentence.`);
   const { used, cap } = room(notes.filter((n) => n.id !== without))[kind];
@@ -41,9 +43,10 @@ function check(notes, kind, text, without = null) {
   }
 }
 
-// The notes with a new one first. Throws MemoryError when it doesn't fit.
-export function addNote(notes, { kind = 'you', text }) {
-  const note = { id: newId(), kind, text: clean(text) };
+// The notes with a new one first. Throws MemoryError when it doesn't fit. A team note says which
+// teammate it's about.
+export function addNote(notes, { kind = 'you', text, about = null }) {
+  const note = { id: newId(), kind, text: clean(text), ...(kind === 'team' ? { about } : {}) };
   check(notes, kind, note.text);
   return { notes: [note, ...notes], note };
 }
@@ -53,6 +56,7 @@ export function changeNote(notes, id, { text, kind }) {
   const old = notes.find((n) => n.id === id);
   if (!old) throw new MemoryError(`There's no note ${id}.`);
   const note = { ...old, kind: kind ?? kindOf(old), text: text === undefined ? old.text : clean(text) };
+  if (note.kind === 'team' && !note.about) throw new MemoryError("A team note says which teammate it's about, so remember a new one instead.");
   check(notes, note.kind, note.text, id);
   return { notes: notes.map((n) => (n.id === id ? note : n)), note, old };
 }
@@ -64,11 +68,12 @@ export function forgetNote(notes, id) {
 }
 
 // What the agent remembers, for its prompt: each kind it has notes of, with how full it is and
-// each note's id, so it can change or forget one.
+// each note's id, so it can change or forget one. Team notes show under each teammate instead.
 export function remembered(notes, who) {
   const full = room(notes);
   const parts = [];
   for (const [kind, { heading }] of Object.entries(KINDS)) {
+    if (kind === 'team') continue;
     const mine = notes.filter((n) => kindOf(n) === kind);
     if (!mine.length) continue;
     parts.push([`${heading(who)} (${chars(full[kind].used)} of ${chars(full[kind].cap)} characters):`, ...mine.map((n) => `- ${n.text} [${n.id}]`)].join('\n'));

@@ -88,7 +88,7 @@ function seed(now) {
   const did = (name, at, verb, object, extra = {}) => item(name, at, { kind: 'action', verb, object, ...extra });
   const agent = (fields) => {
     s.agents[fields.name] = {
-      paused: false, apps: [], routines: [], memory: [], askFirst: [], worksIn: null, tracker: null,
+      paused: false, apps: [], routines: [], memory: [], askFirst: [], worksIn: null, tracker: null, proactivity: 'off', journal: [],
       budget: null, thinking: 'low', ...fields,
     };
   };
@@ -113,7 +113,11 @@ function seed(now) {
       'Dentist: Tandlægerne på Østerbro.', 'Doesn’t take meetings before 09:00.', 'Sara is his partner.',
       'Writes mail in Danish to the clinic, English at work.', 'The design review is every second Thursday.',
     ].map((text, i) => ({ id: `m${i + 1}`, text })),
-    memoryCount: 23, usage: { today: 0.08, week: 0.61, month: 2.4, tokens: 41000 }, budget: 10,
+    memoryCount: 23, usage: { today: 0.08, week: 0.61, month: 2.4, tokens: 41000 }, budget: 10, proactivity: 'matters',
+    journal: [
+      { at: ago(15 * HOUR), text: "Sorted the offsite reply and found Paul's agenda still missing; I'll bring it up Thursday if it hasn't come. Learned that the clinic wants mail in Danish. The dentist clash is still open." },
+      { at: ago(39 * HOUR), text: 'A quiet day: the morning brief, two invites accepted, one declined. Nothing is waiting on me.' },
+    ],
   });
   did('hugin', ago(350 * MIN), 'ran routine', 'Morning briefing');
   say('hugin', ago(350 * MIN), 'Morning. Three things today: Weekly Dev / Eng moved to 11:00, Paul is waiting for your answer about the offsite, and the dentist at 15:00 clashes with the design review.');
@@ -225,7 +229,7 @@ function seed(now) {
 
   agent({
     name: 'pip', role: 'companion', colour: 'straw', provider: 'openrouter', model: 'anthropic/claude-haiku-5.5', createdAt: ago(5 * 24 * HOUR),
-    brief: roleOf('companion').brief('pip'), examples: roleOf('companion').examples('pip'),
+    brief: roleOf('companion').brief('pip'), examples: roleOf('companion').examples('pip'), proactivity: 'chatty',
     abilities: {}, usage: { today: 0, week: 0.04, month: 0.09, tokens: 0 }, memoryCount: 1,
     memory: [{ id: 'm1', text: 'Got the echo riddle right away.' }],
   });
@@ -247,8 +251,32 @@ function seed(now) {
   s.script.hugin = { paulFirst: now + 45 * 1000 };
   for (const list of Object.values(s.items)) list.sort((a, b) => a.at - b.at);
   s.seq = seq;
+  s.skills = [
+    {
+      id: 's1', owner: 'forge', name: 'run-gateway-tests', sharedWith: [], uses: 6, lastUsed: ago(14 * MIN), createdAt: ago(9 * 24 * HOUR),
+      description: "Run and read the gateway's tests: before sending gateway work to review, or when a gateway test fails.",
+      body: "## When to use\nBefore sending anything under gateway/ to review, and whenever a gateway test fails.\n\n## Steps\n1. Set TELEGRAM_TEST_TOKEN; the Telegram tests skip without it, and skipped looks like passed.\n2. Run `pytest gateway/ -q`.\n3. For a failure, run that one test with `-x -vv` before changing anything.\n\n## Pitfalls\n- The rate-limit tests sleep; don't shorten the sleeps to make them faster.\n\n## How to check\nThe count of passed tests matches the count collected, with none skipped.",
+    },
+    {
+      id: 's2', owner: 'vera', name: 'review-a-change', sharedWith: ['*'], uses: 11, lastUsed: ago(14 * MIN), createdAt: ago(16 * 24 * HOUR),
+      description: 'How to review work sent to review: what to run, what to read, and when to send it back.',
+      body: "## When to use\nWhen an issue moves to In review.\n\n## Steps\n1. Read the issue, then the diff.\n2. Run the tests, and try the change the way the issue describes.\n3. Merge what's good; send back what isn't, saying exactly what's missing and where.\n\n## Pitfalls\n- Passing tests can miss the case the issue is about; check there's a test for it.\n\n## How to check\nYou ran it yourself, and your note says what you ran.",
+    },
+  ];
   return s;
 }
+
+// A skill as the runtime sends it (runtime/src/skills.js has the real one).
+const skillText = (s) => `---\nname: ${s.name}\ndescription: ${s.description}\n---\n\n${s.body}\n`;
+function parseSkill(text) {
+  const m = /^\s*---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/.exec(String(text || ''));
+  if (!m) throw new Error('A skill starts with its name and description between --- lines, like a SKILL.md.');
+  const fields = Object.fromEntries([...m[1].matchAll(/^(\w+):\s*(.*)$/gm)].map(([, k, v]) => [k, v.trim()]));
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(fields.name || '')) throw new Error("A skill's name is lowercase words joined by dashes, like run-gateway-tests.");
+  if (!fields.description) throw new Error('Say in the description what the skill does and when to use it.');
+  return { name: fields.name, description: fields.description, body: m[2].trim() };
+}
+const hasSkill = (agent, s) => s.owner === agent.name || s.sharedWith.includes('*') || s.sharedWith.includes(agent.name);
 
 function runItem(number, issue, at, steps, status, endedAt = null) {
   return { kind: 'run', number, issue, at, startedAt: at, steps, status, endedAt };
@@ -318,6 +346,7 @@ function summary(agent) {
     roleName: roleOf(agent.role).name,
     colour: agent.colour,
     state: stateOf(agent),
+    expression: agent.expression && Date.parse(agent.expression.until) > Date.now() ? { ...agent.expression } : null,
     waiting: items.filter(isOpen).length,
     preview: preview(agent),
     lastAt: iso(Math.max(last?.at || agent.createdAt, run ? run.steps[run.steps.length - 1]?.at || 0 : 0)),
@@ -334,6 +363,8 @@ function full(agent) {
     brief: agent.brief,
     examples: agent.examples || '',
     thinking: agent.thinking,
+    proactivity: agent.proactivity || 'off',
+    journal: (agent.journal || []).map((e) => ({ ...e, at: iso(e.at) })),
     abilities: { ...agent.abilities },
     apps: [...agent.apps],
     askFirst: agent.askFirst.map((rule) => ({ ...rule })),
@@ -342,6 +373,10 @@ function full(agent) {
     memoryCount: Math.max(agent.memoryCount || 0, agent.memory.length),
     memoryRoom: Object.fromEntries(Object.entries(MEMORY_KINDS).map(([kind, { cap }]) => [kind,
       { used: agent.memory.filter((n) => kindOf(n) === kind).reduce((sum, n) => sum + n.text.length, 0), cap }])),
+    skills: (state.skills || []).filter((s) => hasSkill(agent, s)).toSorted((a, b) => a.name.localeCompare(b.name)).map((s) => ({
+      ...s, text: skillText(s), mine: s.owner === agent.name, sharedWith: [...s.sharedWith],
+      lastUsed: s.lastUsed ? iso(s.lastUsed) : null, stale: Date.now() - (s.lastUsed || s.createdAt) > 30 * 24 * 3600 * 1000,
+    })),
     usage: { ...agent.usage },
     budget: agent.budget,
     worksIn: agent.worksIn,
@@ -514,6 +549,11 @@ function reply(agent, text) {
     const riddle = state.pip.riddle != null ? RIDDLES[state.pip.riddle] : null;
     if (riddle) {
       state.pip.riddle = null;
+      // A right answer shows on pip's face for a minute (the runtime's set_expression).
+      if (riddle[1].test(text)) {
+        agent.expression = { pose: 'excited', until: iso(Date.now() + 60 * 1000) };
+        setTimeout(changed, 60 * 1000 + 50);
+      }
       return say(name, riddle[1].test(text) ? `Yes! ${riddle[2]}. Want another?` : `Good guess, but no: ${riddle[2].toLowerCase()}. Another?`);
     }
     if (/riddle|yes|sure|ok|go|another|ready/i.test(text)) {
@@ -684,7 +724,7 @@ export const mock = {
     if (state.agents[clean]) throw new Error(`There's already an agent called ${clean}.`);
     const preset = roleOf(role);
     state.agents[clean] = {
-      name: clean, role: preset.id, colour, provider, model: model || preset.model, thinking: 'low', brief: brief || preset.brief(clean), examples: examples ?? preset.examples(clean),
+      name: clean, role: preset.id, colour, provider, model: model || preset.model, thinking: 'low', brief: brief || preset.brief(clean), examples: examples ?? preset.examples(clean), proactivity: { companion: 'chatty', assistant: 'matters' }[preset.id] || 'off', journal: [],
       abilities: { ...preset.abilities }, apps: [], askFirst: [], routines: [], memory: [], memoryCount: 0, worksIn: preset.abilities.code ? { folder: `~/agents/${clean}`, branch: 'main' } : null,
       tracker: preset.abilities.tracker ? { projects: [], takes: preset.id === 'reviewer' ? 'reviews' : 'issues' } : null,
       usage: { today: 0, week: 0, month: 0, tokens: 0 }, budget: null, paused: false, createdAt: Date.now(),
@@ -698,7 +738,7 @@ export const mock = {
   // budget, askFirst ({ id: on }), and tracker ({ projects }).
   async updateAgent(name, patch) {
     const agent = need(name);
-    for (const key of ['role', 'colour', 'provider', 'model', 'thinking', 'brief', 'examples', 'budget']) if (key in patch) agent[key] = patch[key];
+    for (const key of ['role', 'colour', 'provider', 'model', 'thinking', 'brief', 'examples', 'budget', 'proactivity']) if (key in patch) agent[key] = patch[key];
     if (patch.abilities) Object.assign(agent.abilities, patch.abilities);
     if (patch.apps) {
       // Like the runtime: each app picked gets an ask-first rule for anything that changes something.
@@ -778,6 +818,34 @@ export const mock = {
     const agent = need(name);
     agent.routines = agent.routines.filter((r) => r.id !== id);
     changed();
+  },
+
+  async addSkill(name, text) {
+    const agent = need(name);
+    const skill = parseSkill(text);
+    state.skills ||= [];
+    if (state.skills.some((s) => s.owner === name && s.name === skill.name)) throw new Error(`${name} already has a skill called ${skill.name}.`);
+    state.skills.push({ id: `s${Date.now()}`, owner: name, ...skill, sharedWith: [], uses: 0, lastUsed: null, createdAt: Date.now() });
+    act(name, 'saved skill', skill.name);
+    changed();
+    return full(agent);
+  },
+
+  async updateSkill(name, id, { text, sharedWith } = {}) {
+    const agent = need(name);
+    const skill = (state.skills || []).find((s) => s.id === id && s.owner === name);
+    if (!skill) throw new Error(`${name} has no skill ${id}.`);
+    if (text !== undefined) Object.assign(skill, parseSkill(text));
+    if (sharedWith !== undefined) skill.sharedWith = sharedWith.includes('*') ? ['*'] : sharedWith.filter((n) => n !== name);
+    changed();
+    return full(agent);
+  },
+
+  async deleteSkill(name, id) {
+    const agent = need(name);
+    state.skills = (state.skills || []).filter((s) => !(s.id === id && s.owner === name));
+    changed();
+    return full(agent);
   },
 
   async changeNote(name, noteId, { text, kind } = {}) {

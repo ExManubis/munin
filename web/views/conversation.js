@@ -239,15 +239,25 @@ async function answerOption(agent, item, ctx) {
 }
 
 function approval(agent, item, ctx) {
-  const rows = [
-    ['once', 'Allow once', 'Just this once. Ask again next time.'],
-    ['always', 'Always allow', `Stop asking before ${agent.name} ${item.third || item.what}.`],
-    ['deny', 'Deny', `Don't ${item.what}. Tell ${agent.name} why below.`],
-  ];
+  const rows = item.skill
+    ? [
+      ['once', 'Save it', `Save this skill. Ask again for the next one.`],
+      ['always', 'Always allow', `Stop asking before ${agent.name} ${item.third || item.what}.`],
+      ['deny', "Don't save it", `Tell ${agent.name} why below.`],
+    ]
+    : [
+      ['once', 'Allow once', 'Just this once. Ask again next time.'],
+      ['always', 'Always allow', `Stop asking before ${agent.name} ${item.third || item.what}.`],
+      ['deny', 'Deny', `Don't ${item.what}. Tell ${agent.name} why below.`],
+    ];
   const head = [
     h('div', { class: 'label' }, `${agent.name} wants to ${item.what}`),
     h('div', { class: 'ask-target' }, item.target),
   ];
+  // A skill is on its card: what it's for, then the skill itself, so you read what you allow.
+  const skill = item.skill && item.status === 'open'
+    ? h('div', { class: 'quote skill-card' }, h('p', { class: 'hint' }, item.skill.description), markdown(item.skill.body))
+    : null;
   if (item.status !== 'open') {
     const decided = item.status === 'denied' ? 'deny' : item.status;
     const index = rows.findIndex(([d]) => d === decided);
@@ -266,6 +276,7 @@ function approval(agent, item, ctx) {
   }
   return h('div', { class: 'ask-card approval' },
     head,
+    skill,
     h('div', { class: 'options' }, rows.map(([decision, label, detail], i) => optionRow(i, { label, detail }, {
       onclick: () => decide(agent, item, decision, ctx),
     }))));

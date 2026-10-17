@@ -2,6 +2,8 @@
 // their steps, questions and approvals (docs/runtime-api.md). Runs are the tool calls from one
 // input to the agent's answer; munin's own entry kinds carry questions, approvals and actions.
 
+import { isQuiet } from './rhythm.js';
+
 const iso = (ms) => new Date(ms).toISOString();
 
 const textOf = (content) => (typeof content === 'string'
@@ -34,6 +36,7 @@ export function describeCall(name, args = {}) {
     case 'events': return 'Read what changed in the tracker';
     case 'wait_for_work': return `Waited for work in ${args.project}`;
     case 'open_worktree': return args.issue ? `Opened ${args.issue}` : 'Went back to its own folder';
+    case 'read_skill': return `Read the skill ${args.name}`;
     default: {
       const app = /^([a-z0-9_]+?)__(.+)$/.exec(name); // an app's tool: calendar__list_events
       const what = app ? `${app[1].replace(/_/g, ' ')}: ${app[2].replace(/_/g, ' ')}` : name.replace(/_/g, ' ');
@@ -43,7 +46,7 @@ export function describeCall(name, args = {}) {
 }
 
 // Tool calls that show as something else (a question card, an action line) aren't run steps.
-const quiet = (call) => ['ask_human', 'remember', 'change_note', 'forget_note'].includes(call.name) || (call.name === 'add_comment' && call.arguments?.ask_human);
+const quiet = (call) => ['ask_human', 'remember', 'change_note', 'forget_note', 'save_skill', 'set_expression'].includes(call.name) || (call.name === 'add_comment' && call.arguments?.ask_human);
 
 function resultDetail(message) {
   if (message.isError) return 'failed';
@@ -63,6 +66,10 @@ export function toItems(entries, { busy = false } = {}) {
   let run = null;
   let runs = 0;
   let working = null; // the issue the agent took and hasn't let go of yet
+  // munin's own inputs (rhythm.js): a heartbeat that comes to nothing leaves no trace, and a
+  // journal entry shows as a line rather than a message.
+  let heartbeat = null; // { from }: where the heartbeat's items start
+  let journal = false;
   const closeRun = (at) => {
     if (run) run.endedAt = iso(at);
     run = null;
@@ -84,6 +91,21 @@ export function toItems(entries, { busy = false } = {}) {
           if (text) items.push({ id, kind: 'message', from: 'agent', at: iso(at), text });
           items.push({ id: `${id}-failed`, kind: 'action', at: iso(at), verb: message.stopReason === 'aborted' ? 'stopped' : 'failed', object: first(message.errorMessage || '', 120) || null });
           if (run) run.status = 'stopped';
+          closeRun(at);
+          break;
+        }
+        if (message.stopReason !== 'toolUse' && heartbeat) {
+          const from = heartbeat.from;
+          heartbeat = null;
+          if (isQuiet(text) && !items.slice(from).some((i) => i.kind === 'question' || i.kind === 'approval')) {
+            items.length = from;
+            run = null;
+            break;
+          }
+        }
+        if (message.stopReason !== 'toolUse' && journal && text) {
+          journal = false;
+          items.push({ id, kind: 'action', at: iso(at), verb: 'wrote in its journal', object: first(text.split(/(?<=[.!?])\s/)[0], 140), journal: text });
           closeRun(at);
           break;
         }
@@ -121,7 +143,7 @@ export function toItems(entries, { busy = false } = {}) {
         break;
       }
       case 'munin.approval': {
-        const item = { id, kind: 'approval', at: iso(entry.data.at), permission: entry.data.rule, label: entry.data.label, what: entry.data.what, third: entry.data.third, target: entry.data.target, status: 'open', answeredAt: null, undoUntil: null };
+        const item = { id, kind: 'approval', at: iso(entry.data.at), permission: entry.data.rule, label: entry.data.label, what: entry.data.what, third: entry.data.third, target: entry.data.target, skill: entry.data.skill || null, status: 'open', answeredAt: null, undoUntil: null };
         byApproval.set(id, item);
         items.push(item);
         break;
@@ -155,6 +177,17 @@ export function toItems(entries, { busy = false } = {}) {
         }
         break;
       }
+      case 'munin.heartbeat':
+        closeRun(entry.data.at);
+        heartbeat = { from: items.length };
+        break;
+      case 'munin.journal':
+        closeRun(entry.data.at);
+        journal = true;
+        break;
+      case 'munin.decided':
+        closeRun(entry.data.at); // what munin told the agent about a decision: the card shows it
+        break;
       default:
         break; // system, compaction and reset entries don't show
     }
@@ -175,6 +208,9 @@ export function summarize(items, { busy, paused }) {
   else if (busy) state = 'working';
   else if (open.length) state = 'asks';
   let preview = lastMessage ? first(lastMessage.text, 140) : 'Say hello.';
+  // Idle since its journal entry, the sidebar shows that.
+  const wrote = [...items].reverse().find((i) => i.kind === 'action' && i.verb === 'wrote in its journal');
+  if (wrote && (!lastMessage || wrote.at > lastMessage.at)) preview = wrote.object;
   if (open.length) {
     const last = open[open.length - 1];
     preview = last.kind === 'approval' ? `Wants to ${last.what}: ${last.target}` : first(last.text, 140);

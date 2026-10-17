@@ -1,5 +1,6 @@
 // An agent's profile: its brief and how it talks, its model, what it can reach, what it asks
-// first, its routines, what it has done in the tracker, what it remembers, and what it costs.
+// first, its routines and whether it speaks up on its own, its skills, what it has done in the
+// tracker, its journal, what it remembers, and what it costs.
 
 import { api } from '../api.js';
 import { runtime } from '../runtime/index.js';
@@ -27,6 +28,7 @@ export const view = {
 
   leave() {
     allNotes = false;
+    allEntries = false;
     search = searchState();
   },
 
@@ -45,7 +47,10 @@ export const view = {
         abilities(agent, apps, set, ctx),
         askFirst(agent, set),
         routines(agent, ctx),
+        speakingUp(agent, set),
+        skills(agent, ctx),
         trackRecord(agent, record),
+        journal(agent, ctx),
         memory(agent, ctx),
         usage(agent, set)));
   },
@@ -368,6 +373,140 @@ async function runNow(agent, routine, ctx) {
   ctx.reload();
 }
 
+// Whether the agent speaks up without being asked (runtime/src/rhythm.js): every couple of hours,
+// in the day, munin checks in, and the agent says something only when it's worth it.
+const PROACTIVITY = [
+  ['off', 'Only when asked', 'It talks when you talk to it, and when its routines run.'],
+  ['matters', 'When it matters', 'Every couple of hours, 08–21, it looks around and tells you what you need to know soon. Usually it says nothing.'],
+  ['chatty', 'Chatty', 'Every couple of hours, 08–21, it shares something when it has something: a thought, a question, a find. It waits for your answer before it does again.'],
+];
+
+function speakingUp(agent, set) {
+  const current = PROACTIVITY.find(([id]) => id === agent.proactivity) || PROACTIVITY[0];
+  return section('Speaking up', `Whether ${agent.name} starts a conversation on its own. It counts towards its budget.`,
+    h('div', { class: 'select-row' },
+      select(PROACTIVITY.map(([id, label]) => [id, label]), current[0], 'Speaking up', (value) => set({ proactivity: value }, value === 'off' ? `${agent.name} only talks when asked.` : `${agent.name} speaks up ${value === 'chatty' ? 'when it has something' : 'when it matters'}.`))),
+    h('p', { class: 'hint' }, current[2]));
+}
+
+// What the agent writes at the end of a day it worked: what it did, what it learned and what's
+// still open (runtime/src/rhythm.js). Newest first.
+let allEntries = false;
+function journal(agent, ctx) {
+  const entries = agent.journal || [];
+  const day = (at) => new Date(at).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  return section('Journal', entries.length ? `What ${agent.name} writes at the end of a day it worked.` : null,
+    entries.length
+      ? h('div', { class: 'journal' }, (allEntries ? entries : entries.slice(0, 3)).map((e) => h('div', { class: 'journal-entry' },
+        h('span', { class: 'mono muted journal-day' }, day(e.at)),
+        h('p', {}, e.text))))
+      : h('p', { class: 'hint' }, `Nothing yet. At the end of a day it worked, ${agent.name} writes what it did, what it learned and what's still open.`),
+    entries.length > 3
+      ? h('button', { type: 'button', class: 'link', onclick: () => { allEntries = !allEntries; ctx.rerender(); } }, allEntries ? 'Show fewer' : 'View all')
+      : null);
+}
+
+// What the agent knows how to do here (runtime/src/skills.js): its own skills, which it saves as
+// it learns and you approve, and the ones other agents share with it. You can write, change,
+// share and delete its own; another agent's are changed on that agent's profile.
+function skills(agent, ctx) {
+  const asks = agent.askFirst.some((r) => r.id === 'skills' && r.on);
+  const used = (s) => (s.stale ? 'Not used in a month' : s.uses ? `Used ${s.uses} time${s.uses === 1 ? '' : 's'} · ${ago(s.lastUsed)}` : 'Not used yet');
+  const shared = (s) => (s.sharedWith.includes('*') ? 'shared with everyone' : s.sharedWith.length ? `shared with ${list(s.sharedWith)}` : null);
+  return section('Skills', `How ${agent.name} does things here, learned from its work.${asks ? ' It asks you before it saves one.' : ''}`,
+    agent.skills?.length
+      ? h('div', { class: 'routine-list' }, agent.skills.map((s) => h('div', { class: ['routine', s.stale && 'stale'] },
+        h('div', { class: 'routine-main' },
+          h('div', { class: 'routine-name' }, h('span', { class: 'mono' }, s.name),
+            s.mine ? (shared(s) ? h('span', { class: 'mono muted' }, shared(s)) : null) : h('span', { class: 'mono muted' }, `${s.owner}'s`)),
+          h('div', { class: 'hint' }, s.description)),
+        h('span', { class: 'mono muted routine-when' }, used(s)),
+        s.mine ? h('button', { type: 'button', class: 'link', onclick: () => shareSkill(agent, s, ctx) }, 'Share') : null,
+        h('button', { type: 'button', class: 'link', onclick: () => editSkill(agent, s, ctx) }, s.mine ? 'Edit' : 'Read'))))
+      : h('p', { class: 'hint' }, `None yet. ${agent.name} saves one when it learns how to do something it'll do again, or write one yourself.`),
+    h('button', { type: 'button', class: 'btn small', onclick: () => editSkill(agent, null, ctx) }, 'Write a skill'));
+}
+
+const SKILL_TEMPLATE = `---
+name: 
+description: 
+---
+
+## When to use
+
+## Steps
+
+## Pitfalls
+
+## How to check
+`;
+
+// A skill as its SKILL.md, the format Claude Code reads too. Another agent's skill is read only.
+function editSkill(agent, skill, ctx) {
+  const mine = !skill || skill.mine;
+  const text = h('textarea', { class: 'textarea skill-text', value: skill?.text || SKILL_TEMPLATE, 'aria-label': 'Skill', spellcheck: false, readOnly: !mine });
+  const save = async (e) => {
+    e.preventDefault();
+    if (!mine) return closeDialog();
+    try {
+      await (skill ? runtime.updateSkill(agent.name, skill.id, { text: text.value }) : runtime.addSkill(agent.name, text.value));
+      toast(skill ? 'Saved the skill.' : `${agent.name} has a new skill.`);
+      closeDialog();
+      ctx.reload();
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  };
+  const remove = async () => {
+    if (!confirm(`Delete the skill ${skill.name}?${skill.sharedWith.length ? ' The agents it\'s shared with lose it too.' : ''}`)) return;
+    await runtime.deleteSkill(agent.name, skill.id);
+    closeDialog();
+    ctx.reload();
+  };
+  openDialog(h('form', { class: 'sheet', onsubmit: save },
+    h('header', { class: 'sheet-head' }, h('div', { class: 'sheet-title' }, h('span', { class: 'label' }, skill ? (mine ? 'Edit skill' : `${skill.owner}'s skill`) : `New skill for ${agent.name}`)),
+      h('button', { type: 'button', class: 'close link', onclick: closeDialog }, 'Close')),
+    h('div', { class: 'sheet-body' },
+      h('p', { class: 'hint' }, mine ? 'A SKILL.md: its name and what it does up top, then when to use it, the steps, the pitfalls and how to check. Lessons, not logs: no issue ids or dates.' : `Shared with ${agent.name} by ${skill.owner}. Change it on ${skill.owner}'s profile.`),
+      text),
+    h('footer', { class: 'sheet-foot' },
+      skill && mine ? h('button', { type: 'button', class: 'link', onclick: remove }, 'Delete') : h('span'),
+      mine ? h('button', { type: 'submit', class: 'btn primary' }, skill ? 'Save' : 'Add skill') : h('button', { type: 'button', class: 'btn primary', onclick: closeDialog }, 'Done'))), text, 'small');
+}
+
+// Who else has one of the agent's skills: every agent, or the ones you pick.
+function shareSkill(agent, skill, ctx) {
+  const others = store.runtimeAgents.map((a) => a.name).filter((n) => n !== agent.name);
+  let everyone = skill.sharedWith.includes('*');
+  const chosen = new Set(skill.sharedWith.filter((n) => n !== '*'));
+  const rows = others.map((name) => h('label', { class: 'app-pick' },
+    h('input', { type: 'checkbox', checked: everyone || chosen.has(name), disabled: everyone, onchange: (e) => (e.target.checked ? chosen.add(name) : chosen.delete(name)) }),
+    h('span', {}, name)));
+  const all = h('label', { class: 'app-pick' },
+    h('input', {
+      type: 'checkbox',
+      checked: everyone,
+      onchange: (e) => {
+        everyone = e.target.checked;
+        for (const box of rows.map((r) => r.querySelector('input'))) Object.assign(box, { disabled: everyone, checked: everyone || chosen.has(box.nextSibling.textContent) });
+      },
+    }),
+    h('span', {}, 'Every agent, now and later'));
+  const save = async (e) => {
+    e.preventDefault();
+    await runtime.updateSkill(agent.name, skill.id, { sharedWith: everyone ? ['*'] : [...chosen] });
+    closeDialog();
+    ctx.reload();
+  };
+  openDialog(h('form', { class: 'sheet', onsubmit: save },
+    h('header', { class: 'sheet-head' }, h('div', { class: 'sheet-title' }, h('span', { class: 'label' }, `Share ${skill.name}`)),
+      h('button', { type: 'button', class: 'close link', onclick: closeDialog }, 'Close')),
+    h('div', { class: 'sheet-body' },
+      h('p', { class: 'hint' }, `Agents you share it with see it among their skills and read it when it fits. Only ${agent.name} changes it.`),
+      h('div', { class: 'app-picks' }, all, rows)),
+    h('footer', { class: 'sheet-foot' }, h('span'), h('button', { type: 'submit', class: 'btn primary' }, 'Save'))), null, 'small');
+}
+
 // What the agent has done in the tracker: what it shipped, how often its work came back from
 // review, what it reviewed for others and where it works. For an agent that isn't in the
 // tracker and has done nothing there, nothing.
@@ -410,7 +549,7 @@ function memory(agent, ctx) {
 
 // A note, which turns into a field to change it: Return saves, Escape doesn't.
 function noteRow(agent, note, ctx) {
-  const text = h('span', { class: 'note-text' }, note.text);
+  const text = h('span', { class: 'note-text' }, note.about ? [h('span', { class: 'mono muted' }, `${note.about} · `), note.text] : note.text);
   const row = h('li', { class: 'note' }, text,
     h('span', { class: 'note-actions' },
       h('button', {

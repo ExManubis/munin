@@ -1,11 +1,14 @@
 // A small Markdown subset for text agents write: paragraphs, line breaks, `code`,
-// fenced code blocks, **bold**, *italic*, bullet lists, > quotes and http(s) links.
+// fenced code blocks, **bold**, *italic*, headings, bullet and numbered lists, > quotes and
+// http(s) links.
 // It builds DOM nodes directly, so raw HTML in the text only ever shows up as text.
 
 import { h } from './ui.js';
 
 const FENCE = /^\s*(`{3,}|~{3,})/;
 const BULLET = /^\s*[-*+]\s+/;
+const NUMBERED = /^\s*\d+[.)]\s+/;
+const HEADING = /^\s*#{1,6}\s+/;
 const QUOTE = /^\s*>\s?/;
 
 export function markdown(text, cls) {
@@ -27,18 +30,22 @@ export function markdown(text, cls) {
       const quoted = [];
       while (i < lines.length && QUOTE.test(lines[i])) quoted.push(lines[i++].replace(QUOTE, ''));
       root.append(h('blockquote', {}, inline(quoted.join('\n'))));
-    } else if (BULLET.test(line)) {
-      const list = h('ul');
-      while (i < lines.length && BULLET.test(lines[i])) {
-        let item = lines[i++].replace(BULLET, '');
+    } else if (HEADING.test(line)) {
+      // A heading reads as a short bold line; a message isn't a document with sections.
+      root.append(h('p', { class: 'md-h' }, inline(lines[i++].replace(HEADING, '').replace(/\s+#+\s*$/, ''))));
+    } else if (BULLET.test(line) || NUMBERED.test(line)) {
+      const marker = BULLET.test(line) ? BULLET : NUMBERED;
+      const list = h(marker === BULLET ? 'ul' : 'ol');
+      while (i < lines.length && marker.test(lines[i])) {
+        let item = lines[i++].replace(marker, '');
         // Indented lines that follow belong to the same item.
-        while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !BULLET.test(lines[i])) item += `\n${lines[i++].trim()}`;
+        while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !marker.test(lines[i])) item += `\n${lines[i++].trim()}`;
         list.append(h('li', {}, inline(item)));
       }
       root.append(list);
     } else {
       const para = [];
-      while (i < lines.length && lines[i].trim() && !FENCE.test(lines[i]) && !BULLET.test(lines[i]) && !QUOTE.test(lines[i])) para.push(lines[i++]);
+      while (i < lines.length && lines[i].trim() && !FENCE.test(lines[i]) && !BULLET.test(lines[i]) && !NUMBERED.test(lines[i]) && !QUOTE.test(lines[i]) && !HEADING.test(lines[i])) para.push(lines[i++]);
       root.append(h('p', {}, inline(para.join('\n'))));
     }
   }

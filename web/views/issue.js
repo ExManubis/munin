@@ -1,7 +1,10 @@
-// One issue: title and description (editable), status and assignee, what it waits for and
-// blocks, and one timeline of comments and history.
+// One issue: title and description (editable), status and assignee, what one of munin's own
+// agents is doing on it right now, what it waits for and blocks, and one timeline of comments
+// and history.
 
 import { withCosts, dollars } from '../runtime/costs.js';
+import { liveWork } from '../runtime/live.js';
+import { hhmm } from './agents.js';
 import { api } from '../api.js';
 import { store, liveAgents, displayName, quietAgent } from '../store.js';
 import { markdown } from '../markdown.js';
@@ -21,15 +24,15 @@ export const view = {
 
   async load({ id }) {
     const issue = await api.issue(id);
-    await withCosts([issue]);
-    return { issue };
+    const [, live] = await Promise.all([withCosts([issue]), liveWork(issue)]);
+    return { issue, live };
   },
 
   leave() {
     picking = depError = releasing = null;
   },
 
-  render({ issue }, ctx) {
+  render({ issue, live }, ctx) {
     const project = store.projects.find((p) => p.key === issue.project);
     const open = openQuestions(issue);
     const asker = open.length ? open[open.length - 1].author : null;
@@ -57,6 +60,7 @@ export const view = {
               ? markdown(issue.description, 'description')
               : h('p', { class: 'muted description' }, 'No description.'),
           ],
+          live ? liveSection(live) : null,
           dependencies(issue, ctx),
           timeline(issue, open),
           reply(issue, asker, ctx),
@@ -71,6 +75,28 @@ export const view = {
     return true;
   },
 };
+
+// The agent at work: its latest run on this issue, last few steps, the current one marked.
+function liveSection({ agent, run }) {
+  const running = run?.status === 'running';
+  const steps = run ? run.steps.slice(-4) : [];
+  const last = run?.steps[run.steps.length - 1];
+  const conversation = `#/agents/${encodeURIComponent(agent)}`;
+  return h('section', { class: ['live-work', running && 'running'], 'aria-label': `What ${agent} is doing`, 'aria-live': 'polite' },
+    h('div', { class: 'live-head' },
+      agentAvatar(agent),
+      h('span', { class: 'live-who' }, running ? `${agent} is working on it` : run ? `${agent}'s last run on it` : `${agent} has it`),
+      run && !running ? time(run.endedAt || run.at, { cls: 'mono muted' }) : null,
+      h('span', { class: 'spacer' }),
+      h('a', { class: 'link', href: conversation }, 'Open the conversation')),
+    steps.length
+      ? h('ol', { class: 'run-steps' },
+        steps.map((step) => h('li', { class: ['run-step', running && step === last && 'now'] },
+          h('span', { class: 'run-step-time' }, running && step === last ? 'now' : hhmm(step.at)),
+          h('span', { class: 'run-step-text' }, step.text),
+          running && step === last ? h('span', { class: 'cursor', 'aria-hidden': 'true' }) : null)))
+      : h('p', { class: 'hint' }, 'Nothing run on it yet.'));
+}
 
 // Questions no human has replied to yet, like the server's inbox.
 function openQuestions(issue) {

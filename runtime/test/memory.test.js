@@ -15,12 +15,12 @@ import { MEMORY_KINDS } from '../../web/runtime/roles.js';
 const reply = (...content) => fauxAssistantMessage(content, { stopReason: content.some((c) => c.type === 'toolCall') ? 'toolUse' : 'stop' });
 const fill = (kind, n) => Array.from({ length: n }, (_, i) => ({ id: `f${i}`, kind, text: 'x'.repeat(100) }));
 
-test('notes come in three kinds, and notes from before kinds are about you', () => {
-  assert.deepEqual(Object.keys(KINDS), ['you', 'work', 'self']);
+test('notes come in four kinds, and notes from before kinds are about you', () => {
+  assert.deepEqual(Object.keys(KINDS), ['you', 'work', 'self', 'team']);
   assert.equal(kindOf({ text: 'Old note.' }), 'you');
   assert.equal(kindOf({ text: 'Odd.', kind: 'gossip' }), 'you');
   const notes = [{ id: 'a', text: 'Mikkel likes small PRs.' }, { id: 'b', kind: 'work', text: 'Tests: uv run pytest.' }];
-  assert.deepEqual(room(notes), { you: { used: 23, cap: KINDS.you.cap }, work: { used: 21, cap: KINDS.work.cap }, self: { used: 0, cap: KINDS.self.cap } });
+  assert.deepEqual(room(notes), { you: { used: 23, cap: KINDS.you.cap }, work: { used: 21, cap: KINDS.work.cap }, self: { used: 0, cap: KINDS.self.cap }, team: { used: 0, cap: KINDS.team.cap } });
 });
 
 test("the profile names the runtime's kinds, with the same room", () => {
@@ -35,7 +35,7 @@ test('a full kind turns a new note away and says how to make room', () => {
   assert.equal(more[0].kind, 'work', 'another kind still has room');
   assert.throws(() => addNote([], { kind: 'you', text: '   ' }), /Say what to remember/);
   assert.throws(() => addNote([], { kind: 'you', text: 'x'.repeat(301) }), /under 300 characters/);
-  assert.throws(() => addNote([], { kind: 'diary', text: 'Hi.' }), /about you, work or self, not diary/);
+  assert.throws(() => addNote([], { kind: 'diary', text: 'Hi.' }), /about you, work, self or team, not diary/);
 });
 
 test('making room: two notes said in one, then one forgotten, one at a time', () => {
@@ -115,5 +115,43 @@ test('an agent remembers in kinds, makes room itself, and you can change its not
   assert.equal(agent.memory.find((n) => n.id === work.id).kind, 'self');
   await assert.rejects(runtime.changeNote('forge', work.id, { text: 'x'.repeat(301) }), /under 300 characters/);
   await assert.rejects(runtime.changeNote('forge', 'nope', { text: 'Hi.' }), (err) => err.status === 404);
+  await runtime.close();
+});
+
+test("an agent keeps notes on a teammate, which show under them in its team, and go when the teammate does", async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'munin-memory-'));
+  const settings = { db: ':memory:', agentsDir: join(dir, 'agents'), ollamaUrl: null, user: 'Mikkel' };
+  const faux = fauxProvider({ provider: 'scripted', models: [{ id: 'model' }] });
+  const runtime = await openRuntime(settings, { models: await buildModels(settings, { extra: [faux.provider], env: {} }) });
+  await runtime.createAgent({ name: 'vera', role: 'reviewer', provider: 'scripted', model: 'model' });
+  await runtime.createAgent({ name: 'forge', role: 'coder', provider: 'scripted', model: 'model' });
+
+  const heard = [];
+  let prompt = '';
+  faux.setResponses([
+    reply(fauxToolCall('remember', { note: 'Skips edge-case tests.', kind: 'team' })),
+    reply(fauxToolCall('remember', { note: 'Skips edge-case tests; check them first.', kind: 'team', about: 'Forge' })),
+    (context) => {
+      heard.push(JSON.stringify(context.messages.findLast((m) => m.role === 'toolResult')));
+      return reply(fauxText('Noted.'));
+    },
+    (context) => {
+      prompt = JSON.stringify(context.messages.filter((m) => m.role === 'system'));
+      return reply(fauxText('Hi.'));
+    },
+  ]);
+  await runtime.send('vera', "Keep in mind that forge's PRs skip edge cases.");
+  await runtime.waitForIdle();
+  const vera = await runtime.agent('vera');
+  assert.deepEqual(vera.memory.map((n) => [n.kind, n.about, n.text]), [['team', 'forge', 'Skips edge-case tests; check them first.']], 'the first, without a teammate, was turned back');
+  assert.equal(vera.memoryRoom.team.used, 40);
+  await runtime.send('vera', 'Hi');
+  await runtime.waitForIdle();
+  assert.match(prompt, /- forge, a coder: takes issues, writes code and sends it to review\.\\n  Your note: Skips edge-case tests; check them first\. \[m\w+\]/);
+  assert.match(prompt, /Judge their work on evidence, not on how sure they sound\. Your team notes use 40 of 1,000 characters\./);
+  assert.doesNotMatch(prompt, /What you've noticed about your teammates/, 'team notes show in the team, not twice');
+
+  await runtime.deleteAgent('forge');
+  assert.deepEqual((await runtime.agent('vera')).memory, [], 'notes on a teammate go with it');
   await runtime.close();
 });

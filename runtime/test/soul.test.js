@@ -72,7 +72,7 @@ test("the team lists the other agents, what each does, what a coder last took, a
     { name: 'vera', role: 'reviewer', abilities: { code: true }, work: { issue: { id: 'MUN-45', title: 'Retry' }, detached: true } },
     { name: 'moss', role: 'companion', abilities: {}, paused: true },
   ]);
-  assert.deepEqual(text.split('\n').slice(1), [
+  assert.deepEqual(text.split('\n').slice(1, -1), [
     '- forge, a coder: takes issues, writes code and sends it to review. Last took MUN-46 · Stream tool output.',
     "- vera, a reviewer: reviews what the others send to review, and merges what's good.",
     '- moss, a companion: someone to talk to. Paused.',
