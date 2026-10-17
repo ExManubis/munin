@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fauxProvider, fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
 import { buildModels } from '../src/models.js';
 import { openRuntime } from '../src/runtime.js';
@@ -144,4 +144,26 @@ test("a reviewer opens someone's branch detached, a retake picks up the branch, 
   await turn('forge', ['open_worktree', {}], 'Home.');
   assert.match(heard.at(-1), /You're in your own folder again/);
   assert.equal((await runtime.agent('forge')).worksIn.branch, null);
+});
+
+test('a worktree from before agents had clones of their own moves into the agent\'s clone, uncommitted work and all', async (t) => {
+  const { dir, origin, settings, runtime, heard, coder, turn } = await setup(t);
+  await runtime.setRepo('MUN', { source: origin });
+  await coder('forge');
+  // How it was: forge's worktree belonged to munin's shared clone.
+  const hub = join(dir, 'repos', 'MUN');
+  const tree = join(settings.agentsDir, 'forge', 'MUN-5');
+  const branch = 'mun-5-retry-rate-limited-calls';
+  git(hub, 'worktree', 'add', '--quiet', '-b', branch, tree, 'origin/main');
+  await writeFile(join(tree, 'retry.txt'), 'retry\n');
+  git(tree, 'add', 'retry.txt');
+  git(tree, 'commit', '--quiet', '-m', 'Retry on 429');
+  await writeFile(join(tree, 'wip.txt'), 'half done\n');
+
+  await turn('forge', ['update_issue', { issue: 'MUN-5', status: 'in_progress' }], ['bash', { command: 'git status --porcelain; git log --format=%s' }], 'Back.');
+  assert.match(heard[0], new RegExp(`on ${branch}, as you left it\\. munin moved it into your own clone, and committed what you hadn't yet as "Work in progress"`));
+  assert.deepEqual(heard[1].trim().split('\n'), ['Work in progress, kept when munin moved this worktree', 'Retry on 429', 'Start'], 'nothing uncommitted, nothing lost');
+  assert.equal(readFileSync(join(tree, 'wip.txt'), 'utf8'), 'half done\n');
+  assert.equal(resolve(tree, git(tree, 'rev-parse', '--git-common-dir')), join(settings.agentsDir, 'forge', '.repos', 'MUN', '.git'), "it's forge's clone's now");
+  assert.ok(!git(hub, 'worktree', 'list').includes(tree), 'and not the shared clone\'s');
 });

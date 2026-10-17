@@ -44,12 +44,16 @@ function run(...args) {
   });
 }
 
+// What a container is made with; one with another layout is made again. 2: only the agent's folder.
+const LAYOUT = '2';
+
 // Docker is there and answers.
 export const dockerWorks = () => run('info', '--format', '{{.ServerVersion}}').then(() => true, () => false);
 
-// `agentsDir` and `reposDir` are mounted at their own paths, so worktrees and the runtime's
-// idea of each agent's folder hold inside the container too.
-export function createDockerSandbox({ image, network = null, agentsDir, reposDir }) {
+// The agent's own folder is all a container sees, mounted at its own path, so worktrees and the
+// runtime's idea of the folder hold inside it too. The agent's clones are in that folder
+// (workspace.js); munin's own clones and the other agents' folders aren't.
+export function createDockerSandbox({ image, network = null, agentsDir }) {
   // Containers are named after this munin, so two on one machine don't share them.
   const home = createHash('sha256').update(agentsDir).digest('hex').slice(0, 6);
   const nameOf = (agent) => `munin-${home}-${agent.name}`;
@@ -58,26 +62,29 @@ export function createDockerSandbox({ image, network = null, agentsDir, reposDir
   const connections = new Map(); // agent name → Connection
   const starting = new Map();
 
-  // The agent's container, running: started again if it stopped, made if it's gone.
+  // The agent's container, running: started again if it stopped, made if it's gone, and made
+  // again if it's from an older layout (one that mounted munin's clones too).
   function ensure(agent) {
     const name = nameOf(agent);
     if (starting.has(name)) return starting.get(name);
     const ready = (async () => {
-      const state = await run('inspect', '--format', '{{.State.Running}}', name).catch(() => null);
-      if (state === 'true') return name;
-      if (state === 'false') {
+      const found = await run('inspect', '--format', `{{.State.Running}} {{index .Config.Labels "munin.layout"}}`, name).catch(() => null);
+      const [state, layout] = found ? found.split(' ') : [null, null];
+      if (state && layout !== LAYOUT) {
+        await run('rm', '--force', name);
+      } else if (state === 'true') {
+        return name;
+      } else if (state === 'false') {
         await run('start', name);
         return name;
       }
       await mkdir(agent.folder, { recursive: true });
-      await mkdir(reposDir, { recursive: true });
       await run('run', '--detach', '--init', '--name', name,
-        '--label', `munin.agent=${agent.name}`, '--label', `munin.home=${home}`,
+        '--label', `munin.agent=${agent.name}`, '--label', `munin.home=${home}`, '--label', `munin.layout=${LAYOUT}`,
         ...(user ? ['--user', user] : []),
         ...(network ? ['--network', network] : []),
         '--env', `HOME=${agent.folder}`,
         '--volume', `${agent.folder}:${agent.folder}`,
-        '--volume', `${reposDir}:${reposDir}`,
         '--volume', `${daemon}:/usr/local/bin/pi-env:ro`,
         '--workdir', agent.folder,
         image, 'sleep', 'infinity');

@@ -242,6 +242,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       await enter(agent, opened, move);
       return `Your worktree for ${issue.id} is ready, and your shell and file tools work in it now: ${opened.folder}, on `
         + `${opened.fresh ? `a new branch, ${opened.branch}, from ${opened.base}` : `${opened.branch}, as you left it`}. `
+        + (opened.kept ? 'munin moved it into your own clone, and committed what you hadn\'t yet as "Work in progress"; amend or undo that as you like. ' : '')
         + "Commit your work there; the project's brief says how to deliver it.";
     } catch (err) {
       return `munin couldn't open a worktree for ${issue.id} (${err.message}), so you're still in ${agent.work?.folder || agent.folder}.`;
@@ -252,7 +253,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   // a shell that doesn't inherit the runtime's environment and its keys.
   const reposDir = settings.reposDir || join(dirname(settings.agentsDir), 'repos');
   const sandbox = settings.sandbox === 'docker'
-    ? createDockerSandbox({ image: settings.agentImage, network: settings.agentNetwork, agentsDir: settings.agentsDir, reposDir })
+    ? createDockerSandbox({ image: settings.agentImage, network: settings.agentNetwork, agentsDir: settings.agentsDir })
     : null;
   const passthrough = settings.agentEnv || [];
   // pi-durable's coding tools, under their own name so conversations keep selecting them, with
@@ -290,7 +291,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   for (const agent of Object.values(saved?.agents || {})) agents.set(agent.name, { ...structuredClone(agent), brief: upgradeBrief(agent.brief) });
   Object.assign(repos, structuredClone(saved?.repos || {}));
   Object.assign(prefs, structuredClone(saved?.prefs || {}));
-  workspace = createWorkspace({ dir: reposDir, repos });
+  workspace = createWorkspace({ dir: reposDir, agentsDir: settings.agentsDir, repos });
   tracker.connect(); // in the background: until the tracker answers, agents are told it's away
 
   async function saveAgents() {
