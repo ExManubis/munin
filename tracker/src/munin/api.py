@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from munin import agents as agent_svc
 from munin import issues as svc
+from munin import record as record_svc
 from munin.issues import Actor, Invalid
 from munin.push import PushError
 from munin.models import Agent, Comment, Event, Issue, Project, utcnow
@@ -142,6 +143,25 @@ class AgentOut(BaseModel):
 
 class NewAgentOut(AgentOut):
     token: str
+
+
+class ProjectShareOut(BaseModel):
+    key: str
+    issues: int
+
+
+class RecordOut(BaseModel):
+    """What an agent has done in the tracker (record.py), for its profile."""
+
+    name: str
+    shipped: int
+    sent_to_review: int
+    sent_back: int
+    reviewed: int
+    projects: list[ProjectShareOut]
+    last_shipped: IssueBriefOut | None
+    last_shipped_at: UTCDateTime | None
+    since: UTCDateTime | None
 
 
 def _project_out(project: Project, counts: dict[str, int]) -> ProjectOut:
@@ -516,6 +536,23 @@ def list_agents(s: DB) -> list[AgentOut]:
 def add_agent(body: AgentIn, s: DB) -> NewAgentOut:
     agent, token = agent_svc.add_agent(s, body.name)
     return NewAgentOut(**_agent_out(agent, []).model_dump(), token=token)
+
+
+@router.get("/agents/{name}/record")
+def agent_record(name: str, s: DB) -> RecordOut:
+    """What an agent has done in the tracker: any name, with or without a token here."""
+    r = record_svc.record(s, name)
+    return RecordOut(
+        name=r.name,
+        shipped=r.shipped,
+        sent_to_review=r.sent_to_review,
+        sent_back=r.sent_back,
+        reviewed=r.reviewed,
+        projects=[ProjectShareOut(key=key, issues=n) for key, n in r.projects],
+        last_shipped=_brief_out(r.last_shipped) if r.last_shipped else None,
+        last_shipped_at=r.last_shipped_at,
+        since=r.since,
+    )
 
 
 @router.delete("/agents/{name}")

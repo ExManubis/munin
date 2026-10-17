@@ -138,7 +138,7 @@ test('an agent remembers what it learns in later turns, until you make it forget
   await runtime.createAgent({ name: 'hugin', role: 'assistant', provider: 'scripted', model: 'model' });
   let prompt = '';
   faux.setResponses([
-    reply(fauxToolCall('remember', { note: 'Mikkel keeps his mornings free.' })),
+    reply(fauxToolCall('remember', { note: 'Mikkel keeps his mornings free.', kind: 'you' })),
     reply(fauxText('Noted.')),
     (context) => {
       prompt = JSON.stringify(context.messages.filter((m) => m.role === 'system')); // the system prompt, as providers see it

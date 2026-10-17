@@ -6,7 +6,7 @@ from munin import issues as svc
 from munin.app import create_app
 from munin.db import connect
 
-from conftest import CLAUDE
+from conftest import CLAUDE, CODEX
 
 
 def test_project_and_issue_round_trip(client):
@@ -174,3 +174,39 @@ def test_priority_over_the_api_and_for_issues_from_before(client, settings):
         db.execute("ALTER TABLE issues DROP COLUMN priority")
     with TestClient(create_app(settings), base_url="http://localhost") as again:
         assert [i["priority"] for i in again.get("/api/issues?project=MUN").json()] == ["normal", "normal"]
+
+
+def test_an_agents_record_says_what_it_shipped_reviewed_and_got_back(client, settings):
+    client.post("/api/projects", json={"key": "MUN", "name": "munin"})
+    client.post("/api/projects", json={"key": "WEB", "name": "site"})
+    for project, title in [("MUN", "Gateway"), ("MUN", "Stream"), ("WEB", "Landing"), ("MUN", "Codex's")]:
+        client.post("/api/issues", json={"project": project, "title": title})
+    with connect(settings.db_path)() as s:
+        for ref in ("MUN-1", "MUN-2", "WEB-1"):
+            svc.update_issue(s, CLAUDE, ref, status="in_progress")
+            svc.update_issue(s, CLAUDE, ref, status="in_review")
+        svc.update_issue(s, CODEX, "MUN-1", status="done")  # codex reviews and merges
+        svc.update_issue(s, CODEX, "MUN-2", status="todo")  # and sends one back
+        svc.update_issue(s, CLAUDE, "MUN-2", status="in_progress")
+        svc.update_issue(s, CLAUDE, "MUN-2", status="in_review")
+        svc.update_issue(s, CODEX, "MUN-2", status="done")
+        svc.update_issue(s, CODEX, "MUN-3", status="in_progress")
+        svc.update_issue(s, CODEX, "MUN-3", status="in_review")
+        svc.update_issue(s, CLAUDE, "MUN-3", status="done")  # claude-code reviews codex's
+
+    claude = client.get("/api/agents/claude-code/record").json()
+    assert {k: claude[k] for k in ("shipped", "sent_to_review", "sent_back", "reviewed")} == {
+        "shipped": 2,
+        "sent_to_review": 4,
+        "sent_back": 1,
+        "reviewed": 1,
+    }
+    assert claude["projects"] == [{"key": "MUN", "issues": 2}, {"key": "WEB", "issues": 1}]
+    assert claude["last_shipped"]["id"] == "MUN-2"
+    assert claude["since"] is not None
+
+    codex = client.get("/api/agents/codex/record").json()
+    assert (codex["shipped"], codex["reviewed"], codex["sent_back"]) == (1, 3, 0)
+
+    nobody = client.get("/api/agents/nobody/record").json()
+    assert (nobody["shipped"], nobody["projects"], nobody["last_shipped"], nobody["since"]) == (0, [], None, None)

@@ -843,6 +843,13 @@ button.option-card:hover { border-color: var(--text); }
 .profile-section > .btn.small { align-self: flex-start; }
 .notes { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 2px 0 2px 16px; border-left: 1px solid var(--line); list-style: none; }
 .note { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; color: var(--text-2); }
+.note-kind { display: flex; flex-direction: column; gap: 8px; }
+.note-kind + .note-kind { margin-top: 12px; }
+.note-kind-head { display: flex; align-items: baseline; gap: 12px; }
+.note-room.full { color: var(--text); }
+.note-text { flex: 1; }
+.note-input { flex: 1; min-width: 0; }
+.note-actions { display: flex; flex-shrink: 0; gap: 12px; }
 .forget { opacity: 0; }
 .note:hover .forget, .forget:focus-visible { opacity: 1; }
 @media (hover: none) { .forget { opacity: 1; } }

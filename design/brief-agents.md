@@ -429,3 +429,8 @@ forge  13:57
 - **HOW IT TALKS, under BRIEF, on the profile and on New agent.** A text area like the brief's with a few made-up exchanges that show how the agent sounds, where `You:` is you and the agent's lines carry its name. On New agent it fills in from the role, like the brief. It can be emptied.
 - **The brief is two paragraphs:** who the agent is, then how it works. Its lead reads "Who hugin is and how it works." Setup's portrait shows only the first paragraph.
 - **A reviewer starts on a different maker's model from your coders'** when one is offered, and New agent's hint says why.
+
+## Changed while giving agents memory and a track record (MUN-35)
+
+- **MEMORY is in three kinds,** each with a label in Plex Mono 11 caps and how full it is, `ABOUT YOU 620 / 1,500`, turning `#EDEDED` when the kind is full: about you, about the work, and about itself. Each note has tertiary `EDIT` and `FORGET` on hover; `EDIT` turns the note into a field (Return saves, Escape doesn't).
+- **TRACK RECORD, between ROUTINES and MEMORY,** as label/value rows like PROPERTIES: Shipped, Sent back, Reviewed, Works in and Last shipped, from the tracker. An agent with the Tracker ability that hasn't done anything there yet says so; one without it and with nothing in the tracker has no section.
