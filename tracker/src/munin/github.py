@@ -83,9 +83,10 @@ POLL_SECONDS = float(os.environ.get("MUNIN_GITHUB_POLL", "120"))
 def refresh(github: GitHub, sessions) -> int:
     """Ask GitHub about every linked pull request that may still change. Returns how many changed."""
     from munin import issues as svc
-    from munin.models import utcnow
+    from munin.models import Issue, utcnow
 
     changed = 0
+    finished: dict[int, list] = {}  # issue id → its pull requests that closed without merging
     with sessions() as s:
         for pull in svc.pulls_to_check(s):
             try:
@@ -93,10 +94,16 @@ def refresh(github: GitHub, sessions) -> int:
             except GitHubError:
                 continue
             if (found["state"], found["title"]) != (pull.state, pull.title):
+                if found["state"] in ("merged", "closed") and found["state"] != pull.state:
+                    finished.setdefault(pull.issue_id, [])
+                    if found["state"] == "closed":
+                        finished[pull.issue_id].append(pull)
                 pull.state, pull.title = found["state"], found["title"]
                 changed += 1
             pull.checked_at = utcnow()
         s.commit()
+        for issue_id, closed in finished.items():
+            svc.settle_pull_requests(s, s.get(Issue, issue_id), closed)
     return changed
 
 

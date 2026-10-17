@@ -547,6 +547,23 @@ def unlink_pull_request(s: Session, actor: Actor, ref: str, pull_id: int) -> Non
     s.commit()
 
 
+GITHUB = Actor("GitHub", "system")  # what the tracker does because of what GitHub says
+
+
+def settle_pull_requests(s: Session, issue: Issue, closed: list[PullRequest]) -> None:
+    """After GitHub said some of an issue's pull requests finished: a pull request closed without
+    merging gets a comment, and once none is open and one merged, the work is in, so it's done."""
+    for pull in closed:
+        add_comment(s, GITHUB, issue.ref, f"{pull.repo}#{pull.number} was closed without merging: {pull.url}")
+    states = [pr.state for pr in issue.pull_requests]
+    if issue.status in CLOSED_STATUSES or "merged" not in states or any(state in (None, "open") for state in states):
+        return
+    try:
+        update_issue(s, GITHUB, issue.ref, status="done")
+    except MuninError:
+        s.rollback()  # someone changed it just now; the next look settles it
+
+
 def pulls_to_check(s: Session) -> list[PullRequest]:
     """Linked pull requests that may still change: open, or never asked about."""
     statement = select(PullRequest).join(Issue).where(
