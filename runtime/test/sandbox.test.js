@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fauxProvider, fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
@@ -26,6 +26,12 @@ const imageThere = () => {
 const docker = (await dockerWorks()) && imageThere();
 const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.name=me', '-c', 'user.email=me@example.com', ...args], { cwd, encoding: 'utf8' }).trim();
 
+// A container a failed test left behind, gone; deleting the agent does this when the test passes.
+function removeContainers(agent) {
+  const ids = execFileSync('docker', ['ps', '-aq', '--filter', `label=munin.agent=${agent}`], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+  if (ids.length) execFileSync('docker', ['rm', '-f', ...ids], { stdio: 'ignore' });
+}
+
 async function fakeTracker() {
   const server = createServer(async (req, res) => {
     const chunks = [];
@@ -41,12 +47,16 @@ async function fakeTracker() {
   return { url: `http://127.0.0.1:${server.address().port}/mcp`, port: server.address().port, close: () => new Promise((resolve) => server.close(resolve)) };
 }
 
-async function setup(extra = {}) {
-  const dir = await mkdtemp(join(tmpdir(), 'munin-sandbox-'));
+// Everything a test opens is closed after it, pass or fail: a failed assertion used to leave
+// the runtime, the stand-in tracker and the agent's container running, and the file never finished.
+async function setup(t, extra = {}) {
+  // The real path: on a Mac the temp folder is behind a symlink, and a shell's pwd says the real one.
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'munin-sandbox-')));
   const settings = { db: ':memory:', agentsDir: join(dir, 'agents'), reposDir: join(dir, 'repos'), ollamaUrl: null, user: 'Mikkel', ...extra };
   const faux = fauxProvider({ provider: 'scripted', models: [{ id: 'model' }] });
   const models = await buildModels(settings, { extra: [faux.provider], env: {} });
   const runtime = await openRuntime(settings, { models, timers: false });
+  t.after(() => runtime.close());
   const heard = [];
   const seen = new Set();
   const turn = async (name, ...steps) => {
@@ -66,28 +76,29 @@ async function setup(extra = {}) {
   return { dir, settings, runtime, heard, turn };
 }
 
-test("a shell on this machine gets harmless variables and the ones you name, not the runtime's", async () => {
+test("a shell on this machine gets harmless variables and the ones you name, not the runtime's", async (t) => {
   const env = localShellEnv({ PATH: '/usr/bin', HOME: '/home/me', LC_ALL: 'C.UTF-8', OPENROUTER_API_KEY: 'sk-or', MUNIN_DB: '/x', GH_TOKEN: 'ghp' }, ['GH_TOKEN']);
   assert.deepEqual(Object.keys(env).sort(), ['GH_TOKEN', 'GIT_EDITOR', 'GIT_PAGER', 'GIT_TERMINAL_PROMPT', 'HOME', 'LC_ALL', 'PAGER', 'PATH']);
 
   process.env.OPENROUTER_API_KEY_TEST = 'sk-or-test';
   process.env.GH_TOKEN_TEST = 'ghp-test';
-  const { runtime, heard, turn } = await setup({ agentEnv: ['GH_TOKEN_TEST'] });
+  t.after(() => { delete process.env.OPENROUTER_API_KEY_TEST; delete process.env.GH_TOKEN_TEST; });
+  const { runtime, heard, turn } = await setup(t, { agentEnv: ['GH_TOKEN_TEST'] });
   await runtime.createAgent({ name: 'forge', role: 'coder', provider: 'scripted', model: 'model' });
   await turn('forge', ['bash', { command: 'echo key=${OPENROUTER_API_KEY_TEST:-none} gh=${GH_TOKEN_TEST:-none}; git --version > /dev/null && echo git' }], 'Done.');
   assert.equal(heard[0].text, 'key=none gh=ghp-test\ngit');
   assert.equal((await runtime.me()).sandbox, null);
-  delete process.env.OPENROUTER_API_KEY_TEST;
-  delete process.env.GH_TOKEN_TEST;
-  await runtime.close();
 });
 
-test('in a container, a coder reaches its own folder and nothing else of this machine', { skip: !docker && 'needs Docker and the image' }, async () => {
-  const { dir, settings, runtime, heard, turn } = await setup({ sandbox: 'docker', agentImage: IMAGE });
+test('in a container, a coder reaches its own folder and nothing else of this machine', { skip: !docker && 'needs Docker and the image' }, async (t) => {
+  const { dir, settings, runtime, heard, turn } = await setup(t, { sandbox: 'docker', agentImage: IMAGE });
+  t.after(() => removeContainers('forge'));
   const outside = join(dir, 'runtime-secret.txt');
   await writeFile(outside, 'the tracker database\n');
   const host = await fakeTracker(); // listens on this machine's 127.0.0.1
+  t.after(() => host.close());
   process.env.OPENROUTER_API_KEY_TEST = 'sk-or-test';
+  t.after(() => { delete process.env.OPENROUTER_API_KEY_TEST; });
   await runtime.createAgent({ name: 'forge', role: 'coder', provider: 'scripted', model: 'model' });
   assert.deepEqual((await runtime.me()).sandbox, { kind: 'docker', image: IMAGE });
   assert.equal((await runtime.agent('forge')).worksIn.sandbox, 'docker');
@@ -105,13 +116,11 @@ test('in a container, a coder reaches its own folder and nothing else of this ma
   assert.match(curl, /unreachable/, "this machine's 127.0.0.1 isn't the container's");
   assert.equal(pwd, join(settings.agentsDir, 'forge'));
   await runtime.deleteAgent('forge');
-  delete process.env.OPENROUTER_API_KEY_TEST;
-  await runtime.close();
-  await host.close();
 });
 
-test('in a container, a coder takes an issue and commits in its worktree', { skip: !docker && 'needs Docker and the image' }, async () => {
-  const { dir, settings, runtime, heard, turn } = await setup({ sandbox: 'docker', agentImage: IMAGE });
+test('in a container, a coder takes an issue and commits in its worktree', { skip: !docker && 'needs Docker and the image' }, async (t) => {
+  const { dir, settings, runtime, heard, turn } = await setup(t, { sandbox: 'docker', agentImage: IMAGE });
+  t.after(() => removeContainers('forge'));
   const origin = join(dir, 'origin');
   await mkdir(origin);
   git(origin, 'init', '--quiet', '-b', 'main');
@@ -120,6 +129,7 @@ test('in a container, a coder takes an issue and commits in its worktree', { ski
   git(origin, 'commit', '--quiet', '-m', 'Start');
   await runtime.setRepo('MUN', { source: origin });
   const tracker = await fakeTracker();
+  t.after(() => tracker.close());
   await runtime.createAgent({ name: 'forge', role: 'coder', provider: 'scripted', model: 'model', tracker: { url: tracker.url, token: 'tok-forge' } });
 
   await turn('forge',
@@ -132,6 +142,4 @@ test('in a container, a coder takes an issue and commits in its worktree', { ski
   const container = execFileSync('docker', ['ps', '--filter', 'label=munin.agent=forge', '--format', '{{.Names}}'], { encoding: 'utf8' }).trim().split('\n').find((n) => n.endsWith('-forge'));
   await runtime.deleteAgent('forge');
   assert.throws(() => execFileSync('docker', ['inspect', container], { stdio: 'ignore' }), 'deleting the agent removes its container');
-  await runtime.close();
-  await tracker.close();
 });

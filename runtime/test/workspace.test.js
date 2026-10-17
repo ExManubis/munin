@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fauxProvider, fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
@@ -35,8 +35,11 @@ async function fakeTracker() {
   return { url: `http://127.0.0.1:${server.address().port}/mcp`, close: () => new Promise((resolve) => server.close(resolve)) };
 }
 
-async function setup() {
-  const dir = await mkdtemp(join(tmpdir(), 'munin-workspace-'));
+// Everything a test opens is closed after it, pass or fail: a failed assertion used to leave
+// the runtime and the stand-in tracker running, and the test file never finished.
+async function setup(t) {
+  // The real path: on a Mac the temp folder is behind a symlink, and a shell's pwd says the real one.
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'munin-workspace-')));
   const origin = join(dir, 'origin');
   await mkdir(origin);
   git(origin, 'init', '--quiet', '-b', 'main');
@@ -50,6 +53,7 @@ async function setup() {
   const models = await buildModels(settings, { extra: [faux.provider], env: {} });
   const runtime = await openRuntime(settings, { models, timers: false });
   const tracker = await fakeTracker();
+  t.after(() => Promise.all([runtime.close(), tracker.close()]));
   const seen = new Set();
   const say = (...steps) => faux.setResponses(steps.map((step) => (context) => {
     // A moved folder adds a system message after the tool's answer, so look back for it.
@@ -71,8 +75,8 @@ async function setup() {
   return { dir, origin, settings, runtime, tracker, heard, coder, turn };
 }
 
-test('coders get a worktree per issue, on a branch named after it, and work side by side', async () => {
-  const { origin, settings, runtime, tracker, heard, coder, turn } = await setup();
+test('coders get a worktree per issue, on a branch named after it, and work side by side', async (t) => {
+  const { origin, settings, runtime, tracker, heard, coder, turn } = await setup(t);
   await assert.rejects(runtime.setRepo('MUN', { source: join(origin, 'nope') }), /no git repository/);
   assert.deepEqual(await runtime.setRepo('mun', { source: origin }), { project: 'MUN', source: origin, base: 'main' });
   assert.deepEqual(await runtime.repos(), [{ project: 'MUN', source: origin, base: 'main' }]);
@@ -97,12 +101,10 @@ test('coders get a worktree per issue, on a branch named after it, and work side
 
   await turn('forge', ['update_issue', { issue: 'WEB-1', status: 'in_progress' }], 'No repo.');
   assert.match(heard[4], /munin has no repository for WEB, so you're working in your own folder/);
-  await runtime.close();
-  await tracker.close();
 });
 
-test("a reviewer opens someone's branch detached, a retake picks up the branch, and merged worktrees go", async () => {
-  const { dir, origin, settings, runtime, tracker, heard, coder, turn } = await setup();
+test("a reviewer opens someone's branch detached, a retake picks up the branch, and merged worktrees go", async (t) => {
+  const { dir, origin, settings, runtime, tracker, heard, coder, turn } = await setup(t);
   await runtime.setRepo('MUN', { source: origin });
   await coder('forge');
   await coder('vera', 'reviewer');
@@ -142,6 +144,4 @@ test("a reviewer opens someone's branch detached, a retake picks up the branch, 
   await turn('forge', ['open_worktree', {}], 'Home.');
   assert.match(heard.at(-1), /You're in your own folder again/);
   assert.equal((await runtime.agent('forge')).worksIn.branch, null);
-  await runtime.close();
-  await tracker.close();
 });
