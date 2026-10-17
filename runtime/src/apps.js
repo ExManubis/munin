@@ -189,17 +189,21 @@ export async function openApps({ file, registry, onChange = () => {}, builtins =
     // A built-in app started or stopped answering (signing in or out of Google, say).
     changed: () => onChange(),
 
-    // The ask-first rule an app gets on an agent that has it: anything that changes something.
-    ruleFor: (id) => {
+    // The ask-first rules an app gets on an agent that has it: one for anything that changes
+    // something, or, for an app that sorts its tools by kind (Gmail), one per kind.
+    rulesFor: (id) => {
       const app = all().find((a) => a.id === id);
-      return app && { id: `app:${app.id}`, app: app.id, label: `${app.name}: sending, changing or deleting`, what: `do something in ${app.name}`, third: `does things in ${app.name}`, on: true };
+      if (!app) return [];
+      if (app.rules) return app.rules.map((rule) => ({ ...rule, id: `app:${app.id}:${rule.kind}`, app: app.id }));
+      return [{ id: `app:${app.id}`, app: app.id, label: `${app.name}: sending, changing or deleting`, what: `do something in ${app.name}`, third: `does things in ${app.name}`, on: true }];
     },
     // The agent's apps by id, picks from before apps were real included.
     idsFor: (agent) => picked(agent).map((app) => app.id),
-    // The tool behind a call's name, when it's one of `app`'s and changes something.
-    changing(app, name) {
+    // The tool behind a call's name, when it's one of `app`'s and changes something (of `kind`,
+    // for a rule that covers one kind).
+    changing(app, name, kind = null) {
       const spec = live.get(app)?.tools?.find((tool) => toolName(app, tool.name) === name);
-      return spec && changes(spec) ? spec : null;
+      return spec && changes(spec) && (!kind || spec.ask === kind) ? spec : null;
     },
 
     close() {

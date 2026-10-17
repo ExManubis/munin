@@ -868,7 +868,7 @@ export const mock = {
     return mock.google();
   },
   async googleSignIn() {
-    state.googleAccount = { email: 'mikkel@example.com', services: ['gmail', 'calendar'], working: true, problem: null };
+    state.googleAccount = { email: 'mikkel@example.com', services: ['gmail', 'calendar'], organise: true, working: true, problem: null };
     changed();
     return { url: `${location.pathname}?google=ok&message=${encodeURIComponent('Signed in with Google as mikkel@example.com.')}${location.hash}` };
   },

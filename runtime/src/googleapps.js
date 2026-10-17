@@ -1,13 +1,18 @@
 // Gmail and Google Calendar as apps that come with munin, on Google's regular APIs, with the
 // Google sign-in (google.js) for their token. Each tool says whether it only reads
-// (annotations.readOnlyHint), so the app's ask-first rule (apps.js) covers the rest: reading and
-// drafting go straight through; sending mail and changing the calendar ask you first.
+// (annotations.readOnlyHint) and, if it changes something, what kind of change (`ask`), so the
+// app's ask-first rules (apps.js) cover the rest. Gmail has one rule per kind: sending and the
+// bin ask you first, organising (labels, archive, read) doesn't. Calendar asks before any change.
 
 export const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
 export const CALENDAR = 'https://www.googleapis.com/calendar/v3';
 const MAX_THREADS = 10;
 const MAX_BODY = 8000;
 const MAX_TEXT = 20000;
+const MAX_BATCH = 50;
+// Labels Gmail keeps for itself that an agent can't set by name: the bin and spam have their
+// own way in (trash_threads), and the rest Gmail sets.
+const NOT_BY_NAME = ['TRASH', 'SPAM', 'SENT', 'DRAFT', 'CHAT'];
 
 const reads = { readOnlyHint: true };
 const changesThings = { readOnlyHint: false };
@@ -104,10 +109,30 @@ export function googleApps({ google, fetch = globalThis.fetch, gmail = GMAIL, ca
     return `${thread.id} · ${header(last, 'Date')} · from ${header(last, 'From')} · ${header(first, 'Subject') || '(no subject)'} (${thread.messages?.length || 1} ${thread.messages?.length === 1 ? 'message' : 'messages'})`;
   };
 
+  // Threads given as one id, a list, or ids separated by commas: at most 50.
+  const threadsOf = (threads) => {
+    const ids = [threads].flat().flatMap((t) => String(t || '').split(',')).map((t) => t.trim()).filter(Boolean);
+    if (!ids.length) throw new Error('Say which threads, by their ids from search_mail.');
+    if (ids.length > MAX_BATCH) throw new Error(`At most ${MAX_BATCH} threads at a time.`);
+    return [...new Set(ids)];
+  };
+  const canOrganise = () => {
+    if (!google.status().account?.organise) throw new Error('Organising mail needs one more permission from Google: sign in with Google again under Google in Settings.');
+  };
+  const modify = (ids, change, signal) => Promise.all(ids.map((id) => call(gmail, `/threads/${encodeURIComponent(id)}/modify`, { method: 'POST', body: change, signal })));
+  const threadsSchema = { type: 'string', description: 'Thread ids from search_mail, separated by commas' };
+
   const gmailApp = {
     id: 'gmail',
     name: 'Gmail',
     ready: ready('gmail', 'Gmail'),
+    // One ask-first rule per kind of change (apps.js), so sorting can go without asking while
+    // sending still asks.
+    rules: [
+      { kind: 'send', label: 'Gmail: sending mail', what: 'send mail', third: 'sends mail', on: true },
+      { kind: 'trash', label: 'Gmail: moving mail to the bin', what: 'move mail to the bin', third: 'moves mail to the bin', on: true },
+      { kind: 'organise', label: 'Gmail: labelling, archiving and marking read', what: 'organise your mail', third: 'organises your mail', on: false },
+    ],
     tools: [
       {
         name: 'search_mail',
@@ -153,10 +178,100 @@ export function googleApps({ google, fetch = globalThis.fetch, gmail = GMAIL, ca
         description: 'Send a mail from Gmail. Give the thread id to reply in a thread. munin asks first.',
         inputSchema: object({ to: string('Who to, like ann@example.com'), cc: string('Copy to, if anyone'), subject: string('The subject'), body: string('The text'), thread: string('A thread id, to reply in it') }, ['to', 'subject', 'body']),
         annotations: changesThings,
+        ask: 'send',
         async run(args, signal) {
           const reply = args.thread ? await replyHeaders(args.thread, signal) : {};
           const sent = await call(gmail, '/messages/send', { method: 'POST', body: { raw: rawMail({ ...args, ...reply }), ...(args.thread ? { threadId: args.thread } : {}) }, signal });
           return `Sent "${args.subject}" to ${args.to} (message ${sent.id}).`;
+        },
+      },
+      {
+        name: 'list_labels',
+        description: "Gmail's labels: yours, and the ones Gmail keeps (INBOX, UNREAD, STARRED, IMPORTANT).",
+        inputSchema: object({}),
+        annotations: reads,
+        async run(args, signal) {
+          const found = await call(gmail, '/labels', { signal });
+          const labels = (found?.labels || []).filter((l) => !NOT_BY_NAME.includes(l.id));
+          const mine = labels.filter((l) => l.type === 'user').map((l) => l.name).sort();
+          const gmails = labels.filter((l) => l.type !== 'user').map((l) => l.name).sort();
+          return `Yours: ${mine.join(', ') || 'none yet'}\nGmail's: ${gmails.join(', ')}`;
+        },
+      },
+      {
+        name: 'label_threads',
+        description: 'Add labels to threads and take others off, by name. A label that doesn\'t exist yet is made. Takes STARRED and IMPORTANT too.',
+        inputSchema: object({ threads: threadsSchema, add: string('Labels to add, separated by commas'), remove: string('Labels to take off, separated by commas') }, ['threads']),
+        annotations: changesThings,
+        ask: 'organise',
+        async run({ threads, add, remove }, signal) {
+          canOrganise();
+          const ids = threadsOf(threads);
+          const names = (list) => String(list || '').split(',').map((n) => n.trim()).filter(Boolean);
+          const adding = names(add);
+          const removing = names(remove);
+          if (!adding.length && !removing.length) throw new Error('Say which labels to add or take off.');
+          const refused = [...adding, ...removing].filter((n) => NOT_BY_NAME.includes(n.toUpperCase()));
+          if (refused.length) throw new Error(`${refused.join(', ')} can't be set by name. To move mail to the bin, use trash_threads.`);
+          const known = (await call(gmail, '/labels', { signal }))?.labels || [];
+          const find = (name) => known.find((l) => l.name.toLowerCase() === name.toLowerCase() || l.id === name.toUpperCase());
+          const made = [];
+          const idOf = async (name, create) => {
+            const label = find(name);
+            if (label) return label.id;
+            if (!create) return null;
+            const created = await call(gmail, '/labels', { method: 'POST', body: { name, labelListVisibility: 'labelShow', messageListVisibility: 'show' }, signal });
+            known.push(created);
+            made.push(name);
+            return created.id;
+          };
+          const addIds = [];
+          for (const name of adding) addIds.push(await idOf(name, true));
+          const removeIds = (await Promise.all(removing.map((name) => idOf(name, false)))).filter(Boolean);
+          await modify(ids, { addLabelIds: addIds, removeLabelIds: removeIds }, signal);
+          return [
+            `${ids.length} ${ids.length === 1 ? 'thread' : 'threads'}:${adding.length ? ` added ${adding.join(', ')}` : ''}${adding.length && removing.length ? ';' : ''}${removing.length ? ` took off ${removing.join(', ')}` : ''}.`,
+            made.length ? `Made the label${made.length === 1 ? '' : 's'} ${made.join(', ')}.` : null,
+          ].filter(Boolean).join(' ');
+        },
+      },
+      {
+        name: 'archive_threads',
+        description: 'Archive threads: out of the inbox, still in All Mail and searchable.',
+        inputSchema: object({ threads: threadsSchema }, ['threads']),
+        annotations: changesThings,
+        ask: 'organise',
+        async run({ threads }, signal) {
+          canOrganise();
+          const ids = threadsOf(threads);
+          await modify(ids, { removeLabelIds: ['INBOX'] }, signal);
+          return `Archived ${ids.length} ${ids.length === 1 ? 'thread' : 'threads'}.`;
+        },
+      },
+      {
+        name: 'mark_threads',
+        description: 'Mark threads read or unread.',
+        inputSchema: object({ threads: threadsSchema, read: { type: 'boolean', description: 'true for read, false for unread' } }, ['threads', 'read']),
+        annotations: changesThings,
+        ask: 'organise',
+        async run({ threads, read }, signal) {
+          canOrganise();
+          const ids = threadsOf(threads);
+          await modify(ids, read === false ? { addLabelIds: ['UNREAD'] } : { removeLabelIds: ['UNREAD'] }, signal);
+          return `Marked ${ids.length} ${ids.length === 1 ? 'thread' : 'threads'} ${read === false ? 'unread' : 'read'}.`;
+        },
+      },
+      {
+        name: 'trash_threads',
+        description: "Move threads to the bin. Gmail empties it after 30 days; until then they can come back. munin asks first.",
+        inputSchema: object({ threads: threadsSchema }, ['threads']),
+        annotations: changesThings,
+        ask: 'trash',
+        async run({ threads }, signal) {
+          canOrganise();
+          const ids = threadsOf(threads);
+          await Promise.all(ids.map((id) => call(gmail, `/threads/${encodeURIComponent(id)}/trash`, { method: 'POST', signal })));
+          return `Moved ${ids.length} ${ids.length === 1 ? 'thread' : 'threads'} to the bin.`;
         },
       },
     ],

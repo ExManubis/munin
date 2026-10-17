@@ -170,7 +170,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
           return { block: "You've reached your budget for this month, so munin has paused you. Don't call any more tools: say in a line or two where you got to, and stop." };
         }
         // An app's rule covers its tools that change something; the others match by tool and command.
-        const rule = agent?.askFirst.find((r) => r.on && (r.app ? apps.changing(r.app, call.name) : ruleMatches(r, call.name, call.arguments)));
+        const rule = agent?.askFirst.find((r) => r.on && (r.app ? apps.changing(r.app, call.name, r.kind) : ruleMatches(r, call.name, call.arguments)));
         if (!rule) return undefined;
         const allowed = agent.allowances.indexOf(rule.id);
         if (allowed >= 0) {
@@ -178,7 +178,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
           await saveAgents();
           return undefined;
         }
-        const target = rule.app ? describeAppCall(apps.changing(rule.app, call.name).name, call.arguments)
+        const target = rule.app ? describeAppCall(apps.changing(rule.app, call.name, rule.kind).name, call.arguments)
           : call.name === 'bash' ? String(call.arguments.command || '').slice(0, 160) : String(call.arguments.path || call.name);
         await write(agent, 'munin.approval', { rule: rule.id, label: rule.label, what: rule.what, third: rule.third, target });
         return { block: `${them({ start: true })} hasn't allowed this yet (${rule.label.toLowerCase()}). They've been asked; their answer comes as a message. Don't try again before it does.` };
@@ -328,12 +328,14 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     }
   };
 
-  // Each app an agent has gets an ask-first rule (apps.ruleFor), on until you turn it off; an
-  // app it no longer has, or that's gone, takes its rule with it.
+  // Each app an agent has gets its ask-first rules (apps.rulesFor), on or off as the app says
+  // until you change them; an app it no longer has, or that's gone, takes its rules with it, and
+  // so does a rule the app no longer has (Gmail's one rule became one per kind of change).
   function syncAppRules(agent) {
-    const ids = apps.idsFor(agent);
-    agent.askFirst = agent.askFirst.filter((rule) => !rule.app || ids.includes(rule.app));
-    for (const id of ids) if (!agent.askFirst.some((rule) => rule.app === id)) agent.askFirst.push(apps.ruleFor(id));
+    const wanted = apps.idsFor(agent).flatMap((id) => apps.rulesFor(id));
+    const ids = new Set(wanted.map((rule) => rule.id));
+    agent.askFirst = agent.askFirst.filter((rule) => !rule.app || ids.has(rule.id));
+    for (const rule of wanted) if (!agent.askFirst.some((r) => r.id === rule.id)) agent.askFirst.push(rule);
   }
 
   async function saveAgents() {

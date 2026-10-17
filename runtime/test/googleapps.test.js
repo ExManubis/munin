@@ -16,7 +16,7 @@ const b64 = (text) => Buffer.from(text, 'utf8').toString('base64url');
 const headers = (pairs) => Object.entries(pairs).map(([name, value]) => ({ name, value }));
 
 // Google's token endpoint, Gmail and Calendar, as far as munin uses them.
-async function fakeGoogle() {
+async function fakeGoogle({ modify = false } = {}) {
   const seen = []; // [method, path+query, body, authorization]
   let challenge = null;
   const threads = {
@@ -42,7 +42,7 @@ async function fakeGoogle() {
       const form = Object.fromEntries(new URLSearchParams(body));
       if (form.grant_type === 'authorization_code' && createHash('sha256').update(form.code_verifier).digest('base64url') === challenge) {
         return json(200, { access_token: 'access-1', refresh_token: 'refresh-1', expires_in: 3600, id_token: `x.${b64(JSON.stringify({ email: 'mikkel@example.com' }))}.y`,
-          scope: 'openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events' });
+          scope: `openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose${modify ? ' https://www.googleapis.com/auth/gmail.modify' : ''} https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events` });
       }
       return json(400, { error: 'invalid_grant' });
     }
@@ -52,6 +52,11 @@ async function fakeGoogle() {
     if (url.pathname === '/gmail/threads') return json(200, { threads: [{ id: 't1', snippet: 'Lunch on Friday at 12?' }, { id: 't2', snippet: 'Big news' }] });
     if ((m = /^\/gmail\/threads\/(\w+)$/.exec(url.pathname))) return threads[m[1]] ? json(200, threads[m[1]]) : json(404, { error: { message: 'Not Found' } });
     if (url.pathname === '/gmail/drafts') return json(200, { id: 'd1' });
+    if (url.pathname === '/gmail/labels' && req.method === 'GET') {
+      return json(200, { labels: [['INBOX', 'system'], ['UNREAD', 'system'], ['STARRED', 'system'], ['TRASH', 'system'], ['Label_9', 'user', 'Newsletters']].map(([id, type, name]) => ({ id, type, name: name || id })) });
+    }
+    if (url.pathname === '/gmail/labels' && req.method === 'POST') return json(200, { id: 'Label_1', type: 'user', name: JSON.parse(body).name });
+    if (/^\/gmail\/threads\/\w+\/(modify|trash)$/.test(url.pathname)) return json(200, {});
     if (url.pathname === '/gmail/messages/send') return json(200, { id: 's1' });
     if (url.pathname === '/calendar/calendars/primary/events' && req.method === 'GET') return json(200, { timeZone: 'Europe/Copenhagen', items: events });
     if (url.pathname === '/calendar/calendars/primary/events' && req.method === 'POST') return json(200, { id: 'e3', ...JSON.parse(body) });
@@ -86,7 +91,7 @@ test('Gmail and Google Calendar: reading and drafting go straight through, sendi
 
   await runtime.createAgent({ name: 'hugin', role: 'assistant', provider: 'scripted', model: 'model' });
   const agent = await runtime.updateAgent('hugin', { apps: ['gmail', 'google-calendar'] });
-  assert.deepEqual(agent.askFirst.map((r) => r.id), ['app:gmail', 'app:google-calendar']);
+  assert.deepEqual(agent.askFirst.map((r) => [r.id, r.on]), [['app:gmail:send', true], ['app:gmail:trash', true], ['app:gmail:organise', false], ['app:google-calendar', true]]);
 
   const heard = [];
   const turn = async (...steps) => {
@@ -120,11 +125,11 @@ test('Gmail and Google Calendar: reading and drafting go straight through, sendi
 
   // Sending asks first.
   await turn(['gmail__send_mail', { to: 'ann@example.com', subject: 'Lunch', body: 'Yes!' }], 'Asked.');
-  assert.match(heard.at(-1), /hasn't allowed this yet \(gmail: sending, changing or deleting\)/);
+  assert.match(heard.at(-1), /hasn't allowed this yet \(gmail: sending mail\)/);
   assert.equal(calls('/gmail/messages/send').length, 0, 'nothing sent');
   let { items } = await runtime.conversation('hugin');
   const approval = items.filter((i) => i.kind === 'approval').at(-1);
-  assert.deepEqual([approval.what, approval.target], ['do something in Gmail', 'send mail · to: ann@example.com · subject: Lunch · body: Yes!']);
+  assert.deepEqual([approval.what, approval.target], ['send mail', 'send mail · to: ann@example.com · subject: Lunch · body: Yes!']);
   faux.setResponses([
     () => fauxAssistantMessage([fauxToolCall('gmail__send_mail', { to: 'ann@example.com', subject: 'Lunch', body: 'Yes!' })], { stopReason: 'toolUse' }),
     (context) => { heard.push(context.messages.at(-1).content.map((c) => c.text).join('')); return fauxAssistantMessage([fauxText('Sent.')]); },
@@ -165,4 +170,81 @@ test('Gmail and Google Calendar: reading and drafting go straight through, sendi
   await runtime.send('hugin', 'Mail?');
   await runtime.waitForIdle();
   assert.equal(heard.at(-1), '', 'no Gmail tools once signed out');
+});
+
+test('organising Gmail: labels, archive and read go without asking, the bin asks first', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'munin-googleapps-'));
+  const google = await fakeGoogle({ modify: true });
+  t.after(() => google.close());
+  const settings = { db: ':memory:', agentsDir: join(dir, 'agents'), ollamaUrl: null, user: 'Mikkel' };
+  const faux = fauxProvider({ provider: 'scripted', models: [{ id: 'model' }] });
+  const runtime = await openRuntime(settings, { models: await buildModels(settings, { extra: [faux.provider], env: {} }), timers: false, google: google.google });
+  t.after(() => runtime.close());
+  await runtime.setGoogleClient(CLIENT);
+  const { url } = await runtime.googleSignIn({ services: ['gmail'], redirect: 'http://localhost:7779/runtime/api/google/callback' });
+  google.expect(url);
+  await runtime.googleFinish({ state: new URL(url).searchParams.get('state'), code: 'the-code' });
+  assert.equal((await runtime.google()).account.organise, true);
+  await runtime.createAgent({ name: 'hugin', role: 'assistant', provider: 'scripted', model: 'model' });
+  await runtime.updateAgent('hugin', { apps: ['gmail'] });
+
+  const heard = [];
+  const turn = async (call) => {
+    faux.setResponses([
+      () => fauxAssistantMessage([fauxToolCall(call[0], call[1])], { stopReason: 'toolUse' }),
+      (context) => { heard.push(context.messages.at(-1).content.map((c) => c.text).join('')); return fauxAssistantMessage([fauxText('Done.')]); },
+    ]);
+    await runtime.send('hugin', 'Go.');
+    await runtime.waitForIdle();
+    return heard.at(-1);
+  };
+  const changes = () => google.seen.filter(([method, at]) => method === 'POST' && at.startsWith('/gmail/')).map(([, at, body]) => [at, body && JSON.parse(body)]);
+
+  assert.equal(await turn(['gmail__list_labels', {}]), "Yours: Newsletters\nGmail's: INBOX, STARRED, UNREAD");
+  assert.equal(await turn(['gmail__label_threads', { threads: 't1, t2', add: 'Receipts, starred', remove: 'newsletters' }]),
+    '2 threads: added Receipts, starred; took off newsletters. Made the label Receipts.', 'no asking: sorting is off by default');
+  assert.deepEqual(changes(), [
+    ['/gmail/labels', { name: 'Receipts', labelListVisibility: 'labelShow', messageListVisibility: 'show' }],
+    ['/gmail/threads/t1/modify', { addLabelIds: ['Label_1', 'STARRED'], removeLabelIds: ['Label_9'] }],
+    ['/gmail/threads/t2/modify', { addLabelIds: ['Label_1', 'STARRED'], removeLabelIds: ['Label_9'] }],
+  ]);
+  assert.equal(await turn(['gmail__archive_threads', { threads: 't1' }]), 'Archived 1 thread.');
+  assert.deepEqual(changes().at(-1), ['/gmail/threads/t1/modify', { removeLabelIds: ['INBOX'] }]);
+  assert.equal(await turn(['gmail__mark_threads', { threads: 't2', read: false }]), 'Marked 1 thread unread.');
+  assert.deepEqual(changes().at(-1), ['/gmail/threads/t2/modify', { addLabelIds: ['UNREAD'] }]);
+  assert.match(await turn(['gmail__label_threads', { threads: 't1', add: 'TRASH' }]), /TRASH can't be set by name\. To move mail to the bin, use trash_threads/);
+  assert.match(await turn(['gmail__archive_threads', { threads: Array.from({ length: 51 }, (_, i) => `t${i}`).join(',') }]), /At most 50 threads at a time/);
+
+  // The bin asks first.
+  const before = changes().length;
+  assert.match(await turn(['gmail__trash_threads', { threads: 't2' }]), /hasn't allowed this yet \(gmail: moving mail to the bin\)/);
+  assert.equal(changes().length, before, 'nothing moved');
+  const { items } = await runtime.conversation('hugin');
+  const approval = items.filter((i) => i.kind === 'approval').at(-1);
+  assert.deepEqual([approval.what, approval.target], ['move mail to the bin', 'trash threads · threads: t2']);
+});
+
+test("without gmail.modify, Gmail still reads and drafts, and organising says to sign in again", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'munin-googleapps-'));
+  const google = await fakeGoogle();
+  t.after(() => google.close());
+  const settings = { db: ':memory:', agentsDir: join(dir, 'agents'), ollamaUrl: null, user: 'Mikkel' };
+  const faux = fauxProvider({ provider: 'scripted', models: [{ id: 'model' }] });
+  const runtime = await openRuntime(settings, { models: await buildModels(settings, { extra: [faux.provider], env: {} }), timers: false, google: google.google });
+  t.after(() => runtime.close());
+  await runtime.setGoogleClient(CLIENT);
+  const { url } = await runtime.googleSignIn({ services: ['gmail'], redirect: 'http://localhost:7779/runtime/api/google/callback' });
+  google.expect(url);
+  await runtime.googleFinish({ state: new URL(url).searchParams.get('state'), code: 'the-code' });
+  assert.equal((await runtime.apps()).find((a) => a.id === 'gmail').connected, true);
+  await runtime.createAgent({ name: 'hugin', role: 'assistant', provider: 'scripted', model: 'model' });
+  await runtime.updateAgent('hugin', { apps: ['gmail'] });
+  let heard = '';
+  faux.setResponses([
+    () => fauxAssistantMessage([fauxToolCall('gmail__archive_threads', { threads: 't1' })], { stopReason: 'toolUse' }),
+    (context) => { heard = context.messages.at(-1).content.map((c) => c.text).join(''); return fauxAssistantMessage([fauxText('Hm.')]); },
+  ]);
+  await runtime.send('hugin', 'Archive it.');
+  await runtime.waitForIdle();
+  assert.equal(heard, 'Organising mail needs one more permission from Google: sign in with Google again under Google in Settings.');
 });
