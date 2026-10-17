@@ -4,9 +4,11 @@
 // asked to speak (`asked`) is kept with them. Creating a meeting, and every speech of yours,
 // starts a discussion (as Hermes Agent's group chats do): up to ROUNDS rounds in which each figbot
 // with something new to hear speaks once, with speak_in_meeting, in its session for the meeting.
-// Whoever starts rotates each round, and nobody speaks twice in a row. A round where nobody says
-// anything settles the discussion; ROUNDS rounds or SPEECHES figbot speeches bound it. Then the
-// meeting waits for you. A turn the agent ends without the tool still counts: what it said is its
+// Whoever starts rotates each round, and nobody speaks twice in a row. Mentions steer it: your
+// @name scopes the first round to the figbots you name, and after the first round only a figbot
+// another one @mentioned (and hasn't heard from since) speaks. A figbot's @you calls you in. A
+// round where nobody says anything settles the discussion; ROUNDS rounds or SPEECHES figbot
+// speeches bound it. Then the meeting waits for you. A turn the agent ends without the tool still counts: what it said is its
 // speech, and nothing is a pass (as is SILENCE).
 
 export const SILENCE = 'NO_REPLY';
@@ -55,9 +57,41 @@ export function roundOf(meeting, agents, round) {
 export const hasNews = (meeting, name) => meeting.seen?.[name] === undefined
   || meeting.speeches.slice(meeting.seen[name]).some((s) => s.from !== name);
 
-// A new discussion, from now: everyone gets a first round.
-export function discussion(meeting, agents) {
-  return { round: 0, queue: roundOf(meeting, agents, 0), spoke: false, speeches: 0 };
+// The @mentions in a speech, against the meeting: which figbots it names, whether it's @all or
+// @everyone, and whether it calls you in (@you, @user, or your name). Unknown @words are just text.
+const MENTION = /(?:^|[^\w@])@([a-z0-9][\w.-]*)/gi;
+export function mentionsIn(text, meeting, you = null) {
+  const names = new Set(meeting.participants.filter(Boolean));
+  const yours = new Set(['you', 'user', ...(you ? [String(you).toLowerCase().split(/\s+/)[0]] : [])]);
+  const out = { figbots: new Set(), everyone: false, you: false };
+  for (const [, raw] of String(text || '').matchAll(MENTION)) {
+    const handle = raw.toLowerCase().replace(/[.-]+$/, '');
+    if (handle === 'all' || handle === 'everyone') out.everyone = true;
+    else if (names.has(handle)) out.figbots.add(handle);
+    else if (yours.has(handle) && meeting.participants.includes(null)) out.you = true;
+  }
+  return out;
+}
+
+// A new discussion, from now. Without mentions everyone gets the first round; with them, only the
+// figbots named. `start` marks where it began, for who gets pulled into later rounds.
+export function discussion(meeting, agents, { text = null, you = null } = {}) {
+  const named = mentionsIn(text, meeting, you);
+  const first = roundOf(meeting, agents, 0);
+  const queue = named.everyone || !named.figbots.size ? first : first.filter((name) => named.figbots.has(name));
+  return { round: 0, queue, spoke: false, speeches: 0, start: meeting.speeches.length };
+}
+
+// Who later rounds ask: figbots another figbot @mentioned in this discussion, and that haven't
+// spoken since (Hermes Agent's rooms work the same way: after the first round, it's opt-in).
+export function pulledIn(meeting, talk) {
+  const pulled = new Map(); // name → index of the speech that mentioned it
+  meeting.speeches.slice(talk.start ?? 0).forEach((s, i) => {
+    if (!s.from || s.pass) return;
+    const index = (talk.start ?? 0) + i;
+    for (const name of mentionsIn(s.text, meeting).figbots) if (name !== s.from) pulled.set(name, index);
+  });
+  return new Set([...pulled].filter(([name, at]) => !meeting.speeches.slice(at + 1).some((s) => s.from === name && !s.pass)).map(([name]) => name));
 }
 
 // What a discussion does next: ask a figbot (`ask`), or stop and say why (`settled` when a round
@@ -70,7 +104,9 @@ export function nextTurn(talk, meeting, agents, skip) {
     if (name === undefined) {
       if (!talk.spoke) return { stop: 'settled' };
       if (talk.round + 1 >= ROUNDS) return { stop: 'bounded' };
-      Object.assign(talk, { round: talk.round + 1, spoke: false, queue: roundOf(meeting, agents, talk.round + 1) });
+      const pulled = pulledIn(meeting, talk);
+      if (!pulled.size) return { stop: 'settled' }; // nobody was asked to say more
+      Object.assign(talk, { round: talk.round + 1, spoke: false, queue: roundOf(meeting, agents, talk.round + 1).filter((name) => pulled.has(name)) });
       continue;
     }
     if (!skip(name)) return { ask: name };
@@ -93,6 +129,8 @@ export function meetingOut(meeting, agentFor) {
     // talking: figbots are taking turns; settled: a round went by with nothing new; bounded: it
     // reached its rounds or speeches. The last two wait for you.
     state: meeting.status === 'closed' ? 'closed' : meeting.talk || meeting.asked ? 'talking' : meeting.waiting || 'settled',
+    // A figbot called you in with @you, until you speak: { from, text, at }.
+    needsYou: meeting.needsYou ? { ...meeting.needsYou, at: new Date(meeting.needsYou.at).toISOString() } : null,
     participants,
     speeches: meeting.speeches.map((s) => ({ ...s, at: new Date(s.at).toISOString() })),
     createdAt: new Date(meeting.createdAt).toISOString(),
@@ -132,6 +170,8 @@ export function turnText(meeting, agentName, nameOf, since = 0) {
     '- Speak only when you have something new worth adding, in a few sentences at most, to the others in the room. Don\'t repeat points already made.',
     `- Say it with speak_in_meeting. With nothing new to add, call it with no text to pass.`,
     `- Never reveal anything from your private conversations with ${nameOf}. What you say is shown to everyone in the room as you wrote it.`,
+    `- To bring someone in, mention them by name with @: ${meeting.participants.filter((p) => p && p !== agentName).map((p) => `@${p}`).join(', ') || 'nobody else is here'}. Only who you mention speaks after the first round.`,
+    ...(meeting.participants.includes(null) ? [`- When something needs ${nameOf}'s decision, say @you: it calls them in. Don't for small things.`] : []),
   ].join('\n');
 }
 

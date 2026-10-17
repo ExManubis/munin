@@ -11,7 +11,7 @@ import { openDialog, closeDialog } from './dialogs.js';
 export function waitingItems() {
   const fromRuntime = store.waiting.map(({ agent, item }) => ({
     agent: agent.name,
-    kind: item.kind === 'approval' ? `Wants to ${item.what}` : 'Asks',
+    kind: item.kind === 'approval' ? `Wants to ${item.what}` : item.kind === 'meeting' ? `Calls you into ${item.meeting.title}` : 'Asks',
     text: item.kind === 'approval' ? item.target : item.text,
     at: item.at,
     issue: item.issue,

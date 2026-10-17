@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { createFauxCore as fauxCore, createProvider, fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
 import { buildModels } from '../src/models.js';
 import { openRuntime } from '../src/runtime.js';
-import { roundOf, nextTurn, discussion, hasNews, turnText, parseMeeting, MeetingError, ROUNDS, SPEECHES } from '../src/meetings.js';
+import { roundOf, nextTurn, discussion, hasNews, mentionsIn, turnText, parseMeeting, MeetingError, ROUNDS, SPEECHES } from '../src/meetings.js';
 
 async function setup(options = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'munin-meetings-'));
@@ -57,14 +57,27 @@ test('a discussion settles on a silent round, and stops at its caps', () => {
   assert.deepEqual(nextTurn(talk, m, agents, never), { ask: 'hugin' });
   assert.deepEqual(nextTurn(talk, m, agents, never), { stop: 'settled' }, 'nobody spoke in the round');
 
-  const busy = discussion(m, agents);
+  const lively = meeting([{ from: null, text: 'Go.' }]);
+  const busy = discussion(lively, agents);
   const asked = [];
-  for (let turn = nextTurn(busy, m, agents, never); turn.ask; turn = nextTurn(busy, m, agents, never)) {
+  for (let turn = nextTurn(busy, lively, agents, never); turn.ask; turn = nextTurn(busy, lively, agents, never)) {
     asked.push(turn.ask);
-    busy.spoke = true; // everyone has something to say
+    const other = turn.ask === 'pip' ? 'hugin' : 'pip';
+    lively.speeches.push({ from: turn.ask, text: `@${other}, what do you think?` }); // each pulls the other in
+    Object.assign(busy, { spoke: true, speeches: busy.speeches + 1 });
   }
-  assert.equal(asked.length, ROUNDS * 2, `${ROUNDS} rounds of two`);
-  assert.deepEqual(nextTurn(busy, m, agents, never), { stop: 'bounded' });
+  // Round one asks both; after that only whoever was just pulled in and hasn't answered yet.
+  assert.deepEqual(asked, ['pip', 'hugin', 'pip', 'hugin'], `${ROUNDS} rounds`);
+  assert.deepEqual(nextTurn(busy, lively, agents, never), { stop: 'bounded' });
+
+  const once = meeting([{ from: null, text: 'Go.' }]);
+  const quiet = discussion(once, agents);
+  nextTurn(quiet, once, agents, never);
+  once.speeches.push({ from: 'pip', text: 'Done here.' });
+  quiet.spoke = true;
+  nextTurn(quiet, once, agents, never);
+  once.speeches.push({ from: 'hugin', text: 'Me too.' });
+  assert.deepEqual(nextTurn(quiet, once, agents, never), { stop: 'settled' }, 'nobody pulled anyone in: no second round');
 
   const chatty = { ...discussion(m, agents), speeches: SPEECHES };
   assert.deepEqual(nextTurn(chatty, m, agents, never), { stop: 'bounded' }, `${SPEECHES} speeches at most`);
@@ -153,13 +166,13 @@ test('a round where everyone passes settles the meeting, and you speaking starts
 test('you join in, and your speech lands attributed to you', async () => {
   const { runtime, faux, made } = await setup();
   await twoAgents(runtime, made);
-  faux.setResponses([...turn('After you.'), ...turn('Something small.')], 'a');
-  faux.setResponses([...turn('Agreed.'), ...turn('Sure.'), ...turn(null)], 'b');
+  faux.setResponses([...turn('After you.')], 'a');
+  faux.setResponses([...turn('Agreed.')], 'b');
   const meeting = await runtime.createMeeting({ title: 'Plans', participants: ['pip', 'hugin', null] });
   await runtime.waitForIdle();
-  // Your say, then the round goes on: pip, then hugin, then a pass and it waits.
-  faux.setResponses([...turn(null), ...turn(null)], 'a');
-  faux.setResponses([...turn(null)], 'b');
+  // Your say starts a new round: pip passes, hugin answers.
+  faux.setResponses([...turn(null)], 'a');
+  faux.setResponses([...turn('Sure.')], 'b');
   await runtime.speakInMeetingAsHuman(meeting.id, 'What shall we build?');
   await runtime.waitForIdle();
   const full = await runtime.meeting(meeting.id);
@@ -210,14 +223,14 @@ test('a lone agent and you take turns', async () => {
 test('a turn ended without speak_in_meeting still counts, and the meeting moves on', async () => {
   const { runtime, faux, made } = await setup();
   await twoAgents(runtime, made);
-  // pip answers in plain words, no tool; later it has nothing to say, in plain words too.
+  // pip answers in plain words, no tool; hugin pulls it back in, and it has nothing more, in plain words too.
   faux.setResponses([reply(fauxText('We should ship it.')), reply(fauxText('   ')), ...turn(null)], 'a');
-  faux.setResponses([...turn('Agreed.'), ...turn(null)], 'b');
+  faux.setResponses([...turn('Agreed, @pip anything else?'), ...turn(null)], 'b');
   const meeting = await runtime.createMeeting({ title: 'Ship?', participants: ['pip', 'hugin', null], first: 'Ship it?' });
   await runtime.waitForIdle();
   const full = await runtime.meeting(meeting.id);
   assert.deepEqual(full.speeches.slice(0, 4).map((s) => [s.from, s.pass ? 'pass' : s.text]),
-    [[null, 'Ship it?'], ['pip', 'We should ship it.'], ['hugin', 'Agreed.'], ['pip', 'pass']]);
+    [[null, 'Ship it?'], ['pip', 'We should ship it.'], ['hugin', 'Agreed, @pip anything else?'], ['pip', 'pass']]);
   assert.ok(!(await runtime.conversation('pip')).items.some((i) => i.kind === 'question'), 'nothing waits on you from it');
   await runtime.close();
 });
@@ -293,17 +306,16 @@ test("a meeting session doesn't hold the figbot's chats with you", async () => {
 test('a lively discussion stops after its rounds and waits for you, a quiet one settles', async () => {
   const { runtime, faux, made } = await setup();
   await twoAgents(runtime, made);
-  const talker = (name) => (context) => (context.messages.at(-1).role === 'user'
-    ? reply(fauxToolCall('speak_in_meeting', { text: `${name} has more.` })) : reply(fauxText('Said.')));
-  faux.setResponses(Array.from({ length: 20 }, () => talker('pip')), 'a');
-  faux.setResponses(Array.from({ length: 20 }, () => talker('hugin')), 'b');
+  const talker = (name, other) => (context) => (context.messages.at(-1).role === 'user'
+    ? reply(fauxToolCall('speak_in_meeting', { text: `${name} has more for @${other}.` })) : reply(fauxText('Said.')));
+  faux.setResponses(Array.from({ length: 20 }, () => talker('pip', 'hugin')), 'a');
+  faux.setResponses(Array.from({ length: 20 }, () => talker('hugin', 'pip')), 'b');
   const lively = await runtime.createMeeting({ title: 'Lively', participants: ['pip', 'hugin', null], first: 'Go.' });
   await runtime.waitForIdle();
   let full = await runtime.meeting(lively.id);
-  assert.equal(full.speeches.filter((s) => s.from).length, 6, 'three rounds of two');
+  assert.equal(full.speeches.filter((s) => s.from).length, 4, 'both, then each pulled back in, for three rounds');
   assert.equal(full.state, 'bounded');
-  // Round two would start with hugin, but hugin spoke last: nobody speaks twice in a row.
-  assert.deepEqual(full.speeches.slice(1).map((s) => s.from), ['pip', 'hugin', 'pip', 'hugin', 'pip', 'hugin']);
+  assert.deepEqual(full.speeches.slice(1).map((s) => s.from), ['pip', 'hugin', 'pip', 'hugin']);
 
   faux.setResponses([...turn(null), ...turn(null)], 'a');
   faux.setResponses([...turn(null)], 'b');
@@ -313,4 +325,36 @@ test('a lively discussion stops after its rounds and waits for you, a quiet one 
   assert.equal(full.state, 'settled', 'a silent round');
   assert.equal(full.speeches.slice(-2).every((s) => s.pass), true);
   await runtime.close();
+});
+
+test('your @mention picks who answers, a figbot pulls in another, and @you calls you in', async () => {
+  const { runtime, faux, made } = await setup();
+  await twoAgents(runtime, made);
+  faux.setResponses([...turn('Happy to. @hugin, can you check the budget?'), ...turn(null)], 'a');
+  faux.setResponses([...turn('It fits, but @you should decide on the venue.')], 'b');
+  const meeting = await runtime.createMeeting({ title: 'Offsite', participants: ['pip', 'hugin', null], first: '@pip, plan the offsite.' });
+  await runtime.waitForIdle();
+  const full = await runtime.meeting(meeting.id);
+  assert.deepEqual(full.speeches.map((s) => s.from), [null, 'pip', 'hugin'], 'only pip at first; hugin because pip asked');
+  assert.deepEqual([full.state, full.needsYou?.from], ['settled', 'hugin']);
+  const waiting = await runtime.waiting();
+  assert.deepEqual(waiting.map(({ agent, item }) => [agent.name, item.kind, item.meeting?.title]), [['hugin', 'meeting', 'Offsite']]);
+
+  faux.setResponses([...turn(null)], 'a');
+  faux.setResponses([...turn(null)], 'b');
+  await runtime.speakInMeetingAsHuman(meeting.id, 'The lake house.');
+  await runtime.waitForIdle();
+  assert.equal((await runtime.meeting(meeting.id)).needsYou, null);
+  assert.deepEqual(await runtime.waiting(), [], 'answered by speaking');
+  await runtime.close();
+});
+
+test('mentions are read against who is in the meeting', () => {
+  const m = meeting([]);
+  const found = mentionsIn('@pip and @Hugin, cc @nobody and mail@example.com', m, 'Mikkel');
+  assert.deepEqual([[...found.figbots], found.everyone, found.you], [['pip', 'hugin'], false, false]);
+  assert.equal(mentionsIn('@all of you', m).everyone, true);
+  assert.equal(mentionsIn('over to @Mikkel', m, 'Mikkel').you, true);
+  assert.equal(mentionsIn('@you decide', m).you, true);
+  assert.equal(mentionsIn('@you decide', { ...m, participants: ['pip', 'hugin'] }).you, false, "you're not in this one");
 });

@@ -81,6 +81,7 @@ export async function openPush({ file, subject = 'mailto:munin@localhost', send 
       const url = `#/agents/${encodeURIComponent(agent.name)}`;
       if (kind === 'question' && !data.trackerQuestion) return sendAll({ title: `${agent.name} asks`, body: firstLine(data.text), url, tag: `question-${agent.name}` });
       if (kind === 'approval') return sendAll({ title: `${agent.name} wants to ${data.what}`, body: firstLine(data.target), url, tag: `approval-${agent.name}` });
+      if (kind === 'meeting') return sendAll({ title: `${agent.name} calls you into "${data.title}"`, body: firstLine(data.text), url, tag: `meeting-${agent.name}` });
       if (kind === 'message' && !agent.abilities?.code) return sendAll({ title: agent.name, body: firstLine(data.text), url, tag: `message-${agent.name}` });
       return Promise.resolve(0);
     },
