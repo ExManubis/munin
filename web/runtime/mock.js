@@ -364,6 +364,7 @@ function full(agent) {
     examples: agent.examples || '',
     thinking: agent.thinking,
     proactivity: agent.proactivity || 'off',
+    soulHistory: (agent.soulHistory || [{ at: agent.createdAt, by: null, brief: agent.brief, examples: agent.examples || '' }]).map((v) => ({ ...v, at: iso(v.at) })),
     journal: (agent.journal || []).map((e) => ({ ...e, at: iso(e.at) })),
     abilities: { ...agent.abilities },
     apps: [...agent.apps],
@@ -738,7 +739,12 @@ export const mock = {
   // budget, askFirst ({ id: on }), and tracker ({ projects }).
   async updateAgent(name, patch) {
     const agent = need(name);
+    const soul = { brief: agent.brief, examples: agent.examples || '' };
     for (const key of ['role', 'colour', 'provider', 'model', 'thinking', 'brief', 'examples', 'budget', 'proactivity']) if (key in patch) agent[key] = patch[key];
+    if (agent.brief !== soul.brief || (agent.examples || '') !== soul.examples) {
+      agent.soulHistory = [{ at: Date.now(), by: 'you', why: patch.why || null, brief: agent.brief, examples: agent.examples || '' },
+        ...(agent.soulHistory || [{ at: agent.createdAt, by: null, ...soul }])].slice(0, 30);
+    }
     if (patch.abilities) Object.assign(agent.abilities, patch.abilities);
     if (patch.apps) {
       // Like the runtime: each app picked gets an ask-first rule for anything that changes something.

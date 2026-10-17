@@ -454,3 +454,8 @@ forge  13:57
 - **Expression shows state, or for a minute how the work is going** (Mikkel, 2026-10-17). An agent can set a passing expression with its `set_expression` tool, in one of Figbot's own poses: `excited` (until now the spare one), `happy` or `worried`. It shows wherever the agent's face does, then the face goes back to its status. Asking you something (`curious`) and being paused (`sleepy`) always win, so a face never hides that you're needed. Faces already blend into a new expression with a blink, so a passing one fades in and out the same way.
 - **It reads best at 36 px and up:** the conversation header, the profile and the ABOUT panel's big face. At 18 px the colour reads but the expression barely does, as before.
 
+## Changed while letting agents grow (MUN-38)
+
+- **A change an agent proposes to its brief or examples** is an approval card, `JUNO WANTS TO CHANGE WHO IT IS`, with what changes as the target (`its brief`, `how it talks`). Its reason is quoted, then the change word by word, under a `BRIEF` or `HOW IT TALKS` label: words taken out are struck through in `#7A7A7A`, and words put in are `#EDEDED` with a `#7A7A7A` underline. It has two rows, `Change it` and `Keep it as it is`, and no "always", because every change goes through you.
+- **HISTORY, under the brief on the profile:** a label with how many versions there are, then the newest four. Each shows when, who (`You`, the agent, munin), the reason in quotes, tertiary `WHAT CHANGED` (the diff from the version before) and `GO BACK`; the current version says `now`.
+

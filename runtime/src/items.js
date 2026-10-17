@@ -46,7 +46,7 @@ export function describeCall(name, args = {}) {
 }
 
 // Tool calls that show as something else (a question card, an action line) aren't run steps.
-const quiet = (call) => ['ask_human', 'remember', 'change_note', 'forget_note', 'save_skill', 'set_expression'].includes(call.name) || (call.name === 'add_comment' && call.arguments?.ask_human);
+const quiet = (call) => ['ask_human', 'remember', 'change_note', 'forget_note', 'save_skill', 'set_expression', 'propose_soul_change'].includes(call.name) || (call.name === 'add_comment' && call.arguments?.ask_human);
 
 function resultDetail(message) {
   if (message.isError) return 'failed';
@@ -143,7 +143,7 @@ export function toItems(entries, { busy = false } = {}) {
         break;
       }
       case 'munin.approval': {
-        const item = { id, kind: 'approval', at: iso(entry.data.at), permission: entry.data.rule, label: entry.data.label, what: entry.data.what, third: entry.data.third, target: entry.data.target, skill: entry.data.skill || null, status: 'open', answeredAt: null, undoUntil: null };
+        const item = { id, kind: 'approval', at: iso(entry.data.at), permission: entry.data.rule, label: entry.data.label, what: entry.data.what, third: entry.data.third, target: entry.data.target, skill: entry.data.skill || null, soul: entry.data.soul || null, status: 'open', answeredAt: null, undoUntil: null };
         byApproval.set(id, item);
         items.push(item);
         break;
