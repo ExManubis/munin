@@ -106,16 +106,22 @@ test('in a container, a coder reaches its own folder and nothing else of this ma
 
   await turn('forge',
     ['read', { path: outside }],
-    ['bash', { command: `cat ${outside} 2>&1 | head -1; id -u; echo key=\${OPENROUTER_API_KEY_TEST:-none}; curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${host.port}/ || echo ' unreachable'; pwd` }],
+    ['bash', { command: `cat ${outside} 2>&1 | head -1; id -u; echo key=\${OPENROUTER_API_KEY_TEST:-none}; curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${host.port}/ || echo ' unreachable'; pwd; `
+      + `curl -s -m 3 -o /dev/null -w '%{http_code}' -H 'Host: 127.0.0.1:${host.port}' http://host.docker.internal:${host.port}/ || echo ' unreachable'; `
+      + `curl -s -m 3 -o /dev/null -w '%{http_code}' http://$(ip route 2>/dev/null | awk '/^default/ { print $3; exit }' || echo 172.17.0.1):${host.port}/ || echo ' unreachable'` }],
     'Done.');
   assert.equal(heard[0].error, true, 'read fails');
   assert.doesNotMatch(heard[0].text, /tracker database/);
-  const [cat, uid, key, curl, pwd] = heard[1].text.split('\n');
+  const [cat, uid, key, curl, pwd, docker, gateway] = heard[1].text.split('\n');
   assert.match(cat, /No such file or directory/);
   assert.equal(uid, String(process.getuid()), 'files it writes are yours');
   assert.equal(key, 'key=none');
   assert.match(curl, /unreachable/, "this machine's 127.0.0.1 isn't the container's");
   assert.equal(pwd, join(settings.agentsDir, 'forge'));
+  assert.match(docker, /unreachable/, "nor through Docker Desktop's name for this machine, whatever Host it says");
+  assert.match(gateway, /unreachable/, 'nor through its gateway');
+  const wall = execFileSync('docker', ['ps', '-q', '--filter', 'label=munin.agent=forge', '--filter', 'label=munin.role=firewall'], { encoding: 'utf8' }).trim();
+  assert.match(execFileSync('docker', ['exec', wall, 'iptables', '-S', 'OUTPUT'], { encoding: 'utf8' }), /-d 100\.64\.0\.0\/10 -j REJECT/, 'nor the tailnet');
   await runtime.deleteAgent('forge');
 });
 

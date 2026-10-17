@@ -25,8 +25,8 @@ MUNIN_TRACKER_MCP=http://127.0.0.1:7777/mcp
 # Each coder in a container of its own. Use an image with your projects' tools in it.
 MUNIN_AGENT_SANDBOX=docker
 MUNIN_AGENT_IMAGE=buildpack-deps:bookworm-scm
-# Docker Desktop and OrbStack let containers reach this Mac's 127.0.0.1 through host.docker.internal,
-# so a coder could reach munin's own web API. "none" closes that, and the internet with it.
+# Each coder's container sits behind a firewall that blocks this Mac (host.docker.internal) and the
+# tailnet, where munin listens, but not the internet. "none" takes the internet away too.
 # MUNIN_AGENT_NETWORK=none
 
 # Variables from ~/.munin/secrets that agents' shells get, like a token to push with.
