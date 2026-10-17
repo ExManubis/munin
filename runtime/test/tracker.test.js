@@ -194,5 +194,6 @@ test("on the server, agents' tracker calls go to the tracker on this machine", a
 test('issue lines read back from the tracker', () => {
   assert.deepEqual(parseIssueLine('MUN-5 [in_review] Retry (and back off) (assignee: forge) (blocked by MUN-2)'),
     { id: 'MUN-5', status: 'in_review', title: 'Retry (and back off)', assignee: 'forge' });
+  assert.deepEqual(parseIssueLine('MUN-7 [todo] Fix the login (urgent) (assignee: forge)'), { id: 'MUN-7', status: 'todo', title: 'Fix the login', assignee: 'forge' }, 'a priority is no part of the title');
   assert.equal(parseIssueLine('No issues match.'), null);
 });

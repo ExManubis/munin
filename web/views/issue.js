@@ -7,7 +7,7 @@ import { markdown } from '../markdown.js';
 import { condense, describe, eventIcon } from '../history.js';
 import { issuePicker } from '../search.js';
 import {
-  h, kbd, MOD, avatar, agentAvatar, personAvatar, statusIcon, statusLabel, STATUSES, time, parseTime, topbar, bindDraft, drafts, onModEnter, toast, changeIssue, agentPrompts, onEnterSend, SEND_KEY,
+  h, kbd, MOD, PRIORITIES, avatar, agentAvatar, personAvatar, statusIcon, statusLabel, STATUSES, time, parseTime, topbar, bindDraft, drafts, onModEnter, toast, changeIssue, agentPrompts, onEnterSend, SEND_KEY,
 } from '../ui.js';
 
 let editing = null; // id of the issue whose title and description are being edited
@@ -312,6 +312,10 @@ function properties(issue, project, ctx) {
     STATUSES.map(([value, label]) => h('option', { value }, label)));
   status.value = issue.status;
   status.addEventListener('change', () => changeIssue(issue, { status: status.value }, ctx.reload));
+  const priority = h('select', { class: 'select', 'aria-label': 'Priority' },
+    PRIORITIES.map(([value, label]) => h('option', { value }, label)));
+  priority.value = issue.priority || 'normal';
+  priority.addEventListener('change', () => changeIssue(issue, { priority: priority.value }, ctx.reload));
 
   // Free text with suggestions. Empty means unassigned. The draft only lives while typing.
   const key = `assignee:${issue.id}`;
@@ -343,6 +347,7 @@ function properties(issue, project, ctx) {
   const prop = (label, ...value) => h('div', { class: 'prop' }, h('span', { class: 'prop-key' }, label), h('span', { class: 'prop-value' }, value));
   return h('aside', { class: 'props', 'aria-label': 'Properties' },
     prop('Status', statusIcon(issue.status), h('span', { class: 'select-wrap' }, status)),
+    prop('Priority', h('span', { class: 'select-wrap' }, priority)),
     prop('Assignee', personAvatar(issue.assignee), assignee,
       issue.assignee ? h('button', { type: 'button', class: 'link unassign', onclick: () => changeIssue(issue, { assignee: '' }, ctx.reload) }, 'Clear') : null,
       h('datalist', { id: 'assignee-options' }, names.map((n) => h('option', { value: n })))),

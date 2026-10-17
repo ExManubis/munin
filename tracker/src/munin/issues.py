@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy import and_, case, exists, func, select, update
 from sqlalchemy.orm import Session, aliased
 
-from munin.models import OPEN_STATUSES, STATUSES, Comment, Event, Issue, Project, utcnow
+from munin.models import OPEN_STATUSES, PRIORITIES, STATUSES, Comment, Event, Issue, Project, utcnow
 
 KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
 UNASSIGNED = ("", "none", "null", "nobody", "unassigned")
@@ -167,8 +167,10 @@ def create_issue(
     status: str = "todo",
     assignee: str | None = None,
     blocked_by: list[str] | None = None,
+    priority: str = "normal",
 ) -> Issue:
     proj = get_project(s, project)
+    priority = _check_priority(priority)
     if not title.strip():
         raise Invalid("An issue needs a title.")
     status = _check_status(status)
@@ -185,6 +187,7 @@ def create_issue(
         title=title.strip(),
         description=description,
         status=status,
+        priority=priority,
         assignee=assignee,
         position=(bottom or 0.0) + 1.0,
         created_by=actor.name,
@@ -196,6 +199,8 @@ def create_issue(
     _record(issue, actor, now, "created", new=status)
     if blockers:
         _record(issue, actor, now, "blocked_by", new=_refs(blockers))
+    if priority != "normal":
+        _record(issue, actor, now, "priority", "normal", priority)
     s.commit()
     return issue
 
@@ -211,6 +216,7 @@ def update_issue(
     assignee: str | None | object = _UNSET,
     position: float | None = None,
     blocked_by: list[str] | None = None,
+    priority: str | None = None,
 ) -> Issue:
     """Change an issue.
 
@@ -238,6 +244,8 @@ def update_issue(
         values["assignee"] = clean_assignee(assignee)
     if position is not None:
         values["position"] = float(position)
+    if priority is not None:
+        values["priority"] = _check_priority(priority)
     blockers = _check_blockers(s, issue, blocked_by) if blocked_by is not None else None
 
     held_by_other = issue.status == "in_progress" and issue.assignee not in (None, actor.name)
@@ -250,7 +258,7 @@ def update_issue(
             raise Conflict(f"{issue.ref} is blocked by {_refs(waiting_for)}, which isn't done yet. Take another issue.")
 
     now = utcnow()
-    before = {field: getattr(issue, field) for field in ("title", "description", "status", "assignee")}
+    before = {field: getattr(issue, field) for field in ("title", "description", "status", "assignee", "priority")}
     old_blockers = list(issue.blocked_by)
     changes = {field: new for field, new in values.items() if field in before and new != before[field]}
     blockers_changed = blockers is not None and set(blockers) != set(old_blockers)
@@ -273,7 +281,7 @@ def update_issue(
             held = f", assigned to {issue.assignee}" if issue.assignee else ""
             raise Conflict(f"{issue.ref} changed just now: it's {issue.status}{held}. Look at it again.")
 
-    for field in ("status", "assignee", "title"):
+    for field in ("status", "assignee", "title", "priority"):
         if field in changes:
             _record(issue, actor, now, field, before[field], changes[field])
     if "description" in changes:
@@ -371,6 +379,12 @@ def similar_open_issues(s: Session, issue: Issue) -> list[Issue]:
 
 def _title_words(title: str) -> set[str]:
     return {word for word in re.findall(r"[a-z0-9_]+", title.lower()) if len(word) > 2} - FILLER_WORDS
+
+
+def _check_priority(priority: str) -> str:
+    if priority not in PRIORITIES:
+        raise Invalid(f"Unknown priority {priority!r}. Use one of: {', '.join(PRIORITIES)}.")
+    return priority
 
 
 def _check_status(status: str) -> str:
@@ -487,6 +501,8 @@ def describe_event(event: Event) -> str:
             return f"{who} edited the description"
         case "blocked_by":
             return f"{who} set it to wait for {new}" if new else f"{who} removed what it waited for"
+        case "priority":
+            return f"{who} made it {new}" if new != "normal" else f"{who} made it normal priority"
     return f"{who} changed {event.kind}"
 
 

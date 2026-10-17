@@ -6,8 +6,7 @@ import { store, openCount, quietAgent, remember } from '../store.js';
 import { markdown } from '../markdown.js';
 import { openNewIssue, openNewProject } from '../dialogs.js';
 import {
-  h, kbd, MOD, icon, svg, personAvatar, statusIcon, time, parseTime, topbar, logoMark, bindDraft, drafts, onModEnter, toast,
-  firstLine, changeIssue, agentPrompts,
+  h, kbd, MOD, icon, svg, personAvatar, statusIcon, time, parseTime, topbar, logoMark, bindDraft, drafts, onModEnter, toast, firstLine, changeIssue, agentPrompts, priorityChip,
 } from '../ui.js';
 
 const GROUPS = [
@@ -316,6 +315,7 @@ function row(issue, pile) {
     h('span', { class: 'id' }, issue.id),
     statusIcon(issue.status, true),
     h('span', { class: 'row-title' }, h('a', { href, draggable: false }, issue.title)),
+    priorityChip(issue),
     waitingChip(issue),
     waitsChip(issue),
     h('span', { class: 'spacer' }),
@@ -492,7 +492,7 @@ function card(issue, pile) {
       if (!e.target.closest('a, button')) location.hash = href;
     },
   },
-    h('div', { class: 'card-top' }, h('span', { class: 'id' }, issue.id), h('span', { class: 'spacer' }), quietHint(issue), when(issue)),
+    h('div', { class: 'card-top' }, h('span', { class: 'id' }, issue.id), priorityChip(issue), h('span', { class: 'spacer' }), quietHint(issue), when(issue)),
     h('a', { class: 'card-title', href, draggable: false }, issue.title),
     issue.waiting_on_human || issue.blocked_by.length ? h('div', { class: 'card-chips' }, waitingChip(issue), waitsChip(issue)) : null,
     h('div', { class: 'card-foot' }, personAvatar(issue.assignee, { size: 14 }), h('span', { class: 'who-name' }, issue.assignee || 'Anyone')));

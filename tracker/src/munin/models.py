@@ -17,6 +17,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 STATUSES = ("todo", "in_progress", "in_review", "done", "cancelled")
 OPEN_STATUSES = ("in_progress", "in_review", "todo")
+# How much an issue matters, beside its place in the pile: urgent ones go first.
+PRIORITIES = ("urgent", "high", "normal", "low")
 
 
 def utcnow() -> datetime:
@@ -59,6 +61,8 @@ class Issue(Base):
     title: Mapped[str] = mapped_column(String(300))
     description: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default="todo")
+    # One of PRIORITIES. The server default fills it in for issues from before munin kept it.
+    priority: Mapped[str] = mapped_column(String(10), default="normal", server_default="normal")
     assignee: Mapped[str | None] = mapped_column(String(100), default=None)
     # Order within the pile: lower is nearer the top.
     position: Mapped[float] = mapped_column(Float, default=0.0)

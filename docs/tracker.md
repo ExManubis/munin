@@ -27,7 +27,7 @@ Everything else (reviewing someone else's work, unassigning yourself when you gi
 ## Data
 
 - **Project**: a key (like `MUN`, which prefixes issue ids like `MUN-12`), a name and a description agents can read as the brief.
-- **Issue**: title, description (Markdown), status (`todo`, `in_progress`, `in_review`, `done`, `cancelled`), assignee, position in the pile, the issues it waits for, who created it, timestamps.
+- **Issue**: title, description (Markdown), status (`todo`, `in_progress`, `in_review`, `done`, `cancelled`), priority (`urgent`, `high`, `normal` or `low`; an agent takes an urgent issue first, wherever it is in the pile, and urgent and high show as a chip), assignee, position in the pile, the issues it waits for, who created it, timestamps.
 - **Event**: one line of an issue's history: created, moved, assigned, renamed, edited, what it waits for. Every comment is an event too, so the event feed has them in order.
 - **Comment**: author, whether it's from an agent or you, body, whether it's a question for you, and the options it offers.
 - **Agent**: a name and a hashed token. Tokens are shown once and can be revoked.
@@ -68,4 +68,4 @@ From a terminal:
 
 ## Not yet
 
-Priorities, GitHub integration, permission settings, snooze, and multiple human users.
+GitHub integration, permission settings, snooze, and multiple human users.

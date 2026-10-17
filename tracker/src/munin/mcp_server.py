@@ -26,6 +26,7 @@ How to work:
 1. Call list_projects first. It tells you your name in munin, and each project's description
    is the brief: what to build and how work is delivered, for example which branch to commit to.
 2. Take the top issue from the pile: list_issues(project, status="todo") lists the pile in order.
+   An issue marked (urgent) goes before the rest, wherever it is in the pile.
    Take one that's unassigned or assigned to you with update_issue(issue, status="in_progress").
    If another agent already has it, munin says so; take the next one.
 3. Do the work. Comment on the issue when something's worth recording.
@@ -61,6 +62,7 @@ QUIET_FOR = timedelta(minutes=15)
 OTHERS_AROUND = timedelta(minutes=5)
 
 Status = Literal["todo", "in_progress", "in_review", "done", "cancelled"]
+Priority = Annotated[Literal["urgent", "high", "normal", "low"], Field(description="How much it matters. Urgent goes first.")]
 IssueRef = Annotated[str, Field(description="Issue id, like MUN-12")]
 
 
@@ -182,11 +184,12 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         blocked_by: Annotated[
             list[str] | None, Field(description="Issues that must be done before anyone can start this one.")
         ] = None,
+        priority: Priority = "normal",
     ) -> str:
         """Create an issue. It goes to the bottom of the project's pile."""
         assignee = _actor(ctx).name if assignee == "me" else assignee
         with sessions() as s:
-            created = svc.create_issue(s, _actor(ctx), project, title, description, status, assignee, blocked_by)
+            created = svc.create_issue(s, _actor(ctx), project, title, description, status, assignee, blocked_by, priority)
             reply = f"Created {created.ref}: {created.title}"
             if similar := svc.similar_open_issues(s, created):
                 reply += "\nThese open issues look similar. If it duplicates one, set it to cancelled:\n"
@@ -206,12 +209,13 @@ def build_mcp(sessions: sessionmaker[Session]) -> MCPServer:
         blocked_by: Annotated[
             list[str] | None, Field(description="Replaces what this issue waits for. [] clears it.")
         ] = None,
+        priority: Priority | None = None,
     ) -> str:
         """Change an issue. Setting status="in_progress" takes the issue and assigns it to you.
 
         Fails if another agent has the issue in progress, or if it's blocked by issues that aren't done.
         """
-        changes = {"title": title, "description": description, "status": status, "blocked_by": blocked_by}
+        changes = {"title": title, "description": description, "status": status, "blocked_by": blocked_by, "priority": priority}
         if assignee is not None:
             changes["assignee"] = _actor(ctx).name if assignee == "me" else assignee
         with sessions() as s:
@@ -354,6 +358,8 @@ def _available_text(available: svc.Available) -> str:
 
 def _issue_line(issue: Issue) -> str:
     parts = [f"{issue.ref} [{issue.status}]", issue.title]
+    if issue.priority and issue.priority != "normal":
+        parts.append(f"({issue.priority})")
     if issue.assignee:
         parts.append(f"(assignee: {issue.assignee})")
     if svc.waiting_on_human(issue):
@@ -366,7 +372,7 @@ def _issue_line(issue: Issue) -> str:
 def _issue_text(issue: Issue) -> str:
     lines = [
         f"{issue.ref}: {issue.title}",
-        f"Project: {issue.project.key} · Status: {issue.status} · Assignee: {issue.assignee or 'none'}"
+        f"Project: {issue.project.key} · Status: {issue.status}{f' · Priority: {issue.priority}' if issue.priority != 'normal' else ''} · Assignee: {issue.assignee or 'none'}"
         f" · Created by {issue.created_by} {_when(issue.created_at)}",
         "",
         issue.description or "(no description)",

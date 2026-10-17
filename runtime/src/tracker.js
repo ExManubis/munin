@@ -28,7 +28,7 @@ export function parseIssueLine(line) {
   title = title.replace(/ \(assignee: ([^)]*)\)/, (_, who) => {
     assignee = who;
     return '';
-  }).replace(/ \((waiting on the human|blocked by [^)]*)\)/g, '');
+  }).replace(/ \((waiting on the human|blocked by [^)]*|urgent|high|low)\)/g, '');
   return { id: m[1], status: m[2], title: title.trim(), assignee };
 }
 
