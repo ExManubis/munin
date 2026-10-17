@@ -8,13 +8,28 @@ import { join } from 'node:path';
 import { fauxProvider, fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
 import { buildModels, searching } from '../src/models.js';
 import { openRuntime } from '../src/runtime.js';
-import { isPrivate, readPage, withWebSearch } from '../src/web.js';
+import { guardedLookup, isPrivate, readPage, withWebSearch } from '../src/web.js';
 
 test('private networks, this machine and the tailnet are off limits', () => {
   for (const address of ['127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.1.5', '169.254.169.254', '100.108.20.24', '0.0.0.0', '::1', 'fd7a:115c:a1e0::1', 'fe80::1', '::ffff:127.0.0.1']) {
     assert.equal(isPrivate(address), true, address);
   }
-  for (const address of ['93.184.216.34', '1.1.1.1', '100.63.0.1', '2606:4700::1111']) assert.equal(isPrivate(address), false, address);
+  // IPv6 that carries a private IPv4 address, in every way Node or a resolver may write it.
+  for (const address of ['::ffff:7f00:1', '[::ffff:7f00:1]', '::ffff:127.0.0.1', '0:0:0:0:0:ffff:a00:1', '::7f00:1', '::127.0.0.1', '64:ff9b::7f00:1', '2002:7f00:1::', '2002:c0a8:101::1', 'fd7a:115c:a1e0:ab12::1', '2001:db8::1', 'not an address']) {
+    assert.equal(isPrivate(address), true, address);
+  }
+  for (const address of ['93.184.216.34', '1.1.1.1', '100.63.0.1', '2606:4700::1111', '::ffff:5db8:d822', '2002:5db8:d822::1']) assert.equal(isPrivate(address), false, address);
+});
+
+test("the connection's own DNS lookup refuses private addresses, so a name can't change its answer", async () => {
+  let answers = [[{ address: '93.184.216.34', family: 4 }], [{ address: '127.0.0.1', family: 4 }]]; // rebinding: public, then this machine
+  const look = guardedLookup(async () => answers.shift());
+  const ask = (options = {}) => new Promise((resolve) => look('rebind.example', options, (err, address) => resolve(err ? err.code : address)));
+  assert.equal(await ask(), '93.184.216.34');
+  assert.equal(await ask(), 'EPRIVATE', 'the second look is checked too');
+  answers = [[{ address: '93.184.216.34', family: 4 }, { address: '::ffff:7f00:1', family: 6 }]];
+  assert.equal(await ask({ all: true }), 'EPRIVATE', 'any private answer refuses the name');
+  await assert.rejects(readPage('http://[::ffff:127.0.0.1]:7777/'), /private network or this machine/, 'a mapped address in the URL itself');
 });
 
 // A stand-in web: page addresses to [status, headers, body], hosts to addresses.

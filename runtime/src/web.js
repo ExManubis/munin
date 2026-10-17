@@ -5,7 +5,10 @@
 // (withWebSearch), so the model searches as it answers and OpenRouter bills the searches.
 
 import { lookup } from 'node:dns/promises';
+import http from 'node:http';
+import https from 'node:https';
 import { isIP } from 'node:net';
+import { Readable } from 'node:stream';
 import { Type } from '@earendil-works/pi-ai';
 import { defineTool } from '@earendil-works/pi-durable';
 
@@ -15,17 +18,73 @@ const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_CHARS = 20000;
 const MAX_REDIRECTS = 5;
 
-// Addresses a page may not be fetched from: this machine, private and link-local networks, the
-// tailnet (100.64.0.0/10, fd7a:115c:a1e0::/48), and the like. munin listens on some of them.
-export function isPrivate(address) {
-  const v4 = address.startsWith('::ffff:') ? address.slice(7) : address;
-  if (isIP(v4) === 4) {
-    const [a, b] = v4.split('.').map(Number);
-    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254)
-      || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
+// Addresses a page may not be fetched from: this machine, private, shared and link-local
+// networks (the tailnet's 100.64.0.0/10 among them), multicast and reserved ranges, and any
+// IPv6 address that carries one of those IPv4 addresses (mapped, compatible, NAT64, 6to4).
+const privateV4 = ([a, b]) => a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254)
+  || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
+
+// An IPv6 address as its eight 16-bit groups, or null when it isn't one.
+function groupsOf(address) {
+  let text = String(address).toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
+  const tail = /(\d+\.\d+\.\d+\.\d+)$/.exec(text); // a dotted IPv4 tail: ::ffff:127.0.0.1
+  if (tail) {
+    const [a, b, c, d] = tail[1].split('.').map(Number);
+    text = `${text.slice(0, -tail[1].length)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
   }
-  const v6 = address.toLowerCase();
-  return v6 === '::' || v6 === '::1' || v6.startsWith('fc') || v6.startsWith('fd') || v6.startsWith('fe80') || v6.startsWith('ff');
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const rest = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const fill = halves.length === 2 ? 8 - head.length - rest.length : 0;
+  const parts = [...head, ...Array(Math.max(fill, 0)).fill('0'), ...rest];
+  if (parts.length !== 8 || parts.some((p) => !/^[0-9a-f]{1,4}$/.test(p))) return null;
+  return parts.map((p) => parseInt(p, 16));
+}
+
+export function isPrivate(address) {
+  if (isIP(address) === 4) return privateV4(address.split('.').map(Number));
+  const g = groupsOf(address);
+  if (!g) return true; // not an address munin understands: don't fetch it
+  const v4 = (hi, lo) => privateV4([hi >> 8, hi & 255, lo >> 8, lo & 255]);
+  const zero = (n) => g.slice(0, n).every((x) => x === 0);
+  if (zero(5) && g[5] === 0xffff) return v4(g[6], g[7]); // ::ffff:a.b.c.d, mapped
+  if (zero(6)) return true; // ::, ::1 and ::a.b.c.d, compatible: none of them the open web
+  if (g[0] === 0x64 && g[1] === 0xff9b) return true; // NAT64: reaches IPv4, this machine's included, through a gateway
+  if (g[0] === 0x2002) return v4(g[1], g[2]); // 6to4 carries an IPv4 address
+  return (g[0] & 0xfe00) === 0xfc00 // unique local, the tailnet's fd7a:115c:a1e0::/48 among them
+    || (g[0] & 0xffc0) === 0xfe80 // link-local
+    || (g[0] & 0xff00) === 0xff00 // multicast
+    || (g[0] === 0x2001 && g[1] === 0xdb8); // documentation
+}
+
+// The DNS lookup the connection itself uses, so the address checked is the address connected to:
+// a name that resolves to a private address, now or on a second look, isn't connected to.
+export function guardedLookup(resolve = (host) => lookup(host, { all: true })) {
+  return (hostname, options, callback) => {
+    resolve(hostname).then((found) => {
+      if (!found.length) return callback(Object.assign(new Error(`${hostname} can't be found.`), { code: 'ENOTFOUND' }));
+      if (found.some(({ address }) => isPrivate(address))) {
+        return callback(Object.assign(new Error(`${hostname} is on a private network or this machine, which agents can't read from.`), { code: 'EPRIVATE' }));
+      }
+      return options?.all ? callback(null, found.map(({ address, family }) => ({ address, family: family || isIP(address) }))) : callback(null, found[0].address, found[0].family || isIP(found[0].address));
+    }, callback);
+  };
+}
+
+// fetch, but over Node's http and https with guardedLookup, and redirects left to the caller.
+function guardedFetch(url, { signal, headers }) {
+  return new Promise((done, fail) => {
+    const client = url.protocol === 'https:' ? https : http;
+    const request = client.get(url, { headers, signal, lookup: guardedLookup() }, (response) => {
+      const empty = response.statusCode === 204 || response.statusCode === 304;
+      const out = new Headers();
+      for (const [key, value] of Object.entries(response.headers)) out.set(key, Array.isArray(value) ? value.join(', ') : String(value));
+      if (empty) response.resume();
+      done(new Response(empty ? null : Readable.toWeb(response), { status: response.statusCode, headers: out }));
+    });
+    request.on('error', (err) => fail(err.code === 'EPRIVATE' || err.code === 'ENOTFOUND' ? new Error(err.message) : err));
+  });
 }
 
 // A page's text, roughly as a reader sees it: no scripts, styles or markup.
@@ -41,8 +100,8 @@ export function textOf(html) {
     .trim();
 }
 
-// `resolve` and `fetch` are for tests.
-export async function readPage(address, { resolve = (host) => lookup(host, { all: true }), fetch = globalThis.fetch, signal } = {}) {
+// `resolve` and `fetch` are for tests; the real fetch checks addresses again as it connects.
+export async function readPage(address, { resolve = (host) => lookup(host, { all: true }), fetch = guardedFetch, signal } = {}) {
   let url;
   try {
     url = new URL(String(address).trim());
@@ -55,6 +114,7 @@ export async function readPage(address, { resolve = (host) => lookup(host, { all
     const addresses = isIP(host) ? [{ address: host }] : await resolve(host).catch(() => []);
     if (!addresses.length) throw new Error(`${url.hostname} can't be found.`);
     if (addresses.some(({ address: a }) => isPrivate(a))) throw new Error(`${url.hostname} is on a private network or this machine, which agents can't read from.`);
+    // Checked here for a clear answer, and again by the connection's own lookup (guardedFetch).
     const response = await fetch(url, { redirect: 'manual', signal: signal || AbortSignal.timeout(20 * 1000), headers: { 'User-Agent': 'munin (reading a page for an agent)', Accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.5' } });
     if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
       if (hop >= MAX_REDIRECTS) throw new Error(`${address} redirects too many times.`);
