@@ -399,6 +399,7 @@ function connect() {
     clearTimeout(debounce);
     debounce = setTimeout(liveRefresh, 150);
   });
+  stream.addEventListener('reset', () => liveRefresh()); // missed too much while away: reload it all
   stream.addEventListener('error', () => {
     streamUp = false; // EventSource reconnects by itself
   });

@@ -98,12 +98,31 @@ export function createRuntimeServer(runtime, settings) {
     if (req.method === 'GET' && url.pathname === '/runtime/api/stream') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', ...cors });
       res.write(': connected\n\n');
+      // Events are numbered (runtime.eventsSince), and the ones that arrive within 100ms go out as
+      // one, with the newest id and every agent they were about.
+      const send = (events) => {
+        const agents = [...new Set(events.flatMap((event) => event.agents))];
+        res.write(`id: ${events.at(-1).id}\nevent: changed\ndata: ${JSON.stringify({ agents })}\n\n`);
+      };
+      const resumed = req.headers['last-event-id'];
+      if (resumed) {
+        const { reset, events } = runtime.eventsSince(resumed);
+        if (reset) res.write(`id: ${runtime.lastEventId()}\nevent: reset\ndata: {}\n\n`);
+        else if (events.length) send(events);
+        else res.write(`id: ${runtime.lastEventId()}\n\n`);
+      } else {
+        res.write(`id: ${runtime.lastEventId()}\n\n`); // numbered from here, so a reconnect can say where it was
+      }
       let timer = null;
-      const unsubscribe = runtime.subscribe(() => {
+      let pending = [];
+      const unsubscribe = runtime.subscribe((event) => {
+        pending.push(event);
         if (timer) return;
         timer = setTimeout(() => {
           timer = null;
-          res.write('event: changed\ndata: {}\n\n');
+          const events = pending;
+          pending = [];
+          send(events);
         }, 100);
       });
       const keepalive = setInterval(() => res.write(': keepalive\n\n'), 25000);

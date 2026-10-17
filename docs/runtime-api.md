@@ -129,7 +129,7 @@ The runtime serves the models, so a new provider's show up without a frontend ch
 
 ## Live updates
 
-`GET /runtime/api/stream` is a server-sent event stream that says `changed`, like the tracker's `/api/stream`, at most ten times a second; the mock calls `subscribe(fn)` instead. The client reloads after a reconnect, since it can't tell what it missed. The stream should number its events so a reconnecting client can ask for what it missed (`Last-Event-ID`). The Claudewitz daemon does this, and it matters on a phone that keeps dropping off.
+`GET /runtime/api/stream` is a server-sent event stream, at most ten events a second; the mock calls `subscribe(fn)` instead. Every commit in the runtime is a numbered event, `<boot>.<n>`, and changes within 100ms go out as one `changed` event with the newest id and the agents they were about: `data: {"agents": ["pip"]}`. A fresh stream starts with the newest id. A client that reconnects with `Last-Event-ID` gets what it missed as one `changed` event. If the id is from before the runtime restarted, or older than the last 1,000 events, it gets `reset` instead: reload everything. The tracker's `/api/stream` works the same way, numbered by its event ids, with each event as JSON (what `/api/activity` lists), up to 500 missed events. The frontend reloads on `changed` and `reset`, and when a stream comes back.
 
 ## What the tracker added for this
 
@@ -177,4 +177,3 @@ An agent in the tracker starts work when you tell it to, from its projects in th
 Stored but not acted on yet, next roughly in this order:
 
 1. **Apps and the web** as tools, through MCP servers, with ask-first rules for apps like "send mail". Mail and calendar routines start then.
-2. **Numbered events** on the stream, and replay on reconnect.

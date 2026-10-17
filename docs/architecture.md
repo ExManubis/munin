@@ -50,7 +50,7 @@ agent runtime ──MCP──▶ tracker ◀──MCP── Claude Code, Codex, 
 - **A question about an issue lives in the tracker.** The runtime ties its agent's question to the tracker's copy (`trackerQuestion`), so the question shows in both the conversation and the tracker inbox, and answering it in either answers both. The waiting count lists it once.
 - **Adding an agent:** the frontend creates the agent in the runtime, then, for one with the Tracker ability, gets it a token from the tracker and hands that to the runtime. The tracker only ever hears from the runtime's agents over MCP, each with its own token. Deleting the agent, or turning the ability off, revokes the token.
 - **Finding services:** each service answers on a known path: `/api/me` for the tracker, and `/runtime/api/me` for the runtime. The frontend looks for the runtime at its own address (behind the edge) and on port 7779 of the same host (on a laptop, where the runtime lets in pages from 127.0.0.1). When it doesn't answer, the Agents part runs on the mock for now; later it hides, and munin is the tracker plus outside agents.
-- **Live updates:** each service has its own event stream, and the frontend listens to every one that's present.
+- **Live updates:** each service has its own event stream, and the frontend listens to every one that's present. Events are numbered: a client that reconnects with `Last-Event-ID` gets what it missed, or a `reset` (reload everything) when it missed too much.
 
 ## The edge
 
@@ -110,7 +110,7 @@ pi-durable is experimental, and its API changes between releases. Pin exact vers
    - The frontend reaches each service through one module.
    - The dummy swaps those modules for mocks that keep fake data in the browser and simulate agents at work.
    - Every mock function is something a backend has to provide. Once a screen is settled, its mock functions are the spec for the real endpoints.
-3. **Put munin on a server:** systemd units, `tailscale serve`, Tailscale identity, and agents kept from acting as you. Done: `deploy/`, and `server.md`. Still to do: live updates replay what a reconnecting client missed.
+3. **Put munin on a server:** systemd units, `tailscale serve`, Tailscale identity, and agents kept from acting as you. Done: `deploy/`, and `server.md`. Both services' live updates are numbered, and a client that reconnects gets what it missed.
 4. **Build the agent runtime** against the API the dummy frontend settled (`runtime-api.md`). Started:
    - the tracker's three additions for it are done: questions with options, a question's id back from `add_comment`, and an event feed over MCP;
    - the runtime's first version runs agents on pi-durable with OpenRouter, Ollama or a stand-in model, with questions, ask-first approvals, coding tools and memory, and the frontend uses it when it's running;
