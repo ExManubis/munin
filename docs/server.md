@@ -7,7 +7,7 @@ your laptop, your phone ──tailnet──▶ tailscale serve (HTTPS, says who 
                                       ├─ /           tracker         127.0.0.1:7777   munin-tracker.service
                                       ├─ /runtime/api agent runtime  127.0.0.1:7779   munin-runtime.service
                                       └─ /mcp        tracker, for outside agents, with their tokens
-munin-runtime ──docker exec──▶ a container per coder: its folder and munin's clones, nothing else
+munin-runtime ──docker exec──▶ a container per coder: its own folder, nothing else
 ```
 
 Both services listen on 127.0.0.1 only, run as the `munin` user, and keep everything in `/var/lib/munin`. People get in through `tailscale serve`, and only the ones in `MUNIN_USERS`.
@@ -51,7 +51,7 @@ It keeps `/etc/munin/environment` and `/etc/munin/secrets` as they are.
 | | |
 |---|---|
 | Settings | `/etc/munin/environment` (both services), `/etc/munin/secrets` (the runtime only, root-only file) |
-| Data | `/var/lib/munin`: `munin.db` (the tracker), `runtime.sqlite` (the agents), `keys.json` (model keys pasted in Settings), `agents/` (their folders and worktrees), `repos/` (munin's clones) |
+| Data | `/var/lib/munin`: `munin.db` (the tracker), `runtime.sqlite` (the agents), `keys.json` (model keys pasted in Settings), `agents/` (their folders, clones and worktrees), `repos/` (munin's clones) |
 | Services | `systemctl status munin-tracker munin-runtime`; logs: `journalctl -u munin-tracker -u munin-runtime -f` |
 | Edge | `tailscale serve status` |
 | Coders' containers | `docker ps --filter label=munin.agent` |
@@ -62,7 +62,7 @@ To back up, copy `/var/lib/munin` with the services stopped, or the two database
 
 - **People:** `tailscale serve` removes any `Tailscale-User-Login` header the caller sent and sets it from who's actually calling, so the tracker and the runtime trust it on requests that came through it. Requests to munin's public name are let in only for the logins in `MUNIN_USERS`; everyone else gets a 403, and so do tagged devices, which carry no identity. Tailscale's ACLs decide who can reach the machine at all. The square at the top right shows who's looking, by the name Tailscale has for them; comments still go out under `MUNIN_USER`.
 - **Agents:** `/mcp` takes an agent token instead, from wherever the agent runs. munin's own coders call it from the runtime, on this machine (`MUNIN_TRACKER_MCP`).
-- **Coders' containers** see their own folder and munin's clones, run as the `munin` user's id, and can't reach this machine's 127.0.0.1, so they can't reach munin's web API, its databases or its keys.
+- **Coders' containers** see their own folder, with their own clones, and run as the `munin` user's id. Each sits behind a small firewall container that blocks this machine and the tailnet but not the internet, so a coder can't reach munin's web API (not on 127.0.0.1, its gateway, or this machine's tailnet address, where `tailscale serve` would say the caller is the machine's owner), its databases or its keys. The firewall container needs the internet once, to fetch `alpine:3.20` and `iptables`.
 - **This machine:** anything running on it outside the containers, as root or as `munin`, can still do anything munin can.
 
 ## How this was tested
@@ -100,7 +100,7 @@ It needs Tailscale (the app, signed in, with MagicDNS and HTTPS Certificates on 
 - **It runs as you.** Docker Desktop and OrbStack belong to the signed-in user, and coders need Docker, so the tracker and the runtime are launchd agents of yours (`~/Library/LaunchAgents/munin.tracker.plist` and `munin.runtime.plist`) rather than services of their own user. They restart when they stop, and start when you sign in: turn on automatic login for a Mac that runs on its own.
 - **Everything is in `~/.munin`:** settings in `environment`, keys in `secrets` (and model keys pasted in Settings in `keys.json`), the databases, the agents' folders and clones, logs in `logs/`, and the command line as `~/.munin/bin/munin`. Restart a service with `launchctl kickstart -k gui/$(id -u)/munin.runtime`.
 - **The Mac mustn't sleep.** The script says so if it would: System Settings > Energy, or `sudo pmset -a sleep 0`.
-- **Containers are a looser boundary.** Docker Desktop and OrbStack let containers reach the Mac's own 127.0.0.1 through `host.docker.internal` (not yet checked on a Mac), so a coder could reach munin's web API, which on Linux it can't. Files and keys stay out of its reach either way. `MUNIN_AGENT_NETWORK=none` in `~/.munin/environment` closes that, and the internet with it.
+- **Docker Desktop opens a way to the Mac.** Checked on Docker Desktop 4.95: a container reaches the Mac's own 127.0.0.1 through `host.docker.internal`, and munin sees those requests as coming from 127.0.0.1, so `curl -H 'Host: 127.0.0.1:7777' http://host.docker.internal:7777/api/me` got in as you. A container also reached munin through the Mac's tailnet address, where `tailscale serve` named the caller as the Mac's owner. The firewall container in front of each coder's container (above) blocks both, and was checked to: munin by name, by IP and over the tailnet are refused, the internet still works, and a container sharing its network can't change the rules even as root. OrbStack hasn't been checked, but the firewall doesn't depend on which one runs. `MUNIN_AGENT_NETWORK=none` in `~/.munin/environment` takes the internet away too.
 
 It was rehearsed on Linux, as a normal user, with stand-ins for `uname`, `launchctl` (starting each plist's command with only the plist's environment), `tailscale` and `pmset`. Three runs: the first stopped where the image couldn't be pulled (Docker Hub's rate limit; now a copy already there is enough), the second set munin up, the third updated it in place. It hasn't run on a real Mac yet.
 

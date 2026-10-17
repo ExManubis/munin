@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { BACKGROUND_CONTEXT as ctx } from '@earendil-works/chord/context';
 import { Type } from '@earendil-works/pi-ai';
 import {
-  Harness, LiveDoc, MemoryStorage, ToolTask, configure, createRegistry, defineDoc, defineExtension, defineTool, hook, section,
+  GenerationTask, Harness, LiveDoc, MemoryStorage, ToolTask, configure, createRegistry, defineDoc, defineExtension, defineTool, hook, section,
 } from '@earendil-works/pi-durable';
 import { createBashTool, createCodingTools } from '@earendil-works/pi-durable/tools';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
@@ -78,8 +78,10 @@ function trackerLink(value, current) {
   return link;
 }
 
-// `now` and `timers` are for tests: a clock to run routines by, and whether a timer runs them.
-export async function openRuntime(settings, { models, storage, now = Date.now, timers = true } = {}) {
+// `now`, `timers` and `costOf` are for tests: a clock to run routines and budgets by, whether a
+// timer runs routines, and what a model response cost (the test model's are all free).
+const costOfResponse = (message) => message.usage?.cost?.total || 0;
+export async function openRuntime(settings, { models, storage, now = Date.now, timers = true, costOf = costOfResponse } = {}) {
   storage ||= settings.db === ':memory:' ? new MemoryStorage() : await openNodeSqliteStorage(settings.db);
   const agents = new Map(); // name → settings
   const listeners = new Set();
@@ -141,9 +143,26 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         return agent ? about(agent, named()) : undefined;
       }, { tag: false }),
     ],
-    hooks: [hook(ToolTask, {
+    hooks: [hook(GenerationTask, {
+      // Before a request, so this month's spend is known before the response adds to it.
+      beforeRequest: async (request, api) => {
+        const agent = agentFor(api.conversationId);
+        if (agent?.budget) await spentThisMonth(agent);
+        return undefined;
+      },
+      afterResponse: async (message, api) => {
+        const agent = agentFor(api.conversationId);
+        if (!agent) return;
+        const spent = await spentThisMonth(agent);
+        spent.total += costOf(message);
+        if (agent.budget && spent.total >= agent.budget) await pauseForBudget(agent);
+      },
+    }), hook(ToolTask, {
       beforeTool: async (call, api) => {
         const agent = agentFor(api.conversationId);
+        if (agent?.pausedFor === 'budget' && agent.paused) {
+          return { block: "You've reached your budget for this month, so munin has paused you. Don't call any more tools: say in a line or two where you got to, and stop." };
+        }
         const rule = agent?.askFirst.find((r) => r.on && ruleMatches(r, call.name, call.arguments));
         if (!rule) return undefined;
         const allowed = agent.allowances.indexOf(rule.id);
@@ -223,6 +242,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       await enter(agent, opened, move);
       return `Your worktree for ${issue.id} is ready, and your shell and file tools work in it now: ${opened.folder}, on `
         + `${opened.fresh ? `a new branch, ${opened.branch}, from ${opened.base}` : `${opened.branch}, as you left it`}. `
+        + (opened.kept ? 'munin moved it into your own clone, and committed what you hadn\'t yet as "Work in progress"; amend or undo that as you like. ' : '')
         + "Commit your work there; the project's brief says how to deliver it.";
     } catch (err) {
       return `munin couldn't open a worktree for ${issue.id} (${err.message}), so you're still in ${agent.work?.folder || agent.folder}.`;
@@ -233,7 +253,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   // a shell that doesn't inherit the runtime's environment and its keys.
   const reposDir = settings.reposDir || join(dirname(settings.agentsDir), 'repos');
   const sandbox = settings.sandbox === 'docker'
-    ? createDockerSandbox({ image: settings.agentImage, network: settings.agentNetwork, agentsDir: settings.agentsDir, reposDir })
+    ? createDockerSandbox({ image: settings.agentImage, network: settings.agentNetwork, agentsDir: settings.agentsDir })
     : null;
   const passthrough = settings.agentEnv || [];
   // pi-durable's coding tools, under their own name so conversations keep selecting them, with
@@ -271,7 +291,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   for (const agent of Object.values(saved?.agents || {})) agents.set(agent.name, { ...structuredClone(agent), brief: upgradeBrief(agent.brief) });
   Object.assign(repos, structuredClone(saved?.repos || {}));
   Object.assign(prefs, structuredClone(saved?.prefs || {}));
-  workspace = createWorkspace({ dir: reposDir, repos });
+  workspace = createWorkspace({ dir: reposDir, agentsDir: settings.agentsDir, repos });
   tracker.connect(); // in the background: until the tracker answers, agents are told it's away
 
   async function saveAgents() {
@@ -302,38 +322,80 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
   // Reading ------------------------------------------------------------------------------
 
+  // Each conversation's entries, kept as they're read: a read asks pi-durable only for entries
+  // after the last one it has (entries never change once written), and one agent's reads go one
+  // at a time so two can't both append the same new entries. Its items are rebuilt only when
+  // there's something new.
+  const kept = new Map(); // conversationId → { entries, items, key, queue }
   async function readItems(agent) {
-    const conversation = await conversationOf(agent);
-    const entries = [];
-    let cursor;
-    do {
-      const page = await conversation.entries({ order: 'ascending' }, 500, cursor, ctx);
-      entries.push(...page.items);
-      cursor = page.next;
-    } while (cursor);
-    const live = await harness.snapshot(LiveDoc, agent.conversationId, ctx);
-    const busy = Boolean(live?.run);
-    return { entries, items: toItems(entries, { busy }), busy };
+    let held = kept.get(agent.conversationId);
+    if (!held) kept.set(agent.conversationId, held = { entries: [], items: [], key: null, queue: Promise.resolve() });
+    const read = held.queue.then(async () => {
+      const conversation = await conversationOf(agent);
+      const last = held.entries.at(-1)?.id;
+      let cursor;
+      do {
+        const page = await conversation.entries({ order: 'ascending', ...(last ? { minEntryId: last } : {}) }, 500, cursor, ctx);
+        for (const entry of page.items) if (entry.id !== last) held.entries.push(entry); // the bound is inclusive
+        cursor = page.next;
+      } while (cursor);
+      const live = await harness.snapshot(LiveDoc, agent.conversationId, ctx);
+      const busy = Boolean(live?.run);
+      const key = `${held.entries.length}/${busy}`;
+      if (held.key !== key) Object.assign(held, { items: toItems(held.entries, { busy }), key });
+      return { entries: held.entries, items: held.items, busy };
+    });
+    held.queue = read.catch(() => {});
+    return read;
   }
 
+  // `month` is this calendar month, the period a budget covers.
   function usageOf(entries) {
-    const now = Date.now();
+    const at = now();
     const out = { today: 0, week: 0, month: 0, tokens: 0 };
-    const today = new Date();
+    const today = new Date(at);
     today.setHours(0, 0, 0, 0);
+    const month = new Date(today);
+    month.setDate(1);
     for (const entry of entries) {
       const message = entry.kind === 'pi.assistant' ? entry.model?.[0] : null;
       if (!message?.usage) continue;
-      const cost = message.usage.cost?.total || 0;
+      const cost = costOf(message);
       if (message.timestamp >= today.getTime()) {
         out.today += cost;
         out.tokens += message.usage.totalTokens || 0;
       }
-      if (now - message.timestamp < 7 * DAY) out.week += cost;
-      if (now - message.timestamp < 30 * DAY) out.month += cost;
+      if (at - message.timestamp < 7 * DAY) out.week += cost;
+      if (message.timestamp >= month.getTime()) out.month += cost;
     }
     for (const key of ['today', 'week', 'month']) out[key] = Math.round(out[key] * 1000) / 1000;
     return out;
+  }
+
+  // What each agent's model responses cost this calendar month: read from its conversation the
+  // first time it's needed in a month, then added to as responses arrive.
+  const spend = new Map(); // name → { month: 'YYYY-MM', total }
+  const monthOf = (at) => { const d = new Date(at); return `${d.getFullYear()}-${d.getMonth() + 1}`; }; // local, like usageOf
+  async function spentThisMonth(agent) {
+    const month = monthOf(now());
+    let spent = spend.get(agent.name);
+    if (!spent || spent.month !== month) {
+      spent = { month, total: usageOf((await readItems(agent)).entries).month };
+      spend.set(agent.name, spent);
+    }
+    return spent;
+  }
+
+  // An agent pauses itself at its budget and says why. The turn it's in ends rather than being
+  // cut off: its next tool calls are blocked (beforeTool), so it answers once more and stops.
+  // It stays paused until you resume it, which takes a bigger budget or a new month.
+  async function pauseForBudget(agent) {
+    if (agent.paused) return;
+    agent.paused = true;
+    agent.pausedFor = 'budget';
+    await saveAgents();
+    const month = new Date(now()).toLocaleString('en', { month: 'long' });
+    await write(agent, 'munin.action', { verb: 'paused', object: `at its $${agent.budget} budget for ${month}` });
   }
 
   async function summaryOf(agent) {
@@ -341,7 +403,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     const s = summarize(items, { busy, paused: agent.paused });
     return {
       name: agent.name, role: agent.role, roleName: roleName(agent.role), colour: agent.colour,
-      state: s.state, waiting: s.waiting, preview: agent.paused ? 'Paused' : s.preview, lastAt: s.lastAt || new Date(agent.createdAt).toISOString(),
+      state: s.state, waiting: s.waiting, preview: agent.paused ? (agent.pausedFor === 'budget' ? 'Paused at its budget' : 'Paused') : s.preview, lastAt: s.lastAt || new Date(agent.createdAt).toISOString(),
       typing: s.typing, provider: agent.provider, model: agent.model,
     };
   }
@@ -366,7 +428,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         projects: [...(agent.tracker?.projects || [])], takes: agent.role === 'reviewer' ? 'reviews' : 'issues',
         connected: Boolean(agent.tracker?.token), reachable: tracker.reachable(),
       } : null,
-      paused: agent.paused, createdAt: new Date(agent.createdAt).toISOString(),
+      paused: agent.paused, pausedFor: agent.paused ? agent.pausedFor || 'you' : null, createdAt: new Date(agent.createdAt).toISOString(),
       run: s.run ? { id: s.run.id, issue: s.run.issue || null, startedAt: s.run.startedAt, step: s.run.steps[s.run.steps.length - 1]?.text || null } : null,
     };
   }
@@ -422,10 +484,19 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       return fullOf(need(name));
     },
 
-    async conversation(name) {
+    // A page of the conversation: the newest `limit` items, or those just before the item
+    // `before`. `more` says whether there are older ones.
+    async conversation(name, { before = null, limit = 100 } = {}) {
       const agent = need(name);
       const read = await readItems(agent);
-      return { agent: await fullOf(agent, read), items: read.items };
+      const size = Math.max(1, Math.min(Number(limit) || 100, 500));
+      let end = read.items.length;
+      if (before) {
+        end = read.items.findIndex((item) => item.id === before);
+        if (end < 0) throw invalid(`There's no item ${before} in ${name}'s conversation.`);
+      }
+      const start = Math.max(0, end - size);
+      return { agent: await fullOf(agent, read), items: read.items.slice(start, end), more: start > 0 };
     },
 
     async waiting() {
@@ -540,6 +611,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       const agent = need(name);
       await (await conversationOf(agent)).abort(ctx);
       await sandbox?.remove(agent);
+      kept.delete(agent.conversationId);
       agents.delete(name);
       await saveAgents();
     },
@@ -547,6 +619,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     async pause(name) {
       const agent = need(name);
       agent.paused = true;
+      agent.pausedFor = 'you';
       await saveAgents();
       await (await conversationOf(agent)).abort(ctx);
       await write(agent, 'munin.action', { verb: 'paused', object: 'by you' });
@@ -554,7 +627,12 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
     async resume(name) {
       const agent = need(name);
+      if (agent.budget) {
+        const { total } = await spentThisMonth(agent);
+        if (total >= agent.budget) throw conflict(`${name} has spent $${total.toFixed(2)} of its $${agent.budget} budget this month. Raise the budget on its profile to resume it, or wait for next month.`);
+      }
       agent.paused = false;
+      agent.pausedFor = null;
       await saveAgents();
       await write(agent, 'munin.action', { verb: 'resumed', object: 'by you' });
     },

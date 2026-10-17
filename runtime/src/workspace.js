@@ -1,11 +1,13 @@
-// Where coders work: a clone of each project's repository, kept by the runtime, and a git
-// worktree per issue in the agent's own folder, on a branch named after the issue. Parallel
-// coders never share a checkout, and a reviewer gets someone's branch to look at without
-// being able to change it. How work is delivered (push, pull request, merge) is up to the
-// project's brief, not munin.
+// Where coders work. The runtime keeps a clone of each project's repository (the hub, in `dir`),
+// and each agent gets a clone of its own in its folder, made from the hub, with a git worktree
+// per issue on a branch named after the issue. A coder's container sees only its own folder,
+// so it can't touch another coder's branches or the hub. The hub fetches the project and
+// collects every agent's issue branches, and each agent's clone fetches them from it as
+// munin/<branch>, so a reviewer gets someone's branch to look at without being able to change
+// it. How work is delivered (push, pull request, merge) is up to the project's brief, not munin.
 
 import { execFile } from 'node:child_process';
-import { access, mkdir } from 'node:fs/promises';
+import { access, mkdir, readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -40,9 +42,9 @@ export function branchFor(issue) {
 const expand = (path) => (path.startsWith('~/') ? join(homedir(), path.slice(2)) : path);
 const isRemote = (source) => /^(https?|ssh|git|file):\/\/|^[\w.-]+@[\w.-]+:/.test(source);
 
-// `dir` holds the clones. `repos` is the saved setup, { KEY: { source, base } }, which this
-// changes in place; save it after setRepo and removeRepo.
-export function createWorkspace({ dir, repos }) {
+// `dir` holds the hubs and `agentsDir` the agents' folders. `repos` is the saved setup,
+// { KEY: { source, base } }, which this changes in place; save it after setRepo and removeRepo.
+export function createWorkspace({ dir, agentsDir, repos }) {
   const locks = new Map(); // one git operation at a time per repository
   const serial = (key, fn) => {
     const next = (locks.get(key) || Promise.resolve()).then(fn, fn);
@@ -50,6 +52,65 @@ export function createWorkspace({ dir, repos }) {
     return next;
   };
   const clonePath = (key) => join(dir, key);
+  const ownClone = (folder, key) => join(folder, '.repos', key);
+  const issueRefs = (key) => `${key.toLowerCase()}-*`;
+
+  // Every agent's issue branches into the hub, so the others can find them.
+  async function collect(key) {
+    const hub = clonePath(key);
+    const names = await readdir(agentsDir).catch(() => []);
+    for (const name of names) {
+      const clone = ownClone(join(agentsDir, name), key);
+      if (await exists(clone)) await quietly(git(hub, 'fetch', '--quiet', clone, `+refs/heads/${issueRefs(key)}:refs/heads/${issueRefs(key)}`));
+    }
+  }
+
+  // The agent's own clone of the project, made from the hub if it hasn't one, with the
+  // project's branches as origin/… and everyone's issue branches as munin/…, fresh from the hub.
+  async function cloneFor(agent, key) {
+    const hub = clonePath(key);
+    const clone = ownClone(agent.folder, key);
+    if (!(await exists(clone))) {
+      await mkdir(join(agent.folder, '.repos'), { recursive: true });
+      // Copied, not hardlinked: a hardlinked object is the hub's own file.
+      await git(agent.folder, 'clone', '--no-checkout', '--no-hardlinks', '--quiet', '--', hub, clone);
+      await git(clone, 'remote', 'set-url', 'origin', repos[key].source); // pushes go to the project
+      await git(clone, 'config', 'extensions.worktreeConfig', 'true');
+    }
+    await git(clone, 'fetch', '--quiet', '--prune', hub, '+refs/remotes/origin/*:refs/remotes/origin/*', `+refs/heads/${issueRefs(key)}:refs/remotes/munin/${issueRefs(key)}`);
+    return clone;
+  }
+
+  // Fetch the project and pass branches around: the hub from the project and every agent, then
+  // the agent's clone from the hub.
+  async function sync(agent, key) {
+    await quietly(git(clonePath(key), 'fetch', '--quiet', '--prune', 'origin'));
+    await collect(key);
+    return cloneFor(agent, key);
+  }
+
+  // A worktree from before agents had clones of their own belongs to the hub, which a container
+  // can't see. It moves to the agent's clone: what's uncommitted is committed first, so nothing
+  // is lost, and the branch comes along. A detached review copy is just removed, if it's clean.
+  async function moveOver(agent, key, folder, clone) {
+    if (!(await exists(folder))) return null;
+    const common = resolve(folder, await git(folder, 'rev-parse', '--git-common-dir').catch(() => '.'));
+    if (common !== join(clonePath(key), '.git')) return null;
+    const branch = await git(folder, 'branch', '--show-current').catch(() => '');
+    let kept = false;
+    if (branch) {
+      if (await git(folder, 'status', '--porcelain')) {
+        await git(folder, 'add', '--all');
+        await git(folder, 'commit', '--quiet', '--no-verify', '-m', 'Work in progress, kept when munin moved this worktree');
+        kept = true;
+      }
+      await git(clone, 'fetch', '--quiet', clonePath(key), `+refs/heads/${branch}:refs/heads/${branch}`);
+    } else if (await git(folder, 'status', '--porcelain')) {
+      return null; // a review copy with changes stays where it is
+    }
+    await git(clonePath(key), 'worktree', 'remove', '--force', folder);
+    return { branch: branch || null, kept };
+  }
 
   async function setRepo(key, { source, base } = {}) {
     if (!PROJECT.test(key)) throw new WorkspaceError('Projects are keys like MUN.');
@@ -83,11 +144,15 @@ export function createWorkspace({ dir, repos }) {
   const describe = (key) => ({ project: key, source: repos[key].source, base: repos[key].base });
   const list = () => Object.keys(repos).sort().map(describe);
 
-  // The issue's branch, if anyone has made one: "mun-46-…" or just "mun-46".
-  async function branchOf(path, issue) {
+  // The issue's branch, if anyone has made one: "mun-46-…" or just "mun-46". The agent's own
+  // comes first; `ref` is where it is, `branch` its name.
+  async function branchOf(clone, issue) {
     const prefix = issue.id.toLowerCase();
-    const found = (await git(path, 'for-each-ref', '--format=%(refname:short)', `refs/heads/${prefix}`, `refs/heads/${prefix}-*`)).split('\n').filter(Boolean);
-    return found[0] || null;
+    for (const space of ['refs/heads', 'refs/remotes/munin']) {
+      const found = (await git(clone, 'for-each-ref', '--format=%(refname:short)', `${space}/${prefix}`, `${space}/${prefix}-*`)).split('\n').filter(Boolean);
+      if (found[0]) return { ref: found[0], branch: found[0].replace(/^munin\//, ''), own: space === 'refs/heads' };
+    }
+    return null;
   }
 
   // Worktrees as git lists them: [{ path, branch }].
@@ -106,17 +171,20 @@ export function createWorkspace({ dir, repos }) {
     const key = issue.id.split('-')[0];
     if (!repos[key]) return null;
     return serial(key, async () => {
-      const repo = clonePath(key);
+      const repo = await sync(agent, key);
       const folder = join(agent.folder, issue.id);
       const base = repos[key].base;
-      await quietly(git(repo, 'fetch', '--quiet', '--prune', 'origin'));
-      let branch = await branchOf(repo, issue);
+      const moved = await moveOver(agent, key, folder, repo);
+      const found = await branchOf(repo, issue);
+      let branch = found?.branch || null;
       let fresh = false;
       if (await exists(folder)) {
         branch = await git(folder, 'branch', '--show-current') || branch;
-      } else if (branch) {
+      } else if (found?.own) {
         const elsewhere = (await worktrees(repo)).some((w) => w.branch === branch);
         await git(repo, 'worktree', 'add', ...(elsewhere ? ['--force'] : []), folder, branch);
+      } else if (found) {
+        await git(repo, 'worktree', 'add', '-b', branch, folder, found.ref); // someone else's, to carry on
       } else {
         branch = branchFor(issue);
         const start = await quietly(git(repo, 'rev-parse', '--verify', '--quiet', `origin/${base}`)) ? `origin/${base}` : base;
@@ -126,7 +194,7 @@ export function createWorkspace({ dir, repos }) {
       await git(folder, 'config', '--worktree', 'user.name', agent.name);
       await git(folder, 'config', '--worktree', 'user.email', `${agent.name}@munin.local`);
       await tidy(agent, key, folder);
-      return { folder, branch, base, fresh, issue };
+      return { folder, branch, base, fresh, issue, kept: Boolean(moved?.kept) };
     });
   }
 
@@ -137,22 +205,22 @@ export function createWorkspace({ dir, repos }) {
     const key = issue.id.split('-')[0];
     if (!repos[key]) throw new WorkspaceError(`munin has no repository for ${key}.`);
     return serial(key, async () => {
-      const repo = clonePath(key);
-      await quietly(git(repo, 'fetch', '--quiet', '--prune', 'origin'));
-      const branch = await branchOf(repo, issue);
-      if (!branch) throw new WorkspaceError(`${issue.id} has no branch yet.`);
+      const repo = await sync(agent, key);
       const folder = join(agent.folder, issue.id);
-      if (await exists(folder)) await git(folder, 'checkout', '--quiet', '--detach', branch);
-      else await git(repo, 'worktree', 'add', '--detach', folder, branch);
+      await moveOver(agent, key, folder, repo);
+      const found = await branchOf(repo, issue);
+      if (!found) throw new WorkspaceError(`${issue.id} has no branch yet.`);
+      if (await exists(folder)) await git(folder, 'checkout', '--quiet', '--detach', found.ref);
+      else await git(repo, 'worktree', 'add', '--detach', folder, found.ref);
       await tidy(agent, key, folder);
-      return { folder, branch, base: repos[key].base, detached: true, issue };
+      return { folder, branch: found.branch, base: repos[key].base, detached: true, issue };
     });
   }
 
   // Worktrees in the agent's folder that are done with: nothing uncommitted, and detached or on
   // a branch the base already has. The one it's going to work in stays.
   async function tidy(agent, key, keep) {
-    const repo = clonePath(key);
+    const repo = ownClone(agent.folder, key);
     const base = repos[key].base;
     const target = await quietly(git(repo, 'rev-parse', '--verify', '--quiet', `origin/${base}`)) ? `origin/${base}` : base;
     for (const tree of await worktrees(repo)) {

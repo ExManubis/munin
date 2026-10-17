@@ -80,7 +80,11 @@ function header(agent, ctx) {
         type: 'button',
         class: 'link',
         onclick: async () => {
-          await (agent.paused ? runtime.resume(agent.name) : runtime.pause(agent.name));
+          try {
+            await (agent.paused ? runtime.resume(agent.name) : runtime.pause(agent.name));
+          } catch (err) {
+            toast(err.message, { error: true }); // over its budget, say
+          }
           ctx.reload();
         },
       }, agent.paused ? 'Resume' : 'Pause'),

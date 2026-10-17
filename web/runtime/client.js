@@ -42,7 +42,10 @@ export function connect(base) {
     updateMe: (patch) => call('PATCH', '/me', patch),
     agents: () => call('GET', '/agents'),
     agent: (name) => call('GET', agent(name)),
-    conversation: (name) => call('GET', `${agent(name)}/conversation`),
+    conversation: (name, { before, limit } = {}) => {
+      const query = new URLSearchParams({ ...(before ? { before } : {}), ...(limit ? { limit: String(limit) } : {}) }).toString();
+      return call('GET', `${agent(name)}/conversation${query ? `?${query}` : ''}`);
+    },
     waiting: () => call('GET', '/waiting'),
     send: (name, text) => call('POST', `${agent(name)}/messages`, { text }),
     answer: (name, id, answer) => call('POST', `${agent(name)}/items/${enc(id)}/answer`, answer),

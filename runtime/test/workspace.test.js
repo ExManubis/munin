@@ -6,9 +6,9 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fauxProvider, fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
 import { buildModels } from '../src/models.js';
 import { openRuntime } from '../src/runtime.js';
@@ -35,8 +35,11 @@ async function fakeTracker() {
   return { url: `http://127.0.0.1:${server.address().port}/mcp`, close: () => new Promise((resolve) => server.close(resolve)) };
 }
 
-async function setup() {
-  const dir = await mkdtemp(join(tmpdir(), 'munin-workspace-'));
+// Everything a test opens is closed after it, pass or fail: a failed assertion used to leave
+// the runtime and the stand-in tracker running, and the test file never finished.
+async function setup(t) {
+  // The real path: on a Mac the temp folder is behind a symlink, and a shell's pwd says the real one.
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'munin-workspace-')));
   const origin = join(dir, 'origin');
   await mkdir(origin);
   git(origin, 'init', '--quiet', '-b', 'main');
@@ -50,6 +53,7 @@ async function setup() {
   const models = await buildModels(settings, { extra: [faux.provider], env: {} });
   const runtime = await openRuntime(settings, { models, timers: false });
   const tracker = await fakeTracker();
+  t.after(() => Promise.all([runtime.close(), tracker.close()]));
   const seen = new Set();
   const say = (...steps) => faux.setResponses(steps.map((step) => (context) => {
     // A moved folder adds a system message after the tool's answer, so look back for it.
@@ -71,8 +75,8 @@ async function setup() {
   return { dir, origin, settings, runtime, tracker, heard, coder, turn };
 }
 
-test('coders get a worktree per issue, on a branch named after it, and work side by side', async () => {
-  const { origin, settings, runtime, tracker, heard, coder, turn } = await setup();
+test('coders get a worktree per issue, on a branch named after it, and work side by side', async (t) => {
+  const { origin, settings, runtime, tracker, heard, coder, turn } = await setup(t);
   await assert.rejects(runtime.setRepo('MUN', { source: join(origin, 'nope') }), /no git repository/);
   assert.deepEqual(await runtime.setRepo('mun', { source: origin }), { project: 'MUN', source: origin, base: 'main' });
   assert.deepEqual(await runtime.repos(), [{ project: 'MUN', source: origin, base: 'main' }]);
@@ -97,12 +101,10 @@ test('coders get a worktree per issue, on a branch named after it, and work side
 
   await turn('forge', ['update_issue', { issue: 'WEB-1', status: 'in_progress' }], 'No repo.');
   assert.match(heard[4], /munin has no repository for WEB, so you're working in your own folder/);
-  await runtime.close();
-  await tracker.close();
 });
 
-test("a reviewer opens someone's branch detached, a retake picks up the branch, and merged worktrees go", async () => {
-  const { dir, origin, settings, runtime, tracker, heard, coder, turn } = await setup();
+test("a reviewer opens someone's branch detached, a retake picks up the branch, and merged worktrees go", async (t) => {
+  const { dir, origin, settings, runtime, tracker, heard, coder, turn } = await setup(t);
   await runtime.setRepo('MUN', { source: origin });
   await coder('forge');
   await coder('vera', 'reviewer');
@@ -142,6 +144,26 @@ test("a reviewer opens someone's branch detached, a retake picks up the branch, 
   await turn('forge', ['open_worktree', {}], 'Home.');
   assert.match(heard.at(-1), /You're in your own folder again/);
   assert.equal((await runtime.agent('forge')).worksIn.branch, null);
-  await runtime.close();
-  await tracker.close();
+});
+
+test('a worktree from before agents had clones of their own moves into the agent\'s clone, uncommitted work and all', async (t) => {
+  const { dir, origin, settings, runtime, heard, coder, turn } = await setup(t);
+  await runtime.setRepo('MUN', { source: origin });
+  await coder('forge');
+  // How it was: forge's worktree belonged to munin's shared clone.
+  const hub = join(dir, 'repos', 'MUN');
+  const tree = join(settings.agentsDir, 'forge', 'MUN-5');
+  const branch = 'mun-5-retry-rate-limited-calls';
+  git(hub, 'worktree', 'add', '--quiet', '-b', branch, tree, 'origin/main');
+  await writeFile(join(tree, 'retry.txt'), 'retry\n');
+  git(tree, 'add', 'retry.txt');
+  git(tree, 'commit', '--quiet', '-m', 'Retry on 429');
+  await writeFile(join(tree, 'wip.txt'), 'half done\n');
+
+  await turn('forge', ['update_issue', { issue: 'MUN-5', status: 'in_progress' }], ['bash', { command: 'git status --porcelain; git log --format=%s' }], 'Back.');
+  assert.match(heard[0], new RegExp(`on ${branch}, as you left it\\. munin moved it into your own clone, and committed what you hadn't yet as "Work in progress"`));
+  assert.deepEqual(heard[1].trim().split('\n'), ['Work in progress, kept when munin moved this worktree', 'Retry on 429', 'Start'], 'nothing uncommitted, nothing lost');
+  assert.equal(readFileSync(join(tree, 'wip.txt'), 'utf8'), 'half done\n');
+  assert.equal(resolve(tree, git(tree, 'rev-parse', '--git-common-dir')), join(settings.agentsDir, 'forge', '.repos', 'MUN', '.git'), "it's forge's clone's now");
+  assert.ok(!git(hub, 'worktree', 'list').includes(tree), 'and not the shared clone\'s');
 });
