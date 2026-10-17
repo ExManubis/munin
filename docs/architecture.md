@@ -122,6 +122,10 @@ pi-durable is experimental, and its API changes between releases. Pin exact vers
 
 ## Open questions
 
-- **The tracker's feed, read or pushed:** the runtime reads the tracker's `events` feed every half minute for agents with tracker routines, with each agent's own token. That's simple and keeps the tracker unaware of the runtime; whether the tracker should push instead, once there are many agents, is still open.
-- **Costs:** budgets per project or per agent, and what happens at the limit.
-- **The command line:** one `munin` command for every service, or one per service. Today `munin` is the tracker's.
+- **The tracker's feed, read or pushed:** the runtime reads the tracker's `events` feed every half minute for agents with tracker routines, with each agent's own token. That's simple and keeps the tracker unaware of the runtime. With one person and a few agents it costs next to nothing, so it stays; whether the tracker should push instead is worth asking again if munin ever runs many agents.
+- **Costs:** an agent has a monthly budget that pauses it at the limit, and the runtime counts what each issue cost. Budgets per project are still open.
+
+## Decided
+
+- **The command line:** one command per service. On the server, `deploy/install.sh` sets up `munin-tracker` and `munin-runtime` as services that start and restart together; on a laptop it's `munin serve` and the runtime's own command, which is fine for development.
+- **One person:** munin is for one person for now, so comments and answers aren't attributed to people beyond `MUNIN_USER`. Who's looking, behind the edge, only shows in your square.

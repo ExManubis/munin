@@ -70,4 +70,4 @@ From a terminal:
 
 ## Not yet
 
-Permission settings and multiple human users.
+Limiting an outside agent's token to some projects. munin is for one person for now, so there's no attribution to several people or permissions between them.
