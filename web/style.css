@@ -702,11 +702,6 @@ a.toast:hover { border-color: var(--muted); color: var(--text); }
 .agent-item-preview.typing { color: var(--text-2); }
 .chip.row-chip { height: 20px; padding: 0 6px; }
 .btn.new-agent { justify-content: space-between; width: 100%; margin-top: 12px; }
-/* The open agent's Figbot fills the sidebar's bottom-right corner, cut by its edges like the model is. */
-.side-foot { display: flex; align-items: flex-end; gap: 12px; margin: 12px -12px -16px 0; }
-.side-foot .btn.new-agent { flex: 1; min-width: 0; margin: 0 0 16px; }
-.side-bot { flex-shrink: 0; line-height: 0; }
-@media (max-height: 560px) { .side-bot { display: none; } .side-foot { margin: 0; } .side-foot .btn.new-agent { margin: 12px 0 0; } }
 .btn.new-agent.pressed { border-color: var(--text); color: var(--text); }
 
 .convo-wrap { height: 100%; container-type: inline-size; }
@@ -798,6 +793,11 @@ button.option-card:hover { border-color: var(--text); }
 .app-row { display: flex; align-items: center; gap: 10px; color: var(--text); }
 .about-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
 .about-actions .btn { justify-content: space-between; width: 100%; }
+/* The agent's Figbot at the foot of the panel, framed as on figment.engineering. */
+.about-bot { margin-top: auto; padding: 0 24px 24px; }
+.about-bot-frame { aspect-ratio: 1; overflow: hidden; border: 1px solid var(--line); background: var(--ink); }
+.about-bot-frame canvas { width: 100% !important; height: 100% !important; }
+@media (max-height: 640px) { .about-bot { display: none; } }
 @container (max-width: 1000px) {
   .convo-grid { grid-template-columns: minmax(0, 1fr); }
   .about { display: none; }
