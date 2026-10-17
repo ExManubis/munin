@@ -10,7 +10,7 @@ import { runtime } from './runtime/index.js';
 import { ROLES, roleOf, price } from './runtime/roles.js';
 import { connectToTracker, linkable } from './runtime/tracker-link.js';
 import { store, remember } from './store.js';
-import { h, svg, toast, copyButton, toggle, MOD } from './ui.js';
+import { h, svg, toast, copyButton, toggle, onEnterSend, SEND_KEY } from './ui.js';
 import { figbot, COLOURS } from './figbot.js';
 import { claudeMark, isClaude } from './claude-mark.js';
 import { notificationsSupported, notificationsOn, setNotifications } from './notify.js';
@@ -484,12 +484,7 @@ const PAGES = {
         toast(err.message, { error: true });
       }
     };
-    first.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        send();
-      }
-    });
+    onEnterSend(first, send);
     const twinkles = [['left:22px;top:44px', '.1s'], ['left:48px;top:8px', '.9s', 's'], ['right:30px;top:22px', '.5s'], ['right:8px;top:92px', '1.4s', 's'], ['left:6px;top:118px', '1.9s', 's'], ['right:54px;top:0', '1.2s', 's']];
     return {
       main: h('div', { class: 'su-ready su-screen' },
@@ -504,7 +499,7 @@ const PAGES = {
               first,
               h('div', { class: 'su-bar' },
                 h('button', { type: 'button', class: 'su-chip', onclick: () => { first.value = `Hi ${agent.name}! Tell me about yourself.`; first.focus(); } }, 'Say hi'),
-                h('button', { type: 'button', class: 'su-go', dataset: { primary: '' }, onclick: send }, `Send to ${agent.name}`, h('kbd', {}, `${MOD}↵`)))),
+                h('button', { type: 'button', class: 'su-go', dataset: { primary: '' }, onclick: send }, `Send to ${agent.name}`, h('kbd', {}, SEND_KEY)))),
           ]
           : [h('h1', { class: 'su-awake' }, 'munin is set up.'), h('p', { class: 'su-lead' }, 'Make an agent whenever you like, under Agents.')],
         h('div', { class: 'su-after' },
