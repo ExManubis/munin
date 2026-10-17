@@ -395,5 +395,29 @@ export function googleApps({ google, fetch = globalThis.fetch, gmail = GMAIL, ca
     ],
   };
 
-  return [gmailApp, calendarApp];
+  // What routines that start on mail or the calendar look at (googlewatch.js). Only while the
+  // app answers; the scheduler asks per agent whether it has the app.
+  const watch = {
+    gmailReady: () => gmailApp.ready().ok,
+    calendarReady: () => calendarApp.ready().ok,
+    async historyId() {
+      return (await call(gmail, '/profile'))?.historyId ?? null;
+    },
+    async threads(query) {
+      const found = await call(gmail, '/threads', { query: { q: query, maxResults: 20 } });
+      if (!found?.threads?.length) return [];
+      const threads = await Promise.all(found.threads.map((t) => call(gmail, `/threads/${encodeURIComponent(t.id)}`, { query: { format: 'metadata', metadataHeaders: ['Subject', 'From', 'Date'] } })));
+      return threads.map((thread) => ({ id: thread.id, line: threadLine(thread) }));
+    },
+    async events(from, to) {
+      const found = await call(calendar, '/calendars/primary/events', { query: { timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: 'true', orderBy: 'startTime', maxResults: 50 } });
+      return { events: found?.items || [], zone: found?.timeZone || null };
+    },
+    async invitations(from) {
+      const found = await call(calendar, '/calendars/primary/events', { query: { timeMin: from.toISOString(), timeMax: new Date(from.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString(), singleEvents: 'true', orderBy: 'startTime', maxResults: 100 } });
+      return (found?.items || []).filter((e) => e.attendees?.some((a) => a.self && a.responseStatus === 'needsAction'));
+    },
+    time: (point, zone) => when(point, zone),
+  };
+  return Object.assign([gmailApp, calendarApp], { watch });
 }

@@ -140,7 +140,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     name: Type.Optional(Type.String({ description: 'What to call it, like Morning brief' })),
     when: Type.Optional(Type.String({ description: "When it runs, like 'Weekdays 07:30', 'Every 30 minutes, 08–18', or for the tracker 'When an issue moves to In review'" })),
     does: Type.Optional(Type.String({ description: 'What to do each time, as you would say it to yourself' })),
-    trigger: Type.Optional(Type.Union([Type.Literal('schedule'), Type.Literal('tracker')], { description: 'schedule (the default) or tracker' })),
+    trigger: Type.Optional(Type.Union([Type.Literal('schedule'), Type.Literal('tracker'), Type.Literal('mail'), Type.Literal('calendar')], { description: 'schedule (the default), tracker, mail or calendar' })),
   };
   const say = (text, isError = false) => ({ output: [{ type: 'text', text }], ...(isError ? { isError: true } : {}) });
   const routineLine = (r) => `${r.id} · ${r.name} · ${r.when}${r.next ? ` · next ${new Date(r.next).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}${r.note ? ` · ${r.note}` : ''}\n  does: ${r.does}`;
@@ -220,6 +220,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
           tracker: agent.abilities.tracker ? { reachable: tracker.reachable() && Boolean(agent.tracker?.token), projects: agent.tracker?.projects || [] } : null,
           repos: Object.keys(repos),
           routines: agent.routines.length,
+          watches: { mail: Boolean(googleFor(agent, 'mail')), calendar: Boolean(googleFor(agent, 'calendar')) },
         });
       }, { tag: false }),
       section('about', (input) => {
@@ -375,10 +376,18 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     for (const agent of agents.values()) await (await conversationOf(agent)).configure(change(agent), ctx).catch(() => {});
   };
   const google = await openGoogle({ file: settings.googleFile || null, now, ...googleTest });
+  const googleTools = googleApps({ google, ...googleTest.apis });
   const apps = await openApps({
     file: settings.appsFile || null, registry, onChange: () => { reconfigure(); },
-    builtins: googleApps({ google, ...googleTest.apis }), // Gmail and Google Calendar, once you sign in
+    builtins: googleTools, // Gmail and Google Calendar, once you sign in
   });
+  // An agent's Gmail or Google Calendar for routines to watch (googlewatch.js), while it has
+  // the app and it answers.
+  const googleFor = (agent, kind) => {
+    const id = kind === 'mail' ? 'gmail' : 'google-calendar';
+    const ready = kind === 'mail' ? googleTools.watch.gmailReady() : googleTools.watch.calendarReady();
+    return agent.abilities.apps && ready && apps.idsFor(agent).includes(id) ? googleTools.watch : null;
+  };
   harness = await Harness.open(storage, {
     models: models.models,
     registry,
@@ -1001,7 +1010,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   const iso = (ms) => (ms == null ? null : new Date(ms).toISOString());
   const routineOut = (r, agent) => ({
     id: r.id, name: r.name, trigger: r.trigger, when: r.when, does: r.does,
-    next: iso(r.next), last: iso(r.last), note: routineNote(r, agent),
+    next: iso(r.next), last: iso(r.last), note: routineNote(r, agent, { mail: Boolean(googleFor(agent, 'mail')), calendar: Boolean(googleFor(agent, 'calendar')) }),
   });
 
   // A routine's input waits behind whatever the agent is doing; one that's still waiting
@@ -1023,6 +1032,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     run: runRoutine,
     feed: (agent, args) => tracker.call(agent, 'events', args),
     issue: (agent, ref) => tracker.call(agent, 'get_issue', { issue: ref }),
+    google: googleFor,
     save: saveAgents,
     now,
   });

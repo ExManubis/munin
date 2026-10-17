@@ -29,6 +29,7 @@ test('an equipped agent hears what it can do, what asks first, and what it could
     tracker: { reachable: true, projects: ['MUN'] },
     repos: ['MUN'],
     routines: 2,
+    watches: { mail: true, calendar: false },
   });
   const said = lines(text);
   assert.match(said[0], /^What you can do\. When you're asked what you can do, or whether you can do something, answer from this/);
@@ -37,12 +38,13 @@ test('an equipped agent hears what it can do, what asks first, and what it could
   assert.ok(!said.some((l) => l.startsWith('- Google Calendar')), "an app that doesn't work isn't offered");
   assert.ok(said.includes("- munin's tracker: take, review and file issues, in MUN."));
   assert.ok(said.includes('- Code: a folder of your own with a shell, files and git; munin keeps the code of MUN, and taking one of their issues gives you a worktree on its own branch.'));
-  assert.match(text, /, and for the tracker "When an issue moves to In review"\. You have 2\./);
+  assert.match(text, /, for the tracker "When an issue moves to In review", for mail \(trigger mail\) "When new mail arrives" or "When mail from ann@example\.com arrives"\. You have 2\./);
+  assert.doesNotMatch(text, /for the calendar \(trigger calendar\)/, "its calendar isn't working");
   assert.match(text, /These ask Mikkel first, and munin tells you the answer: sending mail \(Gmail\) and pushing to git\. Everything else you just do/);
   assert.ok(said.includes("- Use Google Calendar, which you have but which isn't working: Sign in with Google in Settings."));
   assert.ok(said.includes('- Use Linear (Mikkel can pick it under Apps on your profile).'));
   assert.ok(!said.some((l) => /turn on the (Web|Apps|Code|Tracker) ability/.test(l)), 'it has them all');
-  assert.ok(said.includes('- Wake you when new mail arrives. A routine on a schedule, like "Every 30 minutes, 08–18", does instead.'));
+  assert.doesNotMatch(text, /Wake you when new mail arrives/, 'munin can do that now');
 });
 
 test("a bare agent isn't offered what it doesn't have, and hears who can switch it on", () => {
