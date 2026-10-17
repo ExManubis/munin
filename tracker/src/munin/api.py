@@ -17,7 +17,7 @@ from munin import agents as agent_svc
 from munin import issues as svc
 from munin.issues import Actor, Invalid
 from munin.push import PushError
-from munin.models import Agent, Comment, Event, Issue, Project
+from munin.models import Agent, Comment, Event, Issue, Project, utcnow
 
 router = APIRouter(prefix="/api")
 
@@ -98,6 +98,8 @@ class IssueOut(BaseModel):
     waiting_on_human: bool
     # Ids of the issues this one waits for that aren't done yet.
     blocked_by: list[str]
+    # Its questions are out of your inbox until then.
+    snoozed_until: UTCDateTime | None = None
 
 
 class PullRequestOut(BaseModel):
@@ -174,6 +176,7 @@ def _issue_out(issue: Issue) -> IssueOut:
         status_changed_at=issue.status_changed_at or issue.updated_at,
         waiting_on_human=svc.waiting_on_human(issue),
         blocked_by=[blocker.ref for blocker in svc.open_blockers(issue)],
+        snoozed_until=issue.snoozed_until if issue.snoozed_until and issue.snoozed_until > utcnow() else None,
     )
 
 
@@ -337,8 +340,18 @@ def add_comment(ref: str, body: CommentIn, s: DB, actor: Human) -> IssueDetailOu
 
 
 @router.get("/inbox")
-def inbox(s: DB) -> list[InboxItemOut]:
-    return [InboxItemOut(issue=_issue_out(c.issue), question=_comment_out(c)) for c in svc.inbox(s)]
+def inbox(s: DB, snoozed: bool = False) -> list[InboxItemOut]:
+    """Questions waiting on you, or (`snoozed`) the ones put off till later."""
+    return [InboxItemOut(issue=_issue_out(c.issue), question=_comment_out(c)) for c in svc.inbox(s, snoozed)]
+
+
+class SnoozeIn(BaseModel):
+    until: datetime | None  # None wakes it now
+
+
+@router.put("/issues/{ref}/snooze")
+def snooze(ref: str, body: SnoozeIn, s: DB) -> IssueOut:
+    return _issue_out(svc.snooze(s, ref, body.until))
 
 
 @router.get("/activity")

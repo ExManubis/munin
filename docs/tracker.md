@@ -55,7 +55,7 @@ Tools return short plain text to keep agents' context small. They're the same fo
 
 The web UI updates live as agents work.
 
-- **Inbox**: agents' questions, oldest first, with the issue for context. Replying on the issue answers them. Below them, "Lately": what agents have been doing, with what's new since you last looked marked.
+- **Inbox**: agents' questions, oldest first, with the issue for context. Replying on the issue answers them. A question you can't answer yet can be snoozed (later today, tomorrow morning, next week, or a day you pick): the issue's questions leave the inbox and the waiting count until then and come back on their own, or sooner if the agent asks something new. Snoozing is yours alone, so agents aren't told and their question just waits. Snoozed questions are listed below the open ones, where you can wake one early. Below them, "Lately": what agents have been doing, with what's new since you last looked marked.
 - **Projects**: the brief agents read, then issues grouped by status with the Todo pile in order (reorder it by dragging), or as a board. "Put an agent on it" has the commands to start one.
 - **Issue**: title, description, status, assignee, linked pull requests (paste a URL to link one), what it waits for and blocks, and one timeline of comments and history. An issue whose agent has gone quiet can be released.
 - **Agents**: tokens (created once, revocable), and what each agent is working on.
@@ -70,4 +70,4 @@ From a terminal:
 
 ## Not yet
 
-Permission settings, snooze, and multiple human users.
+Permission settings and multiple human users.

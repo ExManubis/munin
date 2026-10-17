@@ -72,16 +72,25 @@ async function refreshShared({ tracker = true } = {}) {
   const [runtimeAgents, waiting, ...rest] = await Promise.all([
     runtime.agents(),
     runtime.waiting(),
-    ...(tracker ? [api.projects(), api.inbox(), api.agents()] : []),
+    ...(tracker ? [api.projects(), api.inbox(), api.agents(), api.snoozed()] : []),
   ]);
   Object.assign(store, { runtimeAgents, waiting });
   if (tracker) {
-    const [projects, inbox, agents] = rest;
-    Object.assign(store, { projects, inbox, agents });
+    const [projects, inbox, agents, snoozed] = rest;
+    Object.assign(store, { projects, inbox, agents, snoozed });
+    wakeAt(snoozed);
     checkNotifications();
     syncTrackerAnswers();
   }
   updateBadges();
+}
+
+// A snoozed question comes back on its own: look again when the first one's time comes.
+let wakeTimer;
+function wakeAt(snoozed) {
+  clearTimeout(wakeTimer);
+  const first = Math.min(...snoozed.map((item) => Date.parse(item.issue.snoozed_until)).filter(Number.isFinite));
+  if (Number.isFinite(first)) wakeTimer = setTimeout(() => liveRefresh(), Math.min(Math.max(first - Date.now(), 0) + 500, 2 ** 31 - 1));
 }
 
 // Load the current route and draw it. A live update (`live`) only redraws when the data
@@ -130,6 +139,7 @@ function sharedState() {
     store.projects,
     store.runtimeAgents,
     store.inbox.map((item) => item.question.id),
+    store.snoozed.map((item) => [item.question.id, item.issue.snoozed_until]),
   ];
 }
 
