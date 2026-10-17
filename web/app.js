@@ -1,6 +1,7 @@
 // munin web UI: the topbar, routing, live updates, each part's sidebar and keyboard shortcuts.
 // munin has two parts, each with its own sidebar: AGENTS (munin's own agents, from the agent
-// runtime) and TRACKER (issues, from the tracker). Settings sits behind your square.
+// runtime) and TRACKER (issues, from the tracker). Settings sits behind your square. Without a
+// runtime there's no AGENTS part, until one turns up.
 //
 // Each view exports { load(params), render(data, ctx), title(data) } and optionally
 // onKey(e, data, ctx), leave(), scope(params) and poll(data), which asks for polling
@@ -37,6 +38,8 @@ const ROUTES = [
   [/^\/settings$/, settingsView, () => ({}), 'settings'],
 ];
 const HOME = { agents: '#/agents', tracker: '#/inbox' };
+const hasAgents = () => runtime.kind !== 'none';
+const home = () => (hasAgents() ? HOME.agents : HOME.tracker);
 
 const app = document.getElementById('app');
 const appbar = document.getElementById('appbar');
@@ -50,7 +53,7 @@ let seq = 0;
 let stale = false; // a live update arrived while the human was in the middle of something
 
 function parseRoute() {
-  const path = location.hash.replace(/^#/, '') || remember('munin:section-path') || '/agents';
+  const path = location.hash.replace(/^#/, '') || remember('munin:section-path') || home().slice(1);
   for (const [pattern, view, params, section] of ROUTES) {
     const m = path.match(pattern);
     if (m) {
@@ -98,7 +101,8 @@ function wakeAt(snoozed) {
 async function refresh({ live = false, tracker = true } = {}) {
   const mine = ++seq;
   const route = parseRoute();
-  if (!route) return location.replace(HOME.agents);
+  if (!route) return location.replace(home());
+  if (route.section === 'agents' && !hasAgents()) return location.replace(sectionHref('tracker'));
   try {
     await refreshShared({ tracker });
     const data = await route.view.load(route.params);
@@ -197,7 +201,7 @@ function errorPage(err) {
     h('header', { class: 'topbar' }, h('div', { class: 'topbar-left' }, h('span', { class: 'title' }, err.status === 404 ? 'Not found' : 'Something went wrong'))),
     h('div', { class: 'empty-state small' },
       h('h2', {}, err.message),
-      h('p', {}, h('a', { class: 'link', href: HOME.agents }, 'Back to your agents'))));
+      h('p', {}, h('a', { class: 'link', href: home() }, hasAgents() ? 'Back to your agents' : 'Back to the inbox'))));
 }
 
 function setOnline(ok) {
@@ -220,7 +224,7 @@ function renderChrome(route, data) {
   app.className = `app section-${route.section}`;
 
   const key = JSON.stringify([route.path, route.section, data?.issue?.project, store.projects, store.inbox.length,
-    liveAgents().map((a) => [a.name, isWorking(a)]), store.runtimeAgents, waiting.length, store.me]);
+    liveAgents().map((a) => [a.name, isWorking(a)]), store.runtimeAgents, waiting.length, store.me, runtime.kind]);
   if (key === chromeKey) return;
   chromeKey = key;
 
@@ -243,9 +247,9 @@ function renderAppbar(route, waiting) {
     'aria-current': route.section === section ? 'page' : null,
   }, label);
   appbar.replaceChildren(...[
-    h('a', { class: 'logo', href: HOME.agents, 'aria-label': 'munin' },
+    h('a', { class: 'logo', href: home(), 'aria-label': 'munin' },
       h('img', { src: 'munin-lockup-dither-on-dark.svg', alt: 'munin', width: 122, height: 26 })),
-    h('nav', { class: 'section-tabs', 'aria-label': 'Parts of munin' }, tab('agents', 'Agents'), tab('tracker', 'Tracker')),
+    hasAgents() ? h('nav', { class: 'section-tabs', 'aria-label': 'Parts of munin' }, tab('agents', 'Agents'), tab('tracker', 'Tracker')) : null,
     h('div', { class: 'grow' }),
     h('button', { type: 'button', class: 'quick', onclick: openPalette }, icon('search'), h('span', {}, 'Search or jump to…'), kbd(`${MOD}K`)),
     waiting.length
@@ -305,14 +309,16 @@ function settingsSidebar() {
   return [
     h('div', { class: 'label nav-heading first' }, 'Settings'),
     h('nav', { class: 'nav', 'aria-label': 'Settings' },
-      jump('providers', 'Models and providers'),
-      jump('google', 'Google'),
-      jump('apps', 'Apps'),
-      store.projects.length ? jump('code', 'Code') : null,
+      ...(hasAgents() ? [
+        jump('providers', 'Models and providers'),
+        jump('google', 'Google'),
+        jump('apps', 'Apps'),
+        store.projects.length ? jump('code', 'Code') : null,
+      ] : [jump('runtime', 'Agent runtime')]),
       jump('github', 'GitHub'),
       jump('outside-agents', 'Outside agents'),
       jump('notifications', 'Notifications'),
-      jump('setup', 'Setup'),
+      hasAgents() ? jump('setup', 'Setup') : null,
       runtime.kind === 'mock' ? jump('dummy', 'Dummy data') : null),
   ];
 }
@@ -324,11 +330,12 @@ function renderTabbar(route) {
     lead, h('span', {}, label), badge ? h('span', { class: 'badge' }, badge) : null);
   const action = (iconName, label, onclick) => h('button', { type: 'button', class: 'tab', onclick }, icon(iconName, { size: 16 }), h('span', {}, label));
   const agentsWaiting = store.waiting.length;
-  tabbar.replaceChildren(
-    tab(sectionHref('agents'), figbot({ size: 18, state: 'idle', animate: false, cls: onAgents ? null : 'dim' }), 'Agents', onAgents, agentsWaiting),
+  tabbar.replaceChildren(...[
+    hasAgents() ? tab(sectionHref('agents'), figbot({ size: 18, state: 'idle', animate: false, cls: onAgents ? null : 'dim' }), 'Agents', onAgents, agentsWaiting) : null,
     tab(sectionHref('tracker'), icon('inbox', { size: 16, color: onTracker ? '#EDEDED' : '#7A7A7A' }), 'Tracker', onTracker, store.inbox.length),
     action('plus', 'New', () => (onAgents ? (location.hash = '#/agents/new') : openNewIssue())),
-    action('search', 'Search', openPalette));
+    action('search', 'Search', openPalette),
+  ].filter(Boolean));
 }
 
 // Keyboard ---------------------------------------------------------------------
@@ -352,7 +359,7 @@ document.addEventListener('keydown', (e) => {
   if (dialogOpen()) return;
   if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]')) return;
   // G then A or T: go to Agents or the Tracker.
-  if (Date.now() - pendingG < 1200 && /^[at]$/i.test(e.key)) {
+  if (Date.now() - pendingG < 1200 && (hasAgents() ? /^[at]$/i : /^t$/i).test(e.key)) {
     e.preventDefault();
     pendingG = 0;
     location.hash = sectionHref(e.key.toLowerCase() === 'a' ? 'agents' : 'tracker');
@@ -444,7 +451,7 @@ addEventListener('munin:setup-closed', () => refresh());
 window.addEventListener('hashchange', () => {
   // #/setup opens setup over wherever you were.
   if (location.hash === '#/setup') {
-    history.replaceState(null, '', `#${current.path || '/agents'}`);
+    history.replaceState(null, '', current.path ? `#${current.path}` : home());
     openSetup();
     return;
   }
@@ -464,8 +471,8 @@ window.addEventListener('hashchange', () => {
   const about = await runtime.me().catch(() => null);
   store.human = about?.name && about.name !== 'me' ? about.name : null;
   const asked = location.hash === '#/setup';
-  if (asked) history.replaceState(null, '', `#${remember('munin:section-path') || '/agents'}`);
-  if (!location.hash) location.replace(`#${parseRoute()?.path || '/agents'}`);
+  if (asked) history.replaceState(null, '', `#${remember('munin:section-path') || home().slice(1)}`);
+  if (!location.hash) location.replace(parseRoute() ? `#${parseRoute().path}` : home());
   if (asked || (about && about.setup !== 'done')) openSetup({ intro: !asked && !about.setup });
   await refresh();
   connect();

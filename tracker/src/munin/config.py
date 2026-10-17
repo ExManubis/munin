@@ -21,6 +21,8 @@ class Settings:
     # and the Tailscale logins allowed in through it. Agents' MCP calls need a token instead.
     public_url: str | None = None
     users: tuple[str, ...] = ()
+    # munin demo: the frontend shows the Agents part with the runtime's stand-in.
+    demo: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":

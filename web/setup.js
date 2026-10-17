@@ -58,6 +58,11 @@ const machine = () => {
 
 export async function openSetup({ intro = false } = {}) {
   if (layer) return;
+  // Setup is about munin's own agents; without the runtime, outside agents are in Settings.
+  if (runtime.kind === 'none') {
+    location.hash = '#/settings';
+    return;
+  }
   document.body.classList.add('setup-pending'); // the app stays out of sight while setup gets ready
   let about;
   try {
