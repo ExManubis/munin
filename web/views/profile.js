@@ -267,8 +267,8 @@ function askFirst(agent, set) {
 // Each trigger: its label, an example for the When field, and what munin understands there.
 const TRIGGERS = [
   ['schedule', 'On a schedule', 'Weekdays 07:30', "Like 'Weekdays 07:30', 'Mondays at 9', 'Every night 02:00' or 'Every 2 hours, 08–18', in the runtime's time zone."],
-  ['mail', 'When mail arrives', 'When mail from Paul Eriksen arrives', "munin can't connect mail yet, so this waits until it can."],
-  ['calendar', 'When the calendar changes', 'When an event is moved or about to start', "munin can't connect a calendar yet, so this waits until it can."],
+  ['mail', 'When mail arrives', 'When mail from Paul Eriksen arrives', "Like 'When new mail arrives', 'When mail from ann@example.com arrives', 'When mail about invoices arrives' or 'When mail matching is:important arrives'. Needs Gmail on this agent; munin looks about once a minute."],
+  ['calendar', 'From the calendar', 'Before each meeting', "Like 'Before each meeting', '15 minutes before each event' or 'When an invitation arrives'. Needs Google Calendar on this agent; munin looks about once a minute."],
   ['tracker', 'When an issue moves', 'When an issue moves to In review', "Like 'When an issue moves to In review', 'When vera sends my work back' or 'When an issue in MUN is created'."],
 ];
 

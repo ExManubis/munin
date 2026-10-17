@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 
 from munin import agents as agent_svc
 from munin import issues as svc
-from munin.issues import Actor
+from munin.issues import Actor, Invalid
+from munin.push import PushError
 from munin.models import Agent, Comment, Event, Issue, Project
 
 router = APIRouter(prefix="/api")
@@ -398,6 +399,36 @@ async def stream(request: Request) -> StreamingResponse:
             quiet += 0.25
 
     return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+class PushSubscriptionIn(BaseModel):
+    subscription: dict
+
+
+class PushForgetIn(BaseModel):
+    endpoint: str
+
+
+@router.get("/push")
+def push_status(request: Request) -> dict:
+    """The key a device subscribes with, and how many devices get the tracker's pushes."""
+    push = request.app.state.push
+    return {"key": push.key, "devices": len(push.devices)}
+
+
+@router.post("/push", status_code=201)
+def push_subscribe(request: Request, body: PushSubscriptionIn) -> dict:
+    try:
+        request.app.state.push.subscribe(body.subscription)
+    except PushError as error:
+        raise Invalid(str(error)) from error
+    return push_status(request)
+
+
+@router.delete("/push")
+def push_forget(request: Request, body: PushForgetIn) -> dict:
+    request.app.state.push.unsubscribe(body.endpoint)
+    return push_status(request)
 
 
 @router.get("/agents")

@@ -46,7 +46,6 @@ const ABILITIES = {
 // What munin can't do for any agent yet, and what to offer instead.
 const NOT_IN_MUNIN = [
   "Reach a phone. What you say waits in munin until it's read.",
-  'Wake you when new mail arrives. A routine on a schedule, like "Every 30 minutes, 08–18", does instead.',
   'Make pictures.',
 ];
 
@@ -54,13 +53,14 @@ const NOT_IN_MUNIN = [
 // knows what it could do if something were switched on. `setup` is what the runtime knows:
 //   search: whether its model can search the web (OpenRouter);
 //   apps: { mine: [{ name, answering, detail, does }], others: [{ name, detail }] } (apps.js);
-//   tracker: { reachable, projects }, repos: project keys with code, routines: how many it has.
-export function capabilities(agent, name, { search = false, apps = { mine: [], others: [] }, tracker = null, repos = [], routines = 0 } = {}) {
+//   tracker: { reachable, projects }, repos: project keys with code, routines: how many it has,
+//   watches: { mail, calendar }, whether its Gmail and Google Calendar can start routines.
+export function capabilities(agent, name, { search = false, apps = { mine: [], others: [] }, tracker = null, repos = [], routines = 0, watches = {} } = {}) {
   const you = name || 'the person you work for';
   const has = (ability) => Boolean(agent.abilities?.[ability]);
   const can = [];
   can.push(`Talk things through with ${you}. When you need a decision, use ask_human; they may be away for hours. When you learn something about ${you} that will still be true next week, use remember.`);
-  can.push(`Routines: work you do on your own. When you're asked to do something regularly, like a morning brief, set it up with add_routine (and change_routine, remove_routine, list_routines). munin understands "when" like "Weekdays 07:30", "Mondays at 9", "Every night 02:00" or "Every 30 minutes, 08–18"${has('tracker') ? ', and for the tracker "When an issue moves to In review"' : ''}. You have ${routines === 0 ? 'none yet' : routines === 1 ? 'one' : routines}.`);
+  can.push(`Routines: work you do on your own. When you're asked to do something regularly, like a morning brief, set it up with add_routine (and change_routine, remove_routine, list_routines). munin understands "when" like "Weekdays 07:30", "Mondays at 9", "Every night 02:00" or "Every 30 minutes, 08–18"${has('tracker') ? ', for the tracker "When an issue moves to In review"' : ''}${watches.mail ? ', for mail (trigger mail) "When new mail arrives" or "When mail from ann@example.com arrives"' : ''}${watches.calendar ? ', for the calendar (trigger calendar) "Before each meeting", "15 minutes before each event" or "When an invitation arrives"' : ''}. You have ${routines === 0 ? 'none yet' : routines === 1 ? 'one' : routines}.`);
   if (has('web')) {
     can.push(search
       ? 'The web: search it with web_search and read a page with read_page. Say where what you found came from.'

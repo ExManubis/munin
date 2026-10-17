@@ -1,10 +1,11 @@
-// Routines: work an agent does on its own, on a schedule or when something happens in the
-// tracker. A routine that's due becomes an input in the agent's conversation, queued behind
-// whatever it's doing, and shows there as "ran routine". Mail and calendar triggers are kept
-// for when munin can connect those apps.
+// Routines: work an agent does on its own, on a schedule, when something happens in the
+// tracker, or on mail and the calendar (googlewatch.js, through Gmail and Google Calendar). A
+// routine that's due becomes an input in the agent's conversation, queued behind whatever it's
+// doing, and shows there as "ran routine".
 
 import { parseSchedule, describeSchedule, nextRun, ScheduleError } from './schedule.js';
 import { parseWatch, describeWatch, readFeed, matches, WatchError } from './watch.js';
+import { parseMail, describeMail, parseCalendar, describeCalendar, watchMail, watchCalendar, WatchError as GoogleWatchError, POLL_MS as GOOGLE_POLL_MS } from './googlewatch.js';
 
 export const TRIGGERS = ['schedule', 'tracker', 'mail', 'calendar'];
 // A run missed while the runtime was down still happens if it's this recent.
@@ -29,18 +30,26 @@ export function prepareRoutine({ name, trigger = 'schedule', when = '', does = '
       const watch = parseWatch(clean.when, agent.name);
       return { ...clean, when: describeWatch(watch), watch, next: null };
     }
+    if (trigger === 'mail') {
+      const mail = parseMail(clean.when || 'When new mail arrives');
+      return { ...clean, when: describeMail(mail), mail, next: null };
+    }
+    const calendar = parseCalendar(clean.when || 'Before each meeting');
+    return { ...clean, when: describeCalendar(calendar), calendar, next: null };
   } catch (err) {
-    if (err instanceof ScheduleError || err instanceof WatchError) throw new RoutineError(err.message);
+    if (err instanceof ScheduleError || err instanceof WatchError || err instanceof GoogleWatchError) throw new RoutineError(err.message);
     throw err;
   }
-  if (!clean.when) throw new RoutineError(`Say when, like "When mail from Paul arrives".`);
-  return { ...clean, next: null };
 }
 
-// Why a routine isn't running, if it isn't.
-export function routineNote(routine, agent) {
-  if (routine.trigger === 'mail') return "Waits for the mail app, which munin can't connect yet.";
-  if (routine.trigger === 'calendar') return "Waits for the calendar app, which munin can't connect yet.";
+// Why a routine isn't running, if it isn't. `has` says whether the agent has Gmail and Google
+// Calendar working.
+export function routineNote(routine, agent, has = {}) {
+  if (routine.trigger === 'mail' && !routine.mail) return 'Edit it to set it up again.';
+  if (routine.trigger === 'calendar' && !routine.calendar) return 'Edit it to set it up again.';
+  if (routine.trigger === 'mail' && !has.mail) return `Starts once ${agent.name} has Gmail: sign in with Google in Settings, then pick Gmail on its profile.`;
+  if (routine.trigger === 'calendar' && !has.calendar) return `Starts once ${agent.name} has Google Calendar: sign in with Google in Settings, then pick it on its profile.`;
+  if (routine.trigger === 'mail' || routine.trigger === 'calendar') return null;
   if (routine.trigger === 'tracker' && !(agent.abilities.tracker && agent.tracker?.token)) return `Starts once ${agent.name} is in the tracker.`;
   if (!routine.schedule && !routine.watch) return 'Edit it to set it up again.';
   return null;
@@ -48,9 +57,27 @@ export function routineNote(routine, agent) {
 
 // `agents()` lists agents; `run(agent, routine, reason)` starts a routine; `feed(agent, args)`
 // calls the tracker's `events` tool as the agent, and `issue(agent, ref)` its `get_issue`;
+// `google(agent, 'mail' | 'calendar')` is its Gmail or Calendar to watch, or null;
 // `save()` keeps what changed. `tick()` does whatever is due at `now()`.
-export function createScheduler({ agents, run, feed, issue, save, now }) {
+export function createScheduler({ agents, run, feed, issue, google = () => null, save, now }) {
   const polled = new Map(); // agent name → when its feed was last read
+  const looked = new Map(); // agent name → when its mail and calendar were last looked at
+
+  async function mailAndCalendar(agent, t) {
+    if (!agent.routines.some((r) => r.mail || r.calendar)) return false;
+    if (t - (looked.get(agent.name) || 0) < GOOGLE_POLL_MS) return false;
+    looked.set(agent.name, t);
+    const start = (routine, why) => run(agent, routine, { why });
+    let dirty = false;
+    for (const [kind, watch] of [['mail', watchMail], ['calendar', watchCalendar]]) {
+      try {
+        dirty = (await watch(agent, google(agent, kind), start, t)) || dirty;
+      } catch {
+        // Google is away or refused; try again next look
+      }
+    }
+    return dirty;
+  }
 
   async function schedules(agent, t) {
     let dirty = false;
@@ -120,6 +147,7 @@ export function createScheduler({ agents, run, feed, issue, save, now }) {
       let dirty = false;
       for (const agent of [...agents()]) {
         dirty = (await schedules(agent, t)) || dirty;
+        dirty = (await mailAndCalendar(agent, t)) || dirty;
         try {
           dirty = (await events(agent, t)) || dirty;
         } catch {

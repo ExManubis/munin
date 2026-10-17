@@ -119,7 +119,7 @@ test('a routine on a schedule runs when it is due, and not while its agent is pa
   assert.equal((await ranRoutines(runtime, 'hugin')).length, 3, 'run now');
   assert.match(heard.at(-1), /because you asked/);
   const mail = await runtime.addRoutine('hugin', { name: 'Paul first', trigger: 'mail', when: 'When mail from Paul arrives', does: 'Tell me.' });
-  assert.match(mail.note, /mail app/);
+  assert.match(mail.note, /Starts once hugin has Gmail: sign in with Google in Settings/);
   await runtime.close();
 });
 

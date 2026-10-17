@@ -19,6 +19,7 @@ import { ROLES, ROUTINES_RULE, roleName, askFirstFor, ruleMatches, upgradeBrief 
 import { toItems, summarize } from './items.js';
 import { AppError, describeAppCall, openApps } from './apps.js';
 import { GoogleError, openGoogle } from './google.js';
+import { PushError, openPush } from './push.js';
 import { googleApps } from './googleapps.js';
 import { readPageTool, webSearchTool } from './web.js';
 import { identity, about, capabilities } from './prompt.js';
@@ -83,11 +84,11 @@ function trackerLink(value, current) {
   return link;
 }
 
-// `now`, `timers`, `costOf` and `google` are for tests: a clock to run routines and budgets by,
-// whether a timer runs routines, what a model response cost (the test model's are all free), and
-// Google's endpoints and fetch.
+// `now`, `timers`, `costOf`, `google` and `push` are for tests: a clock to run routines and
+// budgets by, whether a timer runs routines, what a model response cost (the test model's are
+// all free), Google's endpoints and fetch, and how pushes are sent.
 const costOfResponse = (message) => message.usage?.cost?.total || 0;
-export async function openRuntime(settings, { models, storage, now = Date.now, timers = true, costOf = costOfResponse, google: googleTest = {} } = {}) {
+export async function openRuntime(settings, { models, storage, now = Date.now, timers = true, costOf = costOfResponse, google: googleTest = {}, push: pushTest = {} } = {}) {
   storage ||= settings.db === ':memory:' ? new MemoryStorage() : await openNodeSqliteStorage(settings.db);
   const agents = new Map(); // name → settings
   const listeners = new Set();
@@ -104,7 +105,14 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
   const agentFor = (conversationId) => [...agents.values()].find((a) => a.conversationId === conversationId) || null;
   const conversationOf = async (agent) => harness.conversation(agent.conversationId, ctx);
-  const write = async (agent, kind, data) => (await conversationOf(agent)).submit({ type: 'write', entry: { kind, data: { at: now(), ...data } } }, ctx);
+  // Push notifications (push.js): questions, approvals, and what agents that don't code say.
+  const push = await openPush({ file: settings.pushFile || null, subject: settings.publicUrl || 'mailto:munin@localhost', ...pushTest });
+  const write = async (agent, kind, data) => {
+    const written = await (await conversationOf(agent)).submit({ type: 'write', entry: { kind, data: { at: now(), ...data } } }, ctx);
+    if (kind === 'munin.question') push.notify(agent, 'question', data).catch(() => {});
+    if (kind === 'munin.approval') push.notify(agent, 'approval', data).catch(() => {});
+    return written;
+  };
 
   // munin's extension: who the agent is and what it remembers, asking the human, remembering
   // things, and asking first before what its rules say.
@@ -140,7 +148,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     name: Type.Optional(Type.String({ description: 'What to call it, like Morning brief' })),
     when: Type.Optional(Type.String({ description: "When it runs, like 'Weekdays 07:30', 'Every 30 minutes, 08–18', or for the tracker 'When an issue moves to In review'" })),
     does: Type.Optional(Type.String({ description: 'What to do each time, as you would say it to yourself' })),
-    trigger: Type.Optional(Type.Union([Type.Literal('schedule'), Type.Literal('tracker')], { description: 'schedule (the default) or tracker' })),
+    trigger: Type.Optional(Type.Union([Type.Literal('schedule'), Type.Literal('tracker'), Type.Literal('mail'), Type.Literal('calendar')], { description: 'schedule (the default), tracker, mail or calendar' })),
   };
   const say = (text, isError = false) => ({ output: [{ type: 'text', text }], ...(isError ? { isError: true } : {}) });
   const routineLine = (r) => `${r.id} · ${r.name} · ${r.when}${r.next ? ` · next ${new Date(r.next).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}${r.note ? ` · ${r.note}` : ''}\n  does: ${r.does}`;
@@ -220,6 +228,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
           tracker: agent.abilities.tracker ? { reachable: tracker.reachable() && Boolean(agent.tracker?.token), projects: agent.tracker?.projects || [] } : null,
           repos: Object.keys(repos),
           routines: agent.routines.length,
+          watches: { mail: Boolean(googleFor(agent, 'mail')), calendar: Boolean(googleFor(agent, 'calendar')) },
         });
       }, { tag: false }),
       section('about', (input) => {
@@ -240,6 +249,9 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
         const spent = await spentThisMonth(agent);
         spent.total += costOf(message);
         if (agent.budget && spent.total >= agent.budget) await pauseForBudget(agent);
+        // A finished answer (not a step towards one) reaches your devices.
+        const text = message.stopReason === 'stop' ? (message.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim() : '';
+        if (text) push.notify(agent, 'message', { text }).catch(() => {});
       },
     }), hook(ToolTask, {
       beforeTool: async (call, api) => {
@@ -375,10 +387,18 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     for (const agent of agents.values()) await (await conversationOf(agent)).configure(change(agent), ctx).catch(() => {});
   };
   const google = await openGoogle({ file: settings.googleFile || null, now, ...googleTest });
+  const googleTools = googleApps({ google, ...googleTest.apis });
   const apps = await openApps({
     file: settings.appsFile || null, registry, onChange: () => { reconfigure(); },
-    builtins: googleApps({ google, ...googleTest.apis }), // Gmail and Google Calendar, once you sign in
+    builtins: googleTools, // Gmail and Google Calendar, once you sign in
   });
+  // An agent's Gmail or Google Calendar for routines to watch (googlewatch.js), while it has
+  // the app and it answers.
+  const googleFor = (agent, kind) => {
+    const id = kind === 'mail' ? 'gmail' : 'google-calendar';
+    const ready = kind === 'mail' ? googleTools.watch.gmailReady() : googleTools.watch.calendarReady();
+    return agent.abilities.apps && ready && apps.idsFor(agent).includes(id) ? googleTools.watch : null;
+  };
   harness = await Harness.open(storage, {
     models: models.models,
     registry,
@@ -905,6 +925,24 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       apps.changed();
     },
 
+    // Push notifications (push.js): the key a device subscribes with, and its devices.
+    push: () => push.status(),
+
+    async subscribePush(subscription) {
+      try {
+        await push.subscribe(subscription);
+        return push.status();
+      } catch (err) {
+        if (err instanceof PushError) throw invalid(err.message);
+        throw err;
+      }
+    },
+
+    async forgetPush(endpoint) {
+      await push.forget(endpoint);
+      return push.status();
+    },
+
     // Apps (apps.js): MCP servers agents use, which you add in Settings.
     apps: () => apps.list(),
 
@@ -1001,7 +1039,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   const iso = (ms) => (ms == null ? null : new Date(ms).toISOString());
   const routineOut = (r, agent) => ({
     id: r.id, name: r.name, trigger: r.trigger, when: r.when, does: r.does,
-    next: iso(r.next), last: iso(r.last), note: routineNote(r, agent),
+    next: iso(r.next), last: iso(r.last), note: routineNote(r, agent, { mail: Boolean(googleFor(agent, 'mail')), calendar: Boolean(googleFor(agent, 'calendar')) }),
   });
 
   // A routine's input waits behind whatever the agent is doing; one that's still waiting
@@ -1023,6 +1061,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     run: runRoutine,
     feed: (agent, args) => tracker.call(agent, 'events', args),
     issue: (agent, ref) => tracker.call(agent, 'get_issue', { issue: ref }),
+    google: googleFor,
     save: saveAgents,
     now,
   });
