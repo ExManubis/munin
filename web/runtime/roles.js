@@ -26,6 +26,7 @@ ${name}: It'll be fast and sometimes wrong. The slow part is one query without a
   {
     id: 'reviewer',
     name: 'Reviewer',
+    spread: true, // starts on a maker the team doesn't use yet
     line: "Reviews other agents' work and merges it.",
     abilities: { code: true, tracker: true },
     model: 'google/gemini-4-argon',
@@ -43,6 +44,7 @@ ${name}: Yes, with one change: the retry loop never gives up. Cap it at five tri
   {
     id: 'assistant',
     name: 'Assistant',
+    spread: true, // starts on a maker the team doesn't use yet
     line: 'Keeps your calendar, mail and reminders in order.',
     abilities: { apps: true, web: true },
     model: 'anthropic/claude-haiku-5.5',
@@ -59,6 +61,7 @@ ${name}: Tomorrow at 9, when your morning is clear? I'll bring it up then.`,
   {
     id: 'writer',
     name: 'Writer',
+    spread: true, // starts on a maker the team doesn't use yet
     line: 'Drafts, edits and keeps one voice.',
     abilities: { web: true },
     model: 'anthropic/claude-sonnet-5.5',
@@ -75,6 +78,7 @@ ${name}: It sounds like everyone else's launch. Try "It's out." and then say wha
   {
     id: 'researcher',
     name: 'Researcher',
+    spread: true, // starts on a maker the team doesn't use yet
     line: 'Reads up on a question and reports back with sources.',
     abilities: { web: true },
     model: 'anthropic/claude-sonnet-5.5',
@@ -91,6 +95,7 @@ ${name}: Best for what? If you mean plain text you own, I'd compare three. Want 
   {
     id: 'companion',
     name: 'Companion',
+    spread: true, // starts on a maker the team doesn't use yet
     line: 'Someone to talk to. Riddles, ideas, bad puns.',
     abilities: {},
     model: 'anthropic/claude-haiku-5.5',
@@ -139,20 +144,26 @@ export function modelIn(catalog, provider, model) {
 
 // The model a new agent of `role` starts on: its role's when it's offered, or else the first
 // there is. A role kept `apart` from another, like a reviewer from the coders, starts on a model
-// from a different maker than theirs when one is offered, so it doesn't share their blind spots.
-// `agents` are the agents there are, with their role and model.
+// from a different maker than theirs, so it doesn't share their blind spots. Every role but the
+// coder also spreads: when the team already runs on that maker's models, it starts on an offered
+// model from a maker nobody uses yet, at no more than twice the price, the nearest in price. In
+// munin's line-up (tools/lineup.mjs), agents on different makers' models were by far the easiest
+// to tell apart; trimming the prompt made no difference. `agents` are the agents there are, with
+// their role and model.
 const makerOf = (id) => String(id || '').split('/')[0];
 export function startingModel(catalog, role, agents = []) {
   const wanted = modelIn(catalog, 'openrouter', role.model);
-  if (!role.apart) return wanted;
-  const theirs = new Set(agents.filter((a) => a.role === role.apart).map((a) => makerOf(a.model)));
-  if (!theirs.has(makerOf(wanted.model))) return wanted;
-  for (const provider of catalog.filter((p) => p.id !== 'standin')) {
-    const other = provider.models.find((m) => !theirs.has(makerOf(m.id)));
-    if (other) return { provider: provider.id, model: other.id };
-  }
-  return wanted;
+  const avoid = new Set(agents.filter((a) => role.spread || (role.apart && a.role === role.apart)).map((a) => makerOf(a.model)));
+  if (!avoid.has(makerOf(wanted.model))) return wanted;
+  const offered = catalog.filter((p) => p.id !== 'standin').flatMap((p) => p.models.map((m) => ({ provider: p.id, ...m })));
+  const price = offered.find((m) => m.id === wanted.model)?.output ?? null;
+  const fits = (m) => !avoid.has(makerOf(m.id)) && (price == null || (m.output ?? 0) <= Math.max(2 * price, 1));
+  const nearest = offered.filter(fits).sort((a, b) => Math.abs((a.output ?? 0) - (price ?? 0)) - Math.abs((b.output ?? 0) - (price ?? 0)))[0];
+  return nearest ? { provider: nearest.provider, model: nearest.id } : wanted;
 }
+
+// Whether a new agent starts on another maker's model than its role's, to sound unlike the rest.
+export const movedForTeam = (catalog, role, agents) => !role.apart && startingModel(catalog, role, agents).model !== modelIn(catalog, 'openrouter', role.model).model;
 
 // A model's price as "$in / $out", dollars per million tokens; "free" when it costs nothing.
 export function price(model) {

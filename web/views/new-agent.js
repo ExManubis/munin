@@ -3,7 +3,7 @@
 // in from the role until you change them.
 
 import { runtime } from '../runtime/index.js';
-import { ROLES, roleOf, costHint, modelIn, startingModel } from '../runtime/roles.js';
+import { ROLES, roleOf, costHint, modelIn, startingModel, movedForTeam } from '../runtime/roles.js';
 import { connectToTracker, linkable } from '../runtime/tracker-link.js';
 import { store } from '../store.js';
 import { h, MOD, onModEnter, toast, topbar } from '../ui.js';
@@ -81,7 +81,7 @@ export const view = {
               ctx.rerender();
             },
           }),
-          h('p', { class: 'hint' }, role && (chosen().model === role.model || (role.apart && !form.model && chosen().provider !== 'standin')) ? role.hint : costHint(catalog, chosen().provider, chosen().model))),
+          h('p', { class: 'hint' }, modelHint(role))),
         h('section', { class: 'profile-section' },
           h('h2', { class: 'section-title' }, 'Brief'),
           h('p', { class: 'hint section-lead-hint' }, role ? 'Filled in from the role. Make it yours.' : 'Pick a role and this fills in.'),
@@ -127,6 +127,14 @@ export const view = {
     return true;
   },
 };
+
+// What the model line says: why it starts where it does, or what it costs.
+function modelHint(role) {
+  const cost = costHint(catalog, chosen().provider, chosen().model);
+  if (!role) return cost;
+  if (!form.model && movedForTeam(catalog, role, store.runtimeAgents)) return `On another maker's model than your other agents', so it sounds less like them. ${cost}`;
+  return chosen().model === role.model || (role.apart && !form.model && chosen().provider !== 'standin') ? role.hint : cost;
+}
 
 // The model the agent gets: the one picked, or the one its role starts on, or the first on offer.
 const chosen = () => {

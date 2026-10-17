@@ -11,7 +11,7 @@ import { buildModels } from '../src/models.js';
 import { openRuntime } from '../src/runtime.js';
 import { ROLES, SOULS, examplesFor } from '../src/roles.js';
 import { VOICE, identity, team } from '../src/prompt.js';
-import { ROLES as SCREEN_ROLES, startingModel } from '../../web/runtime/roles.js';
+import { ROLES as SCREEN_ROLES, movedForTeam, startingModel } from '../../web/runtime/roles.js';
 
 test("the screens offer the runtime's roles, with the same souls", () => {
   assert.deepEqual(SCREEN_ROLES.map((r) => r.id).toSorted(), Object.keys(ROLES).toSorted());
@@ -96,6 +96,24 @@ test("a reviewer starts on another maker's model than your coders'", () => {
   const anthropicOnly = [{ id: 'openrouter', models: [{ id: 'anthropic/claude-haiku-5.5' }] }, catalog[1]];
   assert.deepEqual(startingModel(anthropicOnly, reviewer, coders), { provider: 'openrouter', model: 'anthropic/claude-haiku-5.5' }, 'never the stand-in instead');
   assert.deepEqual(startingModel(catalog, coder, coders), { provider: 'openrouter', model: 'anthropic/claude-haiku-5.5' }, 'a coder starts anywhere');
+});
+
+test("the other roles start on a maker the team doesn't use yet, at no more than twice the price", () => {
+  const role = (id) => SCREEN_ROLES.find((r) => r.id === id);
+  const catalog = [{ id: 'openrouter', models: [
+    { id: 'anthropic/claude-haiku-5.5', output: 5 }, { id: 'anthropic/claude-opus-5.5', output: 25 },
+    { id: 'meta/muse-wonder', output: 20 }, { id: 'deepseek/deepseek-v4-flash', output: 0.18 }, { id: 'z-ai/glm-5.3', output: 6 },
+  ] }];
+  const team = [{ role: 'coder', model: 'anthropic/claude-sonnet-5.5' }];
+  assert.deepEqual(startingModel(catalog, role('assistant'), team), { provider: 'openrouter', model: 'z-ai/glm-5.3' }, 'the nearest in price to Haiku that nobody uses');
+  assert.ok(movedForTeam(catalog, role('assistant'), team));
+  assert.deepEqual(startingModel(catalog, role('companion'), [...team, { role: 'writer', model: 'z-ai/glm-5.3' }]).model, 'deepseek/deepseek-v4-flash');
+  assert.deepEqual(startingModel(catalog, role('assistant'), [{ role: 'writer', model: 'z-ai/glm-5.3' }]).model, 'anthropic/claude-haiku-5.5', "its role's, when nobody uses that maker");
+  const crowded = [...team, { role: 'writer', model: 'z-ai/glm-5.3' }, { role: 'companion', model: 'deepseek/deepseek-v4-flash' }];
+  assert.equal(startingModel(catalog, role('assistant'), crowded).model, 'anthropic/claude-haiku-5.5', 'not four times the price to be different');
+  assert.ok(!movedForTeam(catalog, role('assistant'), crowded));
+  assert.equal(startingModel(catalog, role('coder'), team).model, 'anthropic/claude-haiku-5.5', 'a coder keeps its strong default where it can');
+  assert.ok(SCREEN_ROLES.filter((r) => r.spread).map((r) => r.id).join() === 'reviewer,assistant,writer,researcher,companion');
 });
 
 test('an agent hears its examples and its team, and keeps the examples you give it', async () => {
