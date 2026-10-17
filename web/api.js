@@ -54,6 +54,8 @@ export const api = {
   comment: (id, body) => request('POST', `/api/issues/${enc(id)}/comments`, { body }),
 
   inbox: () => get('/api/inbox'),
+  snoozed: () => get('/api/inbox?snoozed=true'),
+  snooze: (ref, until) => request('PUT', `/api/issues/${encodeURIComponent(ref)}/snooze`, { until }),
   activity: (params) => get(`/api/activity?${new URLSearchParams(params)}`),
 
   agents: () => get('/api/agents'),

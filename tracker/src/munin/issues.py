@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import and_, case, exists, func, select, update
 from sqlalchemy.orm import Session, aliased
@@ -600,6 +600,8 @@ def add_comment(
     issue.updated_at = now
     s.add(comment)
     s.flush()
+    if asks_human:
+        issue.snoozed_until = None  # something new to answer
     _record(issue, actor, now, "comment", None, str(comment.id))
     s.commit()
     return comment
@@ -633,15 +635,32 @@ def _unanswered():
     return exists().where(reply.issue_id == Comment.issue_id, reply.author_kind == "human", reply.id > Comment.id)
 
 
-def inbox(s: Session) -> list[Comment]:
-    """Open questions from agents, oldest first."""
+def inbox(s: Session, snoozed: bool = False) -> list[Comment]:
+    """Open questions from agents, oldest first: the ones waiting on you, or (`snoozed`) the ones
+    you put off till later."""
+    now = utcnow()
+    asleep = Issue.snoozed_until.is_not(None) & (Issue.snoozed_until > now)
     query = (
         select(Comment)
         .join(Issue)
-        .where(Comment.asks_human, ~_unanswered(), Issue.status.not_in(CLOSED_STATUSES))
+        .where(Comment.asks_human, ~_unanswered(), Issue.status.not_in(CLOSED_STATUSES), asleep if snoozed else ~asleep)
         .order_by(Comment.id)
     )
     return list(s.scalars(query))
+
+
+def snooze(s: Session, ref: str, until: datetime | None) -> Issue:
+    """Put an issue's questions out of your inbox until a time, or (None) bring them back now.
+    No event: agents aren't told, their question just waits. A new question wakes it."""
+    issue = get_issue(s, ref)
+    if until is not None:
+        if until.tzinfo is not None:
+            until = until.astimezone(timezone.utc).replace(tzinfo=None)
+        if until <= utcnow():
+            raise Invalid("Snooze until a time that hasn't come yet.")
+    issue.snoozed_until = until
+    s.commit()
+    return issue
 
 
 def waiting_on_human(issue: Issue) -> bool:

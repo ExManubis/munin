@@ -71,6 +71,8 @@ class Issue(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     # When the issue entered its current status. Empty for issues from before munin kept it.
     status_changed_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow)
+    # Out of your inbox until then. Yours alone: no event, so agents never hear of it.
+    snoozed_until: Mapped[datetime | None] = mapped_column(DateTime, default=None)
 
     project: Mapped[Project] = relationship(back_populates="issues")
     pull_requests: Mapped[list["PullRequest"]] = relationship(
