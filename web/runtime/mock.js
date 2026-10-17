@@ -346,6 +346,7 @@ function summary(agent) {
     roleName: roleOf(agent.role).name,
     colour: agent.colour,
     state: stateOf(agent),
+    expression: agent.expression && Date.parse(agent.expression.until) > Date.now() ? { ...agent.expression } : null,
     waiting: items.filter(isOpen).length,
     preview: preview(agent),
     lastAt: iso(Math.max(last?.at || agent.createdAt, run ? run.steps[run.steps.length - 1]?.at || 0 : 0)),
@@ -548,6 +549,11 @@ function reply(agent, text) {
     const riddle = state.pip.riddle != null ? RIDDLES[state.pip.riddle] : null;
     if (riddle) {
       state.pip.riddle = null;
+      // A right answer shows on pip's face for a minute (the runtime's set_expression).
+      if (riddle[1].test(text)) {
+        agent.expression = { pose: 'excited', until: iso(Date.now() + 60 * 1000) };
+        setTimeout(changed, 60 * 1000 + 50);
+      }
       return say(name, riddle[1].test(text) ? `Yes! ${riddle[2]}. Want another?` : `Good guess, but no: ${riddle[2].toLowerCase()}. Another?`);
     }
     if (/riddle|yes|sure|ok|go|another|ready/i.test(text)) {

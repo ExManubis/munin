@@ -3,7 +3,7 @@
 
 import { api } from './api.js';
 import { store, kindOf, isBusy } from './store.js';
-import { figbot } from './figbot.js';
+import { figbot, faceOf } from './figbot.js';
 import { claudeMark, isClaude } from './claude-mark.js';
 
 export const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl ';
@@ -132,7 +132,8 @@ export function agentState(name) {
 export function agentAvatar(name, { size = 18, state } = {}) {
   if (isClaude(name, ownNames())) return claudeMark({ size, label: name });
   const own = store.runtimeAgents.find((a) => a.name === name);
-  return figbot({ colour: own?.colour || 'white', state: state || agentState(name), size, seed: name, label: name });
+  const shown = state || (own ? faceOf(own, agentState(name)) : agentState(name));
+  return figbot({ colour: own?.colour || 'white', state: shown, size, seed: name, label: name });
 }
 
 // Agents, people and nobody, each with the right square.

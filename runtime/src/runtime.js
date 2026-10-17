@@ -99,6 +99,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
   const agents = new Map(); // name → settings
   const skills = new Map(); // id → skill (skills.js), each with its owner and who it's shared with
   const turns = new Map(); // agent name → 'heartbeat' or 'journal', while munin's own input is being answered (rhythm.js)
+  const expressions = new Map(); // agent name → { pose, until }: how the work is going, on its face for a minute
   const listeners = new Set();
   let harness = null;
   // From setup: what agents call you, your favourite OpenRouter models, and where setup is:
@@ -192,6 +193,33 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       return `Forgot ${old.id}.`;
     }),
   });
+  // A passing expression: the agent's Figbot shows how the work is going for a minute, in one of
+  // the poses it already has, then goes back to showing its status. Each change is an entry, so
+  // the frontend hears of it; status still wins whenever you're needed (web/figbot.js, faceOf).
+  const PASSING = ['excited', 'happy', 'worried'];
+  const EXPRESSION_MS = 60 * 1000;
+  async function express(agent, pose) {
+    const until = now() + EXPRESSION_MS;
+    expressions.set(agent.name, { pose, until });
+    await write(agent, 'munin.expression', { pose, until });
+    if (!timers) return;
+    setTimeout(async () => {
+      if (expressions.get(agent.name)?.until !== until || !agents.has(agent.name)) return;
+      expressions.delete(agent.name);
+      await write(agent, 'munin.expression', { pose: null }).catch(() => {});
+    }, EXPRESSION_MS).unref?.();
+  }
+  const setExpression = defineTool({
+    name: 'set_expression',
+    description: 'Let your face show how the work is going, for a minute: excited when something finally works, happy when something went well, worried when something broke or you are stuck. Use it when something real happens, not for small talk.',
+    parameters: Type.Object({ expression: Type.Union(PASSING.map((p) => Type.Literal(p))) }),
+    execute: async (args, toolApi) => {
+      const agent = agentFor(toolApi.conversationId);
+      await express(agent, args.expression);
+      return say(`Your face shows ${args.expression} for a minute.`);
+    },
+  });
+
   // Skills (skills.js): what the agent knows how to do here. It reads one when it fits, and saves
   // one when it has learned something it'll do again; SKILLS_RULE makes each save ask you first,
   // with the skill on the approval card, and saves it when you allow it.
@@ -332,7 +360,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
   const Munin = defineExtension({
     name: 'munin',
-    tools: [askHuman, remember, changeNoteTool, forgetNoteTool, readSkill, saveSkill, ...routineTools],
+    tools: [askHuman, remember, changeNoteTool, forgetNoteTool, readSkill, saveSkill, setExpression, ...routineTools],
     sections: [
       // Who the agent is, who it's talking with and how it talks, then what it can do, who else
       // is on the team and what it knows about you (prompt.js). The brief and the examples are
@@ -750,13 +778,19 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
     await write(agent, 'munin.action', { verb: 'paused', object: `at its $${agent.budget} budget for ${month}` });
   }
 
+  // The agent's passing expression while it lasts: { pose, until }, or null.
+  const expressionOf = (agent) => {
+    const e = expressions.get(agent.name);
+    return e && e.until > now() ? { pose: e.pose, until: new Date(e.until).toISOString() } : null;
+  };
+
   async function summaryOf(agent) {
     const { items, busy } = await readItems(agent);
     const s = summarize(items, { busy, paused: agent.paused });
     return {
       name: agent.name, role: agent.role, roleName: roleName(agent.role), colour: agent.colour,
       state: s.state, waiting: s.waiting, preview: agent.paused ? (agent.pausedFor === 'budget' ? 'Paused at its budget' : 'Paused') : s.preview, lastAt: s.lastAt || new Date(agent.createdAt).toISOString(),
-      typing: s.typing, provider: agent.provider, model: agent.model,
+      typing: s.typing, provider: agent.provider, model: agent.model, expression: expressionOf(agent),
     };
   }
 

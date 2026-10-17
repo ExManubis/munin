@@ -1,7 +1,7 @@
 // Figbot, the halftone sphere with two eyes, ported from figment-engineering/figbot
 // (src/model.ts and src/svg.ts). Every agent wears it in its own colour; its expression
-// says what the agent is doing. Faces are drawn on small canvases; working faces look
-// around and blink, idle ones blink now and then.
+// says what the agent is doing, or for a minute how the work is going (faceOf). Faces are
+// drawn on small canvases; working faces look around and blink, idle ones blink now and then.
 
 export const COLOURS = {
   white: '#EDEDED',
@@ -24,6 +24,15 @@ export const EXPRESSION = {
   paused: 'sleepy',
   finished: 'happy',
 };
+
+// What an agent's face shows: for a minute, the passing expression it set (excited, happy,
+// worried; the runtime's set_expression), and otherwise its status. Status wins whenever you're
+// needed or it's paused: an agent asking you something looks curious, whatever it set.
+export function faceOf(agent, state = agent.state, at = Date.now()) {
+  const passing = agent.expression;
+  if (!passing || Date.parse(passing.until) <= at || state === 'asks' || state === 'paused') return state;
+  return passing.pose;
+}
 
 // The model ------------------------------------------------------------------------
 
@@ -229,7 +238,7 @@ export function figbot({ colour = 'white', state = 'idle', size = 18, label, see
 
 // Motion -------------------------------------------------------------------------------
 
-const calm = matchMedia('(prefers-reduced-motion: reduce)');
+const calm = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : { matches: true }; // no window: a test
 const moving = new Set();
 let frame = 0;
 let last = 0;

@@ -104,6 +104,8 @@ export function capabilities(agent, name, { search = false, apps = { mine: [], o
   if (has('apps')) {
     for (const app of apps.mine.filter((a) => a.answering)) can.push(`${app.name}${app.detail ? ` (${app.detail.replace(/^As /, 'as ')})` : ''}: ${app.does}.`);
   }
+  // Told "now and then, not every turn", Haiku never set one, even when a build broke.
+  can.push(`Your face: munin draws you as a Figbot in your colour, and ${you} sees it beside everything you say. When something real happens in the work, let your face show it for a minute with set_expression: excited when something finally works, happy when something went well, worried when something broke or you're stuck. Not for small talk.`);
   can.push('Skills: how you do things here, from experience, listed below. Read one with read_skill when it fits, and save one with save_skill when you learn something you\'ll do again.');
   if (has('code')) can.push(`Code: a folder of your own with a shell, files and git${repos.length ? `; munin keeps the code of ${list(repos)}, and taking one of their issues gives you a worktree on its own branch` : ''}.`);
   if (has('tracker')) {

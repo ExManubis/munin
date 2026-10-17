@@ -3,7 +3,7 @@
 
 import { store } from '../store.js';
 import { h, topbar } from '../ui.js';
-import { figbot } from '../figbot.js';
+import { figbot, faceOf } from '../figbot.js';
 import { waitingItems, openWaiting } from '../waiting.js';
 
 // Waiting on you first, then by last activity.
@@ -12,7 +12,7 @@ export function sortedAgents() {
 }
 
 export function agentFace(agent, size = 18, { state, animate = true } = {}) {
-  return figbot({ colour: agent.colour, state: state || agent.state, size, seed: agent.name, label: agent.name, animate });
+  return figbot({ colour: agent.colour, state: state || faceOf(agent), size, seed: agent.name, label: agent.name, animate });
 }
 
 export const roleTag = (agent) => h('span', { class: 'role-tag' }, agent.roleName || agent.role);
