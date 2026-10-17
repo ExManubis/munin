@@ -110,10 +110,9 @@ function sample(p, u, v) {
   if (hit !== null) return hit;
 
   const z = Math.sqrt(1 - d2);
-  // The light wraps round the side a little, so the shaded corner keeps its dots.
-  const ndl = Math.max(0, (x * LIGHT[0] + y * LIGHT[1] + z * LIGHT[2] + 0.5) / 1.5);
+  const ndl = Math.max(0, x * LIGHT[0] + y * LIGHT[1] + z * LIGHT[2]);
   const ndh = Math.max(0, x * HALF[0] + y * HALF[1] + z * HALF[2]);
-  const lum = 0.18 + 0.66 * ndl + 0.5 * ndh ** 40 + 0.12 * (1 - z) ** 3;
+  const lum = 0.06 + 0.78 * ndl + 0.5 * ndh ** 40 + 0.12 * (1 - z) ** 3;
   return Math.min(1, Math.max(Number.MIN_VALUE, p.exposure * lum));
 }
 
@@ -122,6 +121,33 @@ function dotRadius(lum) {
   if (lum <= 0) return 0;
   const r = Math.sqrt(lum) * 0.52;
   return r < 0.07 ? 0 : r;
+}
+
+// Blending, from figment's src/model.ts and src/timeline.ts ---------------------------
+
+const TRANSITION = 0.35; // seconds from one expression to the next
+const mix = (a, b, k) => a * (1 - k) + b * k;
+const smoothstep = (k) => {
+  const x = Math.min(1, Math.max(0, k));
+  return x * x * (3 - 2 * x);
+};
+const lerpEye = (a, b, k) => ({ scale: mix(a.scale, b.scale, k), sx: mix(a.sx, b.sx, k), lid: mix(a.lid, b.lid, k), low: mix(a.low, b.low, k), slant: mix(a.slant, b.slant, k) });
+
+// Numbers interpolate; the eyes' shape and the glint switch halfway.
+function lerp(a, b, k) {
+  const late = k >= 0.5;
+  return {
+    shape: late ? b.shape : a.shape, open: mix(a.open, b.open, k), gx: mix(a.gx, b.gx, k), gy: mix(a.gy, b.gy, k),
+    tilt: mix(a.tilt, b.tilt, k), squash: mix(a.squash, b.squash, k), bob: mix(a.bob, b.bob, k),
+    glint: late ? b.glint : a.glint, exposure: mix(a.exposure, b.exposure, k), eyes: [lerpEye(a.eyes[0], b.eyes[0], k), lerpEye(a.eyes[1], b.eyes[1], k)],
+  };
+}
+
+// a → b at raw progress k; a change of the eyes' shape hides behind a blink.
+function transition(a, b, k) {
+  const p = lerp(a, b, smoothstep(k));
+  if (a.shape !== b.shape) p.open *= 1 - 0.94 * (1 - Math.abs(2 * Math.min(1, Math.max(0, k)) - 1));
+  return p;
 }
 
 // Drawing ---------------------------------------------------------------------------
@@ -155,9 +181,13 @@ function draw(canvas, p, colour, size) {
 }
 
 const still = new Map(); // drawn faces by colour, expression and size, copied rather than redrawn
+// What each face (an agent's, at a size) last showed, so a new expression blends in. Screens
+// draw new canvases when they redraw, so this outlives them.
+const shown = new Map();
 
 // A Figbot as a <canvas>. `colour` is a name from COLOURS (or a hex), `state` a key of
-// EXPRESSION. Working faces move; `animate: false` keeps one still.
+// EXPRESSION. Faces move and blend from one expression to the next, as `seed` (the agent)
+// changes state; `animate: false` keeps one still.
 export function figbot({ colour = 'white', state = 'idle', size = 18, label, seed = '', animate = true, cls } = {}) {
   const hex = COLOURS[colour] || colour || COLOURS.white;
   const expression = EXPRESSION[state] || state;
@@ -173,18 +203,25 @@ export function figbot({ colour = 'white', state = 'idle', size = 18, label, see
     canvas.setAttribute('aria-hidden', 'true');
   }
 
-  const key = `${hex}|${expression}|${size}|${dpr}`;
-  let drawn = still.get(key);
-  if (!drawn) {
-    drawn = document.createElement('canvas');
-    drawn.width = drawn.height = size * dpr;
-    draw(drawn, POSES[expression] || POSES.idle, hex, size);
-    still.set(key, drawn);
+  const moves = animate && !calm.matches;
+  const change = moves && seed ? changeOf(`${seed}|${size}`, expression) : null;
+  const entry = { canvas, hex, expression, size, change, hash: hashOf(seed || `${hex}${expression}`) };
+  if (change) {
+    draw(canvas, poseAt(entry, performance.now() / 1000), hex, size); // mid-blend: not the still
+  } else {
+    const key = `${hex}|${expression}|${size}|${dpr}`;
+    let drawn = still.get(key);
+    if (!drawn) {
+      drawn = document.createElement('canvas');
+      drawn.width = drawn.height = size * dpr;
+      draw(drawn, POSES[expression] || POSES.idle, hex, size);
+      still.set(key, drawn);
+    }
+    canvas.getContext('2d').drawImage(drawn, 0, 0);
   }
-  canvas.getContext('2d').drawImage(drawn, 0, 0);
 
-  if (animate && !calm.matches) {
-    moving.add({ canvas, hex, expression, size, hash: hashOf(seed || `${hex}${expression}`) });
+  if (moves) {
+    moving.add(entry);
     if (!frame) frame = requestAnimationFrame(tick);
   }
   return canvas;
@@ -212,8 +249,24 @@ function blinkAt(t, hash) {
   return d < 0.09 ? Math.max(0.06, d / 0.09) : 1;
 }
 
+// The blend a face is in, if its expression changed in the last moment: { from, at }.
+function changeOf(id, expression) {
+  const now = performance.now() / 1000;
+  const was = shown.get(id);
+  if (was && was.expression !== expression) {
+    const change = { expression, from: was.expression, at: now };
+    shown.set(id, change);
+    return change;
+  }
+  if (!was) shown.set(id, { expression, from: null, at: 0 });
+  return was?.from && now - was.at < TRANSITION ? was : null;
+}
+
 function poseAt(entry, t) {
-  const base = POSES[entry.expression] || POSES.idle;
+  const to = POSES[entry.expression] || POSES.idle;
+  const { change } = entry;
+  const k = change ? (t - change.at) / TRANSITION : 1;
+  const base = k < 1 ? transition(POSES[change.from] || POSES.idle, to, Math.max(0, k)) : to;
   const p = { ...base, open: base.open * blinkAt(t, entry.hash), bob: base.bob + 0.006 * Math.sin(t * 1.35) };
   if (entry.expression === 'thinking') {
     // looking about while it works: big enough to read at 18 px
