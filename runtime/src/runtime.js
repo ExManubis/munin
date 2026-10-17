@@ -15,13 +15,13 @@ import {
 import { createBashTool, createCodingTools } from '@earendil-works/pi-durable/tools';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
-import { ROLES, roleName, askFirstFor, ruleMatches, upgradeBrief } from './roles.js';
+import { ROLES, ROUTINES_RULE, roleName, askFirstFor, ruleMatches, upgradeBrief } from './roles.js';
 import { toItems, summarize } from './items.js';
 import { AppError, describeAppCall, openApps } from './apps.js';
 import { GoogleError, openGoogle } from './google.js';
 import { googleApps } from './googleapps.js';
 import { readPageTool, webSearchTool } from './web.js';
-import { identity, about } from './prompt.js';
+import { identity, about, capabilities } from './prompt.js';
 import { createTracker } from './tracker.js';
 import { createScheduler, prepareRoutine, routineNote, RoutineError } from './routines.js';
 import { createWorkspace, WorkspaceError } from './workspace.js';
@@ -134,15 +134,93 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       return { output: [{ type: 'text', text: 'Remembered.' }] };
     },
   });
+  // Routines the agent sets up for itself, when you ask it to: the same as on its profile, and
+  // each change an action line in its conversation. ROUTINES_RULE can make them ask first.
+  const routineSchema = {
+    name: Type.Optional(Type.String({ description: 'What to call it, like Morning brief' })),
+    when: Type.Optional(Type.String({ description: "When it runs, like 'Weekdays 07:30', 'Every 30 minutes, 08–18', or for the tracker 'When an issue moves to In review'" })),
+    does: Type.Optional(Type.String({ description: 'What to do each time, as you would say it to yourself' })),
+    trigger: Type.Optional(Type.Union([Type.Literal('schedule'), Type.Literal('tracker')], { description: 'schedule (the default) or tracker' })),
+  };
+  const say = (text, isError = false) => ({ output: [{ type: 'text', text }], ...(isError ? { isError: true } : {}) });
+  const routineLine = (r) => `${r.id} · ${r.name} · ${r.when}${r.next ? ` · next ${new Date(r.next).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}${r.note ? ` · ${r.note}` : ''}\n  does: ${r.does}`;
+  const findRoutine = (agent, which) => {
+    const key = String(which || '').trim().toLowerCase();
+    return agent.routines.find((r) => r.id === which || r.name.toLowerCase() === key);
+  };
+  const routineCall = (run) => async (args, toolApi) => {
+    const agent = agentFor(toolApi.conversationId);
+    try {
+      return say(await run(agent, args));
+    } catch (err) {
+      if (err instanceof RuntimeError) return say(err.message, true);
+      throw err;
+    }
+  };
+  const routineTools = [
+    defineTool({
+      name: 'list_routines',
+      description: 'Your routines: work you do on your own, on a schedule or when something happens in the tracker.',
+      parameters: Type.Object({}),
+      execute: routineCall(async (agent) => (agent.routines.length ? agent.routines.map((r) => routineLine(routineOut(r, agent))).join('\n') : 'No routines yet.')),
+    }),
+    defineTool({
+      name: 'add_routine',
+      description: 'Set up a routine for yourself when you are asked to: a name, when it runs, and what to do each time.',
+      parameters: Type.Object({ ...routineSchema, name: Type.String(), when: Type.String(), does: Type.String() }),
+      execute: routineCall(async (agent, args) => {
+        const made = await api.addRoutine(agent.name, { trigger: 'schedule', ...args });
+        await write(agent, 'munin.action', { verb: 'added routine', object: `${made.name}: ${made.when}` });
+        return `Added: ${routineLine(made)}`;
+      }),
+    }),
+    defineTool({
+      name: 'change_routine',
+      description: 'Change one of your routines, by its name or id: only what you give changes.',
+      parameters: Type.Object({ routine: Type.String({ description: 'Its name or id' }), ...routineSchema }),
+      execute: routineCall(async (agent, { routine, ...fields }) => {
+        const found = findRoutine(agent, routine);
+        if (!found) throw new RuntimeError(404, `You have no routine called ${routine}. list_routines shows them.`);
+        const changed = await api.updateRoutine(agent.name, found.id, Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined)));
+        await write(agent, 'munin.action', { verb: 'changed routine', object: `${changed.name}: ${changed.when}` });
+        return `Changed: ${routineLine(changed)}`;
+      }),
+    }),
+    defineTool({
+      name: 'remove_routine',
+      description: 'Stop one of your routines, by its name or id.',
+      parameters: Type.Object({ routine: Type.String({ description: 'Its name or id' }) }),
+      execute: routineCall(async (agent, { routine }) => {
+        const found = findRoutine(agent, routine);
+        if (!found) throw new RuntimeError(404, `You have no routine called ${routine}. list_routines shows them.`);
+        await api.deleteRoutine(agent.name, found.id);
+        await write(agent, 'munin.action', { verb: 'removed routine', object: found.name });
+        return `Removed ${found.name}.`;
+      }),
+    }),
+  ];
+
   const Munin = defineExtension({
     name: 'munin',
-    tools: [askHuman, remember],
+    tools: [askHuman, remember, ...routineTools],
     sections: [
       // Who the agent is, who it's talking with and how it talks, then what it knows about you
       // (prompt.js). The brief is part of the first section, so it comes before munin's own notes.
       section('munin', (input) => {
         const agent = agentFor(input.conversationId);
-        return agent ? identity(agent, named(), { apps: apps.namesFor(agent) }) : undefined;
+        return agent ? identity(agent, named()) : undefined;
+      }, { tag: false }),
+      // What the agent can do right now (prompt.js), so it can say so when it's asked.
+      section('capabilities', (input) => {
+        const agent = agentFor(input.conversationId);
+        if (!agent) return undefined;
+        return capabilities(agent, named(), {
+          search: models.resolve(agent.provider, agent.model).provider === 'openrouter',
+          apps: apps.capabilitiesFor(agent),
+          tracker: agent.abilities.tracker ? { reachable: tracker.reachable() && Boolean(agent.tracker?.token), projects: agent.tracker?.projects || [] } : null,
+          repos: Object.keys(repos),
+          routines: agent.routines.length,
+        });
       }, { tag: false }),
       section('about', (input) => {
         const agent = agentFor(input.conversationId);
@@ -313,7 +391,10 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
 
   const saved = await harness.snapshot(AgentsDoc, ctx);
   for (const agent of Object.values(saved?.agents || {})) agents.set(agent.name, { ...structuredClone(agent), brief: upgradeBrief(agent.brief) });
-  for (const agent of agents.values()) syncAppRules(agent);
+  for (const agent of agents.values()) {
+    syncAppRules(agent);
+    if (!agent.askFirst.some((rule) => rule.id === ROUTINES_RULE.id)) agent.askFirst.push({ ...ROUTINES_RULE });
+  }
   Object.assign(repos, structuredClone(saved?.repos || {}));
   Object.assign(prefs, structuredClone(saved?.prefs || {}));
   workspace = createWorkspace({ dir: reposDir, agentsDir: settings.agentsDir, repos });
@@ -634,7 +715,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       const abilities = { ...ROLES[role].abilities };
       const agent = {
         name: clean, role, colour, provider: provider || 'standin', model: model || 'stand-in', thinking: 'low',
-        brief: String(brief || '').trim() || `You're ${clean}.`, abilities, apps: [], askFirst: askFirstFor(abilities), allowances: [],
+        brief: String(brief || '').trim() || `You're ${clean}.`, abilities, apps: [], askFirst: [...askFirstFor(abilities), { ...ROUTINES_RULE }], allowances: [],
         routines: [], memory: [], budget: null, paused: false, createdAt: Date.now(), folder: join(settings.agentsDir, clean), conversationId: null,
         tracker: link ? trackerLink(link, null) : null,
       };
@@ -656,7 +737,7 @@ export async function openRuntime(settings, { models, storage, now = Date.now, t
       if ('brief' in patch) agent.brief = String(patch.brief || '').trim() || agent.brief;
       if (patch.abilities) {
         Object.assign(agent.abilities, patch.abilities);
-        if (agent.abilities.code && !agent.askFirst.length) agent.askFirst = askFirstFor(agent.abilities);
+        if (agent.abilities.code && !agent.askFirst.some((rule) => rule.id === 'push')) agent.askFirst = [...askFirstFor(agent.abilities), ...agent.askFirst];
         if (agent.abilities.code) await mkdir(agent.folder, { recursive: true });
       }
       if (patch.apps) {

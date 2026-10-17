@@ -98,6 +98,8 @@ Gmail and Google Calendar: under Google in Settings, add an OAuth client from yo
 
 The web: an agent with the Web ability reads pages, and one on an OpenRouter model also searches the web through OpenRouter, billed to your OpenRouter key.
 
+Routines: agents run them on a schedule ("Weekdays 07:30") or when something happens in the tracker. Set them up on an agent's profile, or just ask the agent: it sets them up itself, and says so in the conversation.
+
 Apps: under Apps in Settings, add an MCP server by its URL (and a token, if it needs one), then pick it on an agent's profile; the agent gets its tools. munin keeps the token and never shows it again.
 
 Where coders run: by default on this machine, as the user running the runtime. Their shells don't get the runtime's environment (just `PATH`, `HOME`, locale and the like, plus any variables you list in `MUNIN_AGENT_ENV`, such as `GH_TOKEN` for pushing), but they can read your files, so treat them as you'd treat Claude Code in your own terminal. On a server, start the runtime with `MUNIN_AGENT_SANDBOX=docker` and each coder gets a container of its own, through [pi-env](https://www.npmjs.com/package/@earendil-works/pi-env): its shell and file tools see its own folder, with its own clones of the projects, and not munin's databases or keys, and a firewall in front of it blocks this machine and the tailnet, so it can't reach munin's web API either. The internet stays open. `MUNIN_AGENT_IMAGE` picks the image (`buildpack-deps:bookworm-scm`, with git, by default; use one with your project's tools) and `MUNIN_AGENT_NETWORK` its Docker network (`none` for no network at all, firewall or not).

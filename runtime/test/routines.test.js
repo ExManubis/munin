@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fauxProvider, fauxAssistantMessage, fauxText } from '@earendil-works/pi-ai';
+import { fauxProvider, fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
 import { buildModels } from '../src/models.js';
 import { openRuntime } from '../src/runtime.js';
 import { parseSchedule, describeSchedule, nextRun } from '../src/schedule.js';
@@ -178,4 +178,48 @@ test('a routine on a tracker trigger runs when the feed shows a match', async ()
   assert.equal((await ranRoutines(runtime, 'forge')).length, 1, 'nothing new, nothing runs');
   await runtime.close();
   await tracker.close();
+});
+
+test('an agent sets up, changes and removes its own routines when asked, without asking unless you say so', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'munin-routines-'));
+  const settings = { db: ':memory:', agentsDir: join(dir, 'agents'), ollamaUrl: null, user: 'Mikkel' };
+  const faux = fauxProvider({ provider: 'scripted', models: [{ id: 'model' }] });
+  const runtime = await openRuntime(settings, { models: await buildModels(settings, { extra: [faux.provider], env: {} }), timers: false, now: () => at(16, 12) });
+  await runtime.createAgent({ name: 'hugin', role: 'assistant', provider: 'scripted', model: 'model' });
+  assert.deepEqual((await runtime.agent('hugin')).askFirst.map((r) => [r.id, r.on]), [['routines', false]], "every agent has the rule, and it's off");
+
+  let heard = '';
+  const turn = async (name, args) => {
+    faux.setResponses([
+      () => fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: 'toolUse' }),
+      // The tool's answer: a routine changes the prompt, so a system message may come after it.
+      (context) => { heard = context.messages.findLast((m) => m.role === 'toolResult').content.map((c) => c.text).join(''); return fauxAssistantMessage([fauxText('Done.')]); },
+    ]);
+    await runtime.send('hugin', 'Please.');
+    await runtime.waitForIdle();
+    return heard;
+  };
+
+  assert.match(await turn('add_routine', { name: 'Morning brief', when: 'weekdays 7:30', does: "Today's events and the mail that needs me." }),
+    /^Added: r\w+ · Morning brief · Weekdays 07:30 · next Mon 19 Oct, 07:30\n {2}does: Today's events and the mail that needs me\.$/);
+  let agent = await runtime.agent('hugin');
+  assert.deepEqual(agent.routines.map((r) => [r.name, r.when]), [['Morning brief', 'Weekdays 07:30']], 'on its profile like any routine');
+
+  assert.match(await turn('add_routine', { name: 'Odd', when: 'whenever it feels right', does: 'x' }), /Try 'Weekdays 07:30'/, 'what munin doesn\'t understand comes back with examples');
+  assert.match(await turn('change_routine', { routine: 'morning brief', when: 'weekdays 8' }), /^Changed: r\w+ · Morning brief · Weekdays 08:00/);
+  assert.match(await turn('list_routines', {}), /Morning brief · Weekdays 08:00 · next Mon 19 Oct, 08:00/);
+  assert.match(await turn('change_routine', { routine: 'Evening brief', when: '18' }), /no routine called Evening brief/);
+  assert.equal(await turn('remove_routine', { routine: 'Morning brief' }), 'Removed Morning brief.');
+  assert.equal((await runtime.agent('hugin')).routines.length, 0);
+  const { items } = await runtime.conversation('hugin', { limit: 500 });
+  assert.deepEqual(items.filter((i) => i.kind === 'action').map((i) => [i.verb, i.object]), [
+    ['added routine', 'Morning brief: Weekdays 07:30'], ['changed routine', 'Morning brief: Weekdays 08:00'], ['removed routine', 'Morning brief'],
+  ]);
+
+  // Turned on, the rule makes it ask first.
+  await runtime.updateAgent('hugin', { askFirst: { routines: true } });
+  assert.match(await turn('add_routine', { name: 'Inbox sweep', when: 'every 30 minutes, 08-18', does: 'Sort new mail.' }), /hasn't allowed this yet \(setting up its own routines\)/);
+  agent = await runtime.agent('hugin');
+  assert.equal(agent.routines.length, 0, 'nothing added until you allow it');
+  await runtime.close();
 });

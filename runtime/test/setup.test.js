@@ -66,8 +66,8 @@ test('an agent is told who it is talking with as a plain fact, then how it talks
   assert.match(prompts[0], /^You're hugin, an assistant, and you work for the person you're talking with, in munin/);
   assert.match(prompts[0], /only they can write to you here\. You don't know their name yet: ask once, when it fits, and then leave it\./);
   assert.doesNotMatch(prompts[0], /\bme's\b|with me\b|about me\b/, 'MUNIN_USER\'s "me" is no name');
-  assert.match(prompts[0], /Their calendar, mail and other apps aren't connected to munin yet\. Only mention that/);
-  assert.match(prompts[0], /You can read a page with read_page\. Searching the web needs a model on OpenRouter, which you aren't on/);
+  assert.match(prompts[0], /- Use Gmail and Google Calendar \(the person you work for signs in with Google in Settings/);
+  assert.match(prompts[0], /- The web: read a page with read_page\. Searching needs a model on OpenRouter, which you aren't on/);
 
   await runtime.updateMe({ name: 'Mikkel' });
   await runtime.send('hugin', 'Who do you work for?');
@@ -75,8 +75,7 @@ test('an agent is told who it is talking with as a plain fact, then how it talks
   const prompt = prompts[1];
   assert.match(prompt, /^You're hugin, an assistant, and you work for Mikkel\. You're talking with Mikkel right now, in munin, the app Mikkel uses to work with agents\. munin is private, so only Mikkel can write to you here\. Talk to Mikkel as "you"\./);
   assert.doesNotMatch(prompt, /know their name/);
-  assert.match(prompt, /Only mention that when you're asked for something that needs them/);
-  const order = ["You're talking with Mikkel", 'How you talk:', "You're hugin, an assistant.", "Mikkel's calendar, mail and other apps aren't connected", 'Mikkel may be away for hours'];
+  const order = ["You're talking with Mikkel", 'How you talk:', "You're hugin, an assistant.", 'What you can do.', 'What you could do, if it were switched on:', "What munin can't do yet"];
   assert.deepEqual(order.map((words) => prompt.indexOf(words)), order.map((words) => prompt.indexOf(words)).toSorted((a, b) => a - b), 'in this order');
   assert.ok(order.every((words) => prompt.includes(words)));
   for (const p of prompts) assert.doesNotMatch(p, /messages in this conversation are from|read "I"|verif|confirm who/i, 'nothing about where messages come from');

@@ -189,6 +189,21 @@ export async function openApps({ file, registry, onChange = () => {}, builtins =
     // A built-in app started or stopped answering (signing in or out of Google, say).
     changed: () => onChange(),
 
+    // What the agent's prompt says about apps (prompt.js capabilities): its own, whether each
+    // works right now and what it does, and the ones it could pick.
+    capabilitiesFor(agent) {
+      const mine = picked(agent);
+      const doesOf = (app) => {
+        if (app.does) return app.does();
+        const tools = live.get(app.id)?.tools || [];
+        return tools.length ? `its tools: ${tools.map((t) => t.name.replace(/_/g, ' ')).join(', ')}` : 'no tools yet';
+      };
+      return {
+        mine: mine.map((app) => ({ name: app.name, answering: answers(app), detail: describe(app).detail, does: doesOf(app) })),
+        others: all().filter((app) => !mine.includes(app) && describe(app).connected).map((app) => ({ name: app.name, detail: describe(app).detail })),
+      };
+    },
+
     // The ask-first rules an app gets on an agent that has it: one for anything that changes
     // something, or, for an app that sorts its tools by kind (Gmail), one per kind.
     rulesFor: (id) => {

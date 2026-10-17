@@ -108,8 +108,8 @@ test('an app added in Settings gives the agents that have it its tools', async (
   await runtime.send('hugin', "What's on my calendar?");
   await runtime.waitForIdle();
   assert.deepEqual(seen[0][0].filter((name) => name.startsWith('calendar__')), ['calendar__list_events', 'calendar__add_event']);
-  assert.match(seen[0][1], /You can use Calendar through their tools/);
-  assert.doesNotMatch(seen[0][1], /calendar, mail and other apps aren't connected/);
+  assert.match(seen[0][1], /\n- Calendar \(2 tools\): its tools: list events, add event\.\n/, 'the prompt says what the app does');
+  assert.doesNotMatch(seen[0][1], /Use Gmail and Google Calendar/, 'it has an app already');
   assert.match(seen[1][2], /09:00 Standup \(today\)/, "the app's answer reaches the agent");
   const { items } = await runtime.conversation('hugin');
   assert.equal(items.find((i) => i.kind === 'run').steps[0].text, 'calendar: list events {"day":"today"}');
@@ -142,14 +142,15 @@ test('an app added in Settings gives the agents that have it its tools', async (
   assert.deepEqual((await runtime.apps()).filter((app) => app.builtin).map((app) => [app.id, app.connected, app.detail]),
     [['gmail', false, 'Sign in with Google in Settings'], ['google-calendar', false, 'Sign in with Google in Settings']], 'Gmail and Calendar come with munin');
 
-  // Gone: hugin loses the tools, and hears that apps aren't connected.
+  // Gone: hugin loses the tools, and hears how it could have apps.
   await runtime.removeApp('calendar');
   await assert.rejects(runtime.removeApp('calendar'), /no app calendar/);
   faux.setResponses([(context) => { look(context); return fauxAssistantMessage([fauxText('Hm.')]); }]);
   await runtime.send('hugin', 'Calendar?');
   await runtime.waitForIdle();
   assert.ok(!seen.at(-1)[0].some((name) => name.startsWith('calendar__')));
-  assert.match(seen.at(-1)[1], /Mikkel's calendar, mail and other apps aren't connected to munin yet/);
+  assert.match(seen.at(-1)[1], /- Use Gmail and Google Calendar \(Mikkel signs in with Google in Settings, then picks them on your profile\)\./);
+  assert.doesNotMatch(seen.at(-1)[1], /- Calendar \(/);
 });
 
 test("an app that doesn't answer, or refuses its token, says why", async (t) => {
@@ -176,7 +177,7 @@ test('an app asks first before anything that changes something, and reading goes
   await runtime.addApp({ name: 'Calendar', url: cal.url, token: 'cal-secret-1234' });
   await runtime.createAgent({ name: 'hugin', role: 'assistant', provider: 'scripted', model: 'model' });
   let agent = await runtime.updateAgent('hugin', { apps: ['calendar'] });
-  assert.deepEqual(agent.askFirst.map((r) => [r.id, r.label, r.on]), [['app:calendar', 'Calendar: sending, changing or deleting', true]]);
+  assert.deepEqual(agent.askFirst.filter((r) => r.app).map((r) => [r.id, r.label, r.on]), [['app:calendar', 'Calendar: sending, changing or deleting', true]]);
 
   const heard = [];
   const turn = async (...steps) => {
@@ -219,5 +220,5 @@ test('an app asks first before anything that changes something, and reading goes
   assert.equal((await runtime.agent('hugin')).askFirst.find((r) => r.id === 'app:calendar').on, false, 'always turns the rule off');
 
   agent = await runtime.updateAgent('hugin', { apps: [] });
-  assert.deepEqual(agent.askFirst, [], 'no app, no rule');
+  assert.deepEqual(agent.askFirst.filter((r) => r.app), [], 'no app, no rule');
 });
