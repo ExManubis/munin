@@ -5,6 +5,7 @@ import { api } from './api.js';
 import { store, kindOf, isBusy } from './store.js';
 import { figbot } from './figbot.js';
 import { claudeMark, isClaude } from './claude-mark.js';
+import { piMark, isPi } from './pi-mark.js';
 
 export const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl ';
 
@@ -103,12 +104,13 @@ export function icon(name, { color = C.muted, size = 12 } = {}) {
   return svg(size, '0 0 12 12', ICONS[name](color));
 }
 
-// Agents are pixel faces, white, except Claude, which gets its own spark. People are solid
+// Agents are pixel faces, white, except Claude and pi, which get their own marks. People are solid
 // squares with an initial, and nobody (unassigned) is a dotted square.
 export function avatar(name, { kind, idle = false, size = 18, state } = {}) {
   if (!name) return svg(size, '0 0 18 18', [frame18(C.muted, { 'stroke-dasharray': '1 1' })], { cls: 'avatar', label: 'Unassigned' });
   if ((kind || kindOf(name)) === 'agent') {
     if (isClaude(name)) return claudeMark({ size });
+    if (isPi(name)) return piMark({ size });
     return figbot({ size, state: state || (idle ? 'idle' : 'working'), animate: false });
   }
   const style = size === 18 ? null : `width:${size}px;height:${size}px;font-size:${size < 16 ? 9 : 10}px`;
@@ -126,6 +128,7 @@ export function agentState(name) {
 // An agent's face, with the expression for what it's doing.
 export function agentAvatar(name, { size = 18, state } = {}) {
   if (isClaude(name)) return claudeMark({ size, label: name });
+  if (isPi(name)) return piMark({ size, label: name });
   return figbot({ colour: 'white', state: state || agentState(name), size, seed: name, label: name });
 }
 
