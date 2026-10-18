@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from munin import agents as agent_svc
 from munin import issues as svc
 from munin import record as record_svc
+from munin import usage as usage_svc
 from munin.issues import Actor, Invalid
 from munin.push import PushError
 from munin.models import Agent, Comment, Event, Issue, Project, utcnow
@@ -82,6 +83,12 @@ class IssueBriefOut(BaseModel):
     assignee: str | None
 
 
+class CostOut(BaseModel):
+    cost: float
+    tokens: int
+    agents: dict[str, float]
+
+
 class IssueOut(BaseModel):
     id: str
     project: str
@@ -101,6 +108,8 @@ class IssueOut(BaseModel):
     blocked_by: list[str]
     # Its questions are out of your inbox until then.
     snoozed_until: UTCDateTime | None = None
+    # What agents reported spending. Only set on the issue list and a single issue.
+    cost: CostOut | None = None
 
 
 class PullRequestOut(BaseModel):
@@ -198,6 +207,10 @@ def _issue_out(issue: Issue) -> IssueOut:
         blocked_by=[blocker.ref for blocker in svc.open_blockers(issue)],
         snoozed_until=issue.snoozed_until if issue.snoozed_until and issue.snoozed_until > utcnow() else None,
     )
+
+
+def _cost_out(total: dict | None) -> CostOut | None:
+    return CostOut(**total) if total else None
 
 
 def _pull_out(pull) -> PullRequestOut:
@@ -332,7 +345,9 @@ def list_issues(
     q: Annotated[str | None, Query(description="An issue id, or words in titles and descriptions")] = None,
     limit: Annotated[int | None, Query(ge=1, le=500)] = None,
 ) -> list[IssueOut]:
-    return [_issue_out(issue) for issue in svc.list_issues(s, project, status, assignee, limit, q)]
+    found = svc.list_issues(s, project, status, assignee, limit, q)
+    costs = usage_svc.totals(s, [issue.id for issue in found])
+    return [_issue_out(issue).model_copy(update={"cost": _cost_out(costs.get(issue.id))}) for issue in found]
 
 
 @router.post("/issues", status_code=201)
@@ -345,7 +360,9 @@ def create_issue(body: IssueIn, s: DB, actor: Human) -> IssueDetailOut:
 
 @router.get("/issues/{ref}")
 def get_issue(ref: str, s: DB) -> IssueDetailOut:
-    return _issue_detail_out(svc.get_issue(s, ref))
+    issue = svc.get_issue(s, ref)
+    cost = usage_svc.totals(s, [issue.id]).get(issue.id)
+    return _issue_detail_out(issue).model_copy(update={"cost": _cost_out(cost)})
 
 
 @router.patch("/issues/{ref}")
