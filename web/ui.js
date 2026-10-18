@@ -8,6 +8,7 @@ import { claudeMark, isClaude } from './claude-mark.js';
 import { piMark, isPi } from './pi-mark.js';
 import { codexMark, isCodex } from './codex-mark.js';
 import { opencodeMark, isOpencode } from './opencode-mark.js';
+import { moreMark } from './more-marks.js';
 
 export const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl ';
 
@@ -106,7 +107,8 @@ export function icon(name, { color = C.muted, size = 12 } = {}) {
   return svg(size, '0 0 12 12', ICONS[name](color));
 }
 
-// Agents are pixel faces, white, except Claude, Codex, opencode and pi, which get their own marks. People are solid
+// Agents are pixel faces, white, except Claude, Codex, opencode, pi, Cursor, Gemini and Copilot,
+// which get their own marks. People are solid
 // squares with an initial, and nobody (unassigned) is a dotted square.
 export function avatar(name, { kind, idle = false, size = 18, state } = {}) {
   if (!name) return svg(size, '0 0 18 18', [frame18(C.muted, { 'stroke-dasharray': '1 1' })], { cls: 'avatar', label: 'Unassigned' });
@@ -115,6 +117,8 @@ export function avatar(name, { kind, idle = false, size = 18, state } = {}) {
     if (isPi(name)) return piMark({ size });
     if (isCodex(name)) return codexMark({ size });
     if (isOpencode(name)) return opencodeMark({ size });
+    const mark = moreMark(name, { size });
+    if (mark) return mark;
     return figbot({ size, state: state || (idle ? 'idle' : 'working'), animate: false });
   }
   const style = size === 18 ? null : `width:${size}px;height:${size}px;font-size:${size < 16 ? 9 : 10}px`;
@@ -135,6 +139,8 @@ export function agentAvatar(name, { size = 18, state } = {}) {
   if (isPi(name)) return piMark({ size, label: name });
   if (isCodex(name)) return codexMark({ size, label: name });
   if (isOpencode(name)) return opencodeMark({ size, label: name });
+  const mark = moreMark(name, { size, label: name });
+  if (mark) return mark;
   return figbot({ colour: 'white', state: state || agentState(name), size, seed: name, label: name });
 }
 
