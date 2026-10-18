@@ -94,8 +94,10 @@ else
   echo "Kept $HERE/environment."
 fi
 say "Services"
-# launchd starts it with almost no PATH.
-SERVICE_PATH="$(dirname "$(command -v git)"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# launchd starts its jobs with almost no PATH; the updater runs this script, which needs git, node
+# and uv. Node's own folder, not a version manager's per-shell link to it (fnm, nvm).
+NODE_DIR=$(dirname "$(node -p process.execPath)")
+SERVICE_PATH="$NODE_DIR:$(dirname "$(command -v uv)"):$(dirname "$(command -v git)"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 mkdir -p "$AGENTS"
 plist="$AGENTS/munin.tracker.plist"
 render "$MUNIN_DIR/deploy/mac/munin.tracker.plist" "MUNIN_DIR=$MUNIN_DIR" "HOME=$HOME" "PATH=$SERVICE_PATH" > "$plist"
