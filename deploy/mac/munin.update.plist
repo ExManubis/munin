@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Runs deploy/update.sh when the update button in munin's Settings asks for it: munin writes
+     ~/.munin/update-requested, which this watches. Installed by deploy/install-mac.sh. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>munin.update</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>[ -f "@HOME@/.munin/update-requested" ] || exit 0; rm -f "@HOME@/.munin/update-requested"; exec "@MUNIN_DIR@/deploy/update.sh"</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@PATH@</string>
+  </dict>
+  <key>WatchPaths</key>
+  <array>
+    <string>@HOME@/.munin/update-requested</string>
+  </array>
+  <key>StandardOutPath</key>
+  <string>@HOME@/.munin/logs/update.log</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/.munin/logs/update.log</string>
+</dict>
+</plist>

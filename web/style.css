@@ -453,6 +453,8 @@ select option { background: var(--ink); color: var(--text); }
 .agent-row.revoked .agent-name { color: var(--muted); }
 .agent-seen { font: 13px/18px var(--sans); color: var(--text-2); }
 .agent-action { text-align: right; }
+.releases { margin: 0 0 16px; padding-left: 18px; color: var(--text-2); }
+.releases li { margin: 4px 0; }
 .providers { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .provider { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 1px dashed var(--line); color: var(--muted); background: none; font: inherit; font-size: 13px; cursor: pointer; }
 .provider:hover { color: var(--text); }
