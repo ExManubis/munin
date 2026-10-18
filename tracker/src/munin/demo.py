@@ -5,22 +5,21 @@ from datetime import timedelta
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from munin import agents
+from munin import agents, usage
 from munin import issues as svc
 from munin.issues import Actor
 from munin.models import Agent, Comment, Event, Issue, utcnow
 
 CLAUDE = Actor("claude-code", "agent")
 CODEX = Actor("codex", "agent")
-FIGBOT = Actor("figbot", "agent")
-# munin's own agents, from the frontend's sample cast; in the tracker they're agents like any other
-FORGE = Actor("forge", "agent")
-VERA = Actor("vera", "agent")
+CLAUDE_1 = Actor("claude-1", "agent")  # one of `munin run`'s
+PI = Actor("pi", "agent")
+GLM = Actor("glm", "agent")
 
 
 def seed(s: Session, user: str) -> None:
     me = Actor(user, "human")
-    for agent in (CLAUDE, CODEX, FIGBOT, FORGE, VERA):
+    for agent in (CLAUDE, CODEX, CLAUDE_1, PI, GLM):
         agents.add_agent(s, agent.name)
 
     svc.create_project(
@@ -92,10 +91,13 @@ def seed(s: Session, user: str) -> None:
     )
 
     take(CLAUDE, memory)
+    usage.report(s, CLAUDE, memory, 1.84, tokens_in=412_000, tokens_out=38_000, model="claude-opus-5-5")
     finish(CLAUDE, memory, "Done on branch mun-3: memory now lives in `memory.db`. Migration from JSON runs once.")
+    usage.report(s, CODEX, memory, 0.31, tokens_in=120_000, tokens_out=4_000)
     svc.add_comment(s, CODEX, memory, "Reviewed mun-3: works, but the migration deletes the JSON file. Keep a backup.")
     svc.update_issue(s, CODEX, memory, status="todo")
     take(CLAUDE, memory)
+    usage.report(s, CLAUDE, memory, 0.42, tokens_in=96_000, tokens_out=7_500, model="claude-opus-5-5")
     finish(CLAUDE, memory, "The migration now keeps `memory.json.bak`. Added a test for it.")
     svc.add_comment(
         s,
@@ -106,19 +108,21 @@ def seed(s: Session, user: str) -> None:
     )
 
     take(CODEX, redact)
+    usage.report(s, CODEX, redact, 0.58, tokens_in=230_000, tokens_out=12_000)
     finish(CODEX, redact, "Masks anything that looks like a key or token in log lines. 14 tests.")
 
-    take(FORGE, retry)
-    finish(FORGE, retry, "On a 429 it now backs off with jitter, up to 3 times. Tests cover the backoff.")
-    svc.add_comment(s, VERA, retry, "Reviewed and merged into main.")
-    svc.update_issue(s, VERA, retry, status="done")
+    take(PI, retry)
+    usage.report(s, PI, retry, 0.07, tokens_in=150_000, tokens_out=9_000, model="glm-5")
+    finish(PI, retry, "On a 429 it now backs off with jitter, up to 3 times. Tests cover the backoff.")
+    svc.add_comment(s, GLM, retry, "Reviewed and merged into main.")
+    svc.update_issue(s, GLM, retry, status="done")
 
-    take(FORGE, stream)
-    svc.add_comment(s, FORGE, stream, "Plan: buffer output and edit one message every 1.5 s to stay under the limit.")
+    take(PI, stream)
+    svc.add_comment(s, PI, stream, "Plan: buffer output and edit one message every 1.5 s to stay under the limit.")
     svc.add_comment(s, me, stream, "Use the sandbox bot for testing. Spam it as much as you like.")
     svc.add_comment(
         s,
-        FORGE,
+        PI,
         stream,
         "Telegram caps a message at 4,096 characters. When output runs past that, start a new message or "
         "attach the rest as a file?",
@@ -129,17 +133,17 @@ def seed(s: Session, user: str) -> None:
         ],
     )
 
-    take(FIGBOT, gateway)
-    svc.add_comment(s, FIGBOT, gateway, "Gave up after 3 attempts. The gateway test times out on CI only.")
-    svc.update_issue(s, FIGBOT, gateway, status="todo", assignee="none")
+    take(CLAUDE_1, gateway)
+    svc.add_comment(s, CLAUDE_1, gateway, "Gave up after 3 attempts. The gateway test times out on CI only.")
+    svc.update_issue(s, CLAUDE_1, gateway, status="todo", assignee="none")
 
-    svc.update_issue(s, me, status_cmd, assignee="figbot")
+    svc.update_issue(s, me, status_cmd, assignee="claude-1")
     svc.update_issue(s, me, manifest, status="in_progress", assignee=me.name)
     take(CODEX, landing)
 
     _spread_over_days(s, days=3)
     for agent in s.scalars(select(Agent)):
-        agent.last_seen_at = utcnow() - (timedelta(hours=1) if agent.name == "figbot" else timedelta(minutes=1))
+        agent.last_seen_at = utcnow() - (timedelta(hours=1) if agent.name == "claude-1" else timedelta(minutes=1))
     s.commit()
 
 

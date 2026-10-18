@@ -1,7 +1,6 @@
-// munin's push notifications, in a service worker per service (push/tracker/sw.js and
-// push/runtime/sw.js load this): each service pushes with keys of its own, and a device is
-// subscribed to both. A push shows as a notification; tapping it opens munin at what it's
-// about. Neither worker controls munin's pages, so an open munin window is asked to go there.
+// munin's push notifications, in the service worker push/tracker/sw.js loads. A push shows as
+// a notification; tapping it opens munin at what it's about. The worker doesn't control
+// munin's pages, so an open munin window is asked to go there.
 
 const home = new URL('../../', self.location).href; // munin's own address
 

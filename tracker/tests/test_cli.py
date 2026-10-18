@@ -1,3 +1,4 @@
+from munin import agents, usage
 from munin import issues as svc
 from munin.cli import main, raven
 from munin.db import connect
@@ -43,7 +44,10 @@ def test_demo_data_looks_lived_in(tmp_path):
         seed(s, "me")
         assert [p.key for p in svc.list_projects(s)] == ["MUN", "WEB"]
         assert [c.issue.ref for c in svc.inbox(s)] == ["MUN-1", "MUN-3", "MUN-2"]
-        assert [c.author for c in svc.inbox(s)] == ["codex", "claude-code", "forge"]
+        assert [c.author for c in svc.inbox(s)] == ["codex", "claude-code", "pi"]
+        names = {a.name for a in agents.list_agents(s)}
+        assert names == {"claude-code", "codex", "claude-1", "pi", "glm"}  # agents of any make, none special
+        assert usage.totals(s, [svc.get_issue(s, "MUN-3").id])  # reported cost shows on issues
         statuses = {i.ref: i.status for i in svc.list_issues(s, status="all")}
         assert statuses["MUN-3"] == "in_review" and statuses["MUN-6"] == "todo" and statuses["MUN-11"] == "done"
         assert statuses["MUN-5"] == "done" and statuses["MUN-2"] == "in_progress"

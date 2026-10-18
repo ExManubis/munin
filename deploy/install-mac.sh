@@ -1,15 +1,14 @@
 #!/bin/bash
-# Puts munin on this Mac, for a Mac that stays on (a Mac mini, say): the tracker and the agent
-# runtime as launchd agents of yours, each coder in a container of its own (Docker Desktop or
-# OrbStack), and tailscale serve in front, so munin is at https://<this Mac's tailnet name> for
-# the people you name and nobody else.
+# Puts munin on this Mac, for a Mac that stays on (a Mac mini, say): the tracker as a launchd
+# agent of yours, and tailscale serve in front, so munin is at https://<this Mac's tailnet name>
+# for the people you name and nobody else.
 #
 #   git clone <munin's repository> ~/munin
 #   ~/munin/deploy/install-mac.sh
 #
 # Run it as yourself, not with sudo, and again after pulling to update. It only touches munin's
 # own things: ~/.munin, ~/Library/LaunchAgents/munin.*.plist, and this Mac's tailscale serve
-# paths / and /runtime/api. Set MUNIN_USERS to say who may use munin, if it isn't you.
+# path /. Set MUNIN_USERS to say who may use munin, if it isn't you.
 #
 # Written for macOS's own bash 3.2 and BSD tools.
 set -euo pipefail
@@ -46,19 +45,13 @@ render() {
 [ "$UID_NOW" != 0 ] || fail "run this as yourself, not with sudo: munin's services run as you."
 need git "xcode-select --install, or: brew install git"
 need curl "It comes with macOS."
-need node "Node 22.19 or later: brew install node"
-need npm "It comes with Node."
+need node "brew install node"
 need uv "brew install uv"
-need docker "Docker Desktop (docker.com) or OrbStack (orbstack.dev)."
 TAILSCALE=$(command -v tailscale || true)
 if [ -z "$TAILSCALE" ] && [ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ]; then
   TAILSCALE=/Applications/Tailscale.app/Contents/MacOS/Tailscale
 fi
 [ -n "$TAILSCALE" ] || fail "this needs Tailscale: https://tailscale.com/download, signed in."
-node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 19) ? 0 : 1)' \
-  || fail "this needs Node 22.19 or later; this is $(node --version)."
-NODE=$(command -v node)
-docker info > /dev/null 2>&1 || fail "Docker isn't running. Open Docker Desktop (or OrbStack), and set it to start when you sign in."
 
 # This Mac on the tailnet: its name for munin's address, and its owner for MUNIN_USERS.
 read -r HOST OWNER HTTPS < <("$TAILSCALE" status --json | node -e '
@@ -79,7 +72,6 @@ read -r HOST OWNER HTTPS < <("$TAILSCALE" status --json | node -e '
 
 say "Dependencies"
 (cd "$MUNIN_DIR/tracker" && uv sync --frozen --no-dev --quiet)
-(cd "$MUNIN_DIR/runtime" && npm ci --omit=dev --no-audit --no-fund --loglevel=error)
 
 say "Settings in $HERE"
 mkdir -p "$HERE/logs" "$HERE/bin"
@@ -96,59 +88,51 @@ if [ ! -f "$HERE/environment" ]; then
 else
   echo "Kept $HERE/environment."
 fi
-if [ ! -f "$HERE/secrets" ]; then
-  (umask 077 && printf '%s\n' "# Keys for the runtime, one per line, like:" "# OPENROUTER_API_KEY=sk-or-..." "# GH_TOKEN=... (and MUNIN_AGENT_ENV=GH_TOKEN in environment)" > "$HERE/secrets")
-fi
-
-if [ "$(setting MUNIN_AGENT_SANDBOX)" = docker ]; then
-  IMAGE=$(setting MUNIN_AGENT_IMAGE)
-  say "The coders' image, ${IMAGE:=buildpack-deps:bookworm-scm}"
-  # Up to date if Docker Hub lets us; the copy already here does otherwise (it rate-limits pulls).
-  docker pull --quiet "$IMAGE" > /dev/null 2>&1 || docker image inspect "$IMAGE" > /dev/null 2>&1 \
-    || fail "couldn't pull $IMAGE. Try: docker pull $IMAGE"
-fi
-
 say "Services"
-# launchd starts them with almost no PATH, and the runtime needs docker and git.
-SERVICE_PATH="$(dirname "$NODE"):$(dirname "$(command -v docker)"):$(dirname "$(command -v git)"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# launchd starts it with almost no PATH.
+SERVICE_PATH="$(dirname "$(command -v git)"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 mkdir -p "$AGENTS"
-for name in tracker runtime; do
-  plist="$AGENTS/munin.$name.plist"
-  render "$MUNIN_DIR/deploy/mac/munin.$name.plist" "MUNIN_DIR=$MUNIN_DIR" "NODE=$NODE" "HOME=$HOME" "PATH=$SERVICE_PATH" > "$plist"
-  launchctl bootout "gui/$UID_NOW/munin.$name" 2> /dev/null || true
-  # bootout can take a moment to let go.
-  for _ in 1 2 3 4 5 6 7 8 9 10; do launchctl bootstrap "gui/$UID_NOW" "$plist" 2> /dev/null && break || sleep 1; done
-  launchctl print "gui/$UID_NOW/munin.$name" > /dev/null 2>&1 || fail "launchd didn't take $plist. Try: launchctl bootstrap gui/$UID_NOW $plist"
-done
+plist="$AGENTS/munin.tracker.plist"
+render "$MUNIN_DIR/deploy/mac/munin.tracker.plist" "MUNIN_DIR=$MUNIN_DIR" "HOME=$HOME" "PATH=$SERVICE_PATH" > "$plist"
+launchctl bootout "gui/$UID_NOW/munin.tracker" 2> /dev/null || true
+# bootout can take a moment to let go.
+for _ in 1 2 3 4 5 6 7 8 9 10; do launchctl bootstrap "gui/$UID_NOW" "$plist" 2> /dev/null && break || sleep 1; done
+launchctl print "gui/$UID_NOW/munin.tracker" > /dev/null 2>&1 || fail "launchd didn't take $plist. Try: launchctl bootstrap gui/$UID_NOW $plist"
+
+# munin's own agents moved out to figbots. A Mac set up before that still has their service:
+# stop it and forget it, but leave their data in ~/.munin for figbots to take.
+if [ -f "$AGENTS/munin.runtime.plist" ]; then
+  say "munin's agents moved to figbots"
+  launchctl bootout "gui/$UID_NOW/munin.runtime" 2> /dev/null || true
+  rm -f "$AGENTS/munin.runtime.plist"
+  "$TAILSCALE" serve --bg --set-path /runtime/api off > /dev/null 2>&1 || true
+  echo "  Stopped munin.runtime. munin's agents are figbots now: https://github.com/ExManubis/figbots"
+  echo "  Their data is still in $HERE; figbots' deploy/move-from-munin.sh takes it over."
+fi
 render "$MUNIN_DIR/deploy/mac/munin" "MUNIN_DIR=$MUNIN_DIR" "HOME=$HOME" > "$HERE/bin/munin"
 chmod 755 "$HERE/bin/munin"
 
 TRACKER=$(setting MUNIN_PORT)
-RUNTIME=$(setting MUNIN_RUNTIME_PORT)
-for url in "http://127.0.0.1:${TRACKER:=7777}/api/me" "http://127.0.0.1:${RUNTIME:=7779}/runtime/api/me"; do
-  for _ in $(seq 30); do curl -fsS -o /dev/null "$url" 2> /dev/null && break || sleep 1; done
-  curl -fsS -o /dev/null "$url" || fail "$url doesn't answer. See $HERE/logs/."
-done
+url="http://127.0.0.1:${TRACKER:=7777}/api/me"
+for _ in $(seq 30); do curl -fsS -o /dev/null "$url" 2> /dev/null && break || sleep 1; done
+curl -fsS -o /dev/null "$url" || fail "$url doesn't answer. See $HERE/logs/."
 
 say "tailscale serve"
 "$TAILSCALE" serve --bg --set-path / "http://127.0.0.1:$TRACKER"
-# Only /runtime/api: the frontend's own files under /runtime/ come from the tracker, with the rest of it.
-"$TAILSCALE" serve --bg --set-path /runtime/api "http://127.0.0.1:$RUNTIME/runtime/api"
-# Serve can also stop without setting anything up, having said what's missing; check it took both paths.
+# Serve can also stop without setting anything up, having said what's missing; check it took the path.
 "$TAILSCALE" serve status --json | node -e '
   let text = "";
   process.stdin.on("data", (d) => { text += d; }).on("end", () => {
     const config = JSON.parse(text || "{}");
     const paths = Object.values(config.Web || {}).flatMap((site) => Object.keys(site.Handlers || {}));
-    process.exit(paths.includes("/") && paths.includes("/runtime/api") ? 0 : 1);
-  });' || fail "tailscale serve didn't take munin's paths. See: tailscale serve status"
+    process.exit(paths.includes("/") ? 0 : 1);
+  });' || fail "tailscale serve didn't take munin's path. See: tailscale serve status"
 
 say "munin is at https://$HOST"
 cat << EOF
   For: $(setting MUNIN_USERS)
-  Models: paste an OpenRouter key in munin, under Settings
-  Settings: $HERE/environment; other keys, like GH_TOKEN, in $HERE/secrets,
-            then: launchctl kickstart -k gui/$UID_NOW/munin.runtime
+  Agents: connect them in munin, under Settings
+  Settings: $HERE/environment, then: launchctl kickstart -k gui/$UID_NOW/munin.tracker
   A project: $HERE/bin/munin project add MUN munin --description "What it is, and how work gets delivered"
   Logs: tail -f $HERE/logs/*.log
 EOF

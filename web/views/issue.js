@@ -1,17 +1,13 @@
-// One issue: title and description (editable), status and assignee, what one of munin's own
-// agents is doing on it right now, what it waits for and blocks, and one timeline of comments
-// and history.
+// One issue: title and description (editable), status and assignee, what it cost, what it
+// waits for and blocks, and one timeline of comments and history.
 
-import { withCosts, dollars } from '../runtime/costs.js';
-import { liveWork } from '../runtime/live.js';
-import { hhmm } from './agents.js';
 import { api } from '../api.js';
 import { store, liveAgents, displayName, quietAgent } from '../store.js';
 import { markdown } from '../markdown.js';
 import { condense, describe, eventIcon } from '../history.js';
 import { issuePicker } from '../search.js';
 import {
-  h, kbd, MOD, PRIORITIES, avatar, agentAvatar, personAvatar, statusIcon, statusLabel, STATUSES, time, parseTime, topbar, bindDraft, drafts, onModEnter, toast, changeIssue, agentPrompts, onEnterSend, SEND_KEY,
+  h, kbd, MOD, PRIORITIES, dollars, avatar, agentAvatar, personAvatar, statusIcon, statusLabel, STATUSES, time, parseTime, topbar, bindDraft, drafts, onModEnter, toast, changeIssue, agentPrompts, onEnterSend, SEND_KEY,
 } from '../ui.js';
 
 let editing = null; // id of the issue whose title and description are being edited
@@ -23,16 +19,14 @@ export const view = {
   title: (data) => `${data.issue.id} ${data.issue.title}`,
 
   async load({ id }) {
-    const issue = await api.issue(id);
-    const [, live] = await Promise.all([withCosts([issue]), liveWork(issue)]);
-    return { issue, live };
+    return { issue: await api.issue(id) };
   },
 
   leave() {
     picking = depError = releasing = null;
   },
 
-  render({ issue, live }, ctx) {
+  render({ issue }, ctx) {
     const project = store.projects.find((p) => p.key === issue.project);
     const open = openQuestions(issue);
     const asker = open.length ? open[open.length - 1].author : null;
@@ -60,7 +54,6 @@ export const view = {
               ? markdown(issue.description, 'description')
               : h('p', { class: 'muted description' }, 'No description.'),
           ],
-          live ? liveSection(live) : null,
           dependencies(issue, ctx),
           timeline(issue, open),
           reply(issue, asker, ctx),
@@ -75,28 +68,6 @@ export const view = {
     return true;
   },
 };
-
-// The agent at work: its latest run on this issue, last few steps, the current one marked.
-function liveSection({ agent, run }) {
-  const running = run?.status === 'running';
-  const steps = run ? run.steps.slice(-4) : [];
-  const last = run?.steps[run.steps.length - 1];
-  const conversation = `#/agents/${encodeURIComponent(agent)}`;
-  return h('section', { class: ['live-work', running && 'running'], 'aria-label': `What ${agent} is doing`, 'aria-live': 'polite' },
-    h('div', { class: 'live-head' },
-      agentAvatar(agent),
-      h('span', { class: 'live-who' }, running ? `${agent} is working on it` : run ? `${agent}'s last run on it` : `${agent} has it`),
-      run && !running ? time(run.endedAt || run.at, { cls: 'mono muted' }) : null,
-      h('span', { class: 'spacer' }),
-      h('a', { class: 'link', href: conversation }, 'Open the conversation')),
-    steps.length
-      ? h('ol', { class: 'run-steps' },
-        steps.map((step) => h('li', { class: ['run-step', running && step === last && 'now'] },
-          h('span', { class: 'run-step-time' }, running && step === last ? 'now' : hhmm(step.at)),
-          h('span', { class: 'run-step-text' }, step.text),
-          running && step === last ? h('span', { class: 'cursor', 'aria-hidden': 'true' }) : null)))
-      : h('p', { class: 'hint' }, 'Nothing run on it yet.'));
-}
 
 // Questions no human has replied to yet, like the server's inbox.
 function openQuestions(issue) {
@@ -388,7 +359,7 @@ function properties(issue, project, ctx) {
     prompts(issue, 'props-prompts'));
 }
 
-// What its agents' models cost while they worked on it, from the runtime; who spent what when several did.
+// What its agents' models cost while they worked on it, as they reported it; who spent what when several did.
 function cost(issue) {
   if (!issue.cost?.cost) return null;
   const agents = Object.entries(issue.cost.agents).sort((a, b) => b[1] - a[1]);

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from munin import agents
 from munin import issues as svc
+from munin import usage
 from munin.issues import Actor, MuninError
 from munin.models import Comment, Event, Issue, utcnow
 
@@ -32,6 +33,7 @@ How to work:
    If another agent already has it, munin says so; take the next one.
 3. Do the work. Comment on the issue when something's worth recording.
 4. When you're done, add a comment saying what you did, then set status="in_review".
+   If you know what you spent, report it with report_usage.
    If you opened a pull request for it, link it with link_pull_request(issue, url): when it
    merges, munin moves the issue to done.
 5. Review issues other agents finished: check the work, commit it and set status="done",
@@ -267,6 +269,22 @@ def build_mcp(sessions: sessionmaker[Session], github=None) -> MCPServer:
                     "issue's comments, and wait_for_work tells you when it does."
                 )
             return f"Commented on {comment.issue.ref} (comment {comment.id})."
+
+    @tool
+    def report_usage(
+        ctx: Context,
+        issue: IssueRef,
+        cost_usd: Annotated[float, Field(description="What this stretch of work cost, in US dollars")],
+        tokens_in: Annotated[int | None, Field(description="Input tokens used")] = None,
+        tokens_out: Annotated[int | None, Field(description="Output tokens used")] = None,
+        model: Annotated[str | None, Field(description="The model that did the work")] = None,
+    ) -> str:
+        """Report what your model spent on an issue, if your client tells you. Each call adds to the issue's
+        total; call it when you finish a stretch of work, not after every step."""
+        with sessions() as s:
+            row = usage.report(s, _actor(ctx), issue, cost_usd, tokens_in, tokens_out, model)
+            total = usage.totals(s, [row.issue_id])[row.issue_id]["cost"]
+            return f"Recorded ${cost_usd:.2f} on {row.issue.ref} (now ${total:.2f} in all)."
 
     @tool
     def events(

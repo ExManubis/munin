@@ -1,14 +1,13 @@
-// Claude's spark, in the brand's dither, for outside agents that are Claude (claude-code, or
+// Claude's spark, in the brand's dither, for agents that are Claude (claude-code, or
 // claude-1 and on from `munin run`): solid at the heart, its rays thinning to a checkerboard
-// toward their tips. Drawn in square pixels on the same grid sizes as a Figbot.
+// toward their tips. Drawn in square pixels on the same grid sizes as an agent's face.
 
 const COLOUR = '#D97757';
 const RAYS = 12;
 // Each ray's length, as a share of the radius, going round: uneven, like the real spark.
 const LENGTHS = [1, 0.8, 0.92, 0.76, 0.98, 0.84, 0.9, 0.78, 1, 0.82, 0.94, 0.8];
 
-// Outside agents only: one of munin's own agents is a Figbot, whatever it's called.
-export const isClaude = (name, ownNames = []) => /^claude/i.test(name || '') && !ownNames.includes(name);
+export const isClaude = (name) => /^claude/i.test(name || '');
 
 const gridFor = (size) => (size <= 20 ? size : size <= 40 ? 24 : size < 100 ? 36 : 48);
 
