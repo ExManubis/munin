@@ -39,9 +39,10 @@ def _newer(repo: str, commit: str, api: str, token: str | None) -> dict:
     return {"behind": found.get("ahead_by", 0), "releases": releases[::-1]}
 
 
-def status(data_dir: Path, api: str, token: str | None) -> dict:
+def status(data_dir: Path, api: str, token: str | None, fresh: bool = False) -> dict:
     """What Settings shows: the commit munin runs, whether it can update itself, and what's newer.
-    GitHub is asked at most once an hour; if it can't be reached, nothing is newer."""
+    GitHub is asked at most once an hour, or now when `fresh`; if it can't be reached, nothing is
+    newer."""
     mine = installed(data_dir)
     out = {"commit": None, "can_update": False, "behind": 0, "releases": []}
     if not mine or not mine.get("commit"):
@@ -49,8 +50,8 @@ def status(data_dir: Path, api: str, token: str | None) -> dict:
     out.update(commit=mine["commit"][:7], can_update=True)
     if not mine.get("repo"):
         return out
-    fresh = _seen["commit"] == mine["commit"] and time.monotonic() - _seen["at"] < CHECK_EVERY
-    if not fresh:
+    known = _seen["commit"] == mine["commit"] and time.monotonic() - _seen["at"] < CHECK_EVERY
+    if fresh or not known:
         try:
             _seen["found"] = _newer(mine["repo"], mine["commit"], api, token)
         except (urllib.error.URLError, OSError, ValueError, KeyError):

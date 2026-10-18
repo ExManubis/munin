@@ -453,6 +453,7 @@ select option { background: var(--ink); color: var(--text); }
 .agent-row.revoked .agent-name { color: var(--muted); }
 .agent-seen { font: 13px/18px var(--sans); color: var(--text-2); }
 .agent-action { text-align: right; }
+.update-check { display: flex; gap: 16px; align-items: baseline; margin-top: 8px; }
 .releases { margin: 0 0 16px; padding-left: 18px; color: var(--text-2); }
 .releases li { margin: 4px 0; }
 .providers { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
