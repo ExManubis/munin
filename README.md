@@ -19,7 +19,7 @@ uv run munin agent add claude-code      # prints the agent's token, shown once
 uv run munin serve --open               # http://127.0.0.1:7777
 ```
 
-The tracker serves the web UI from `web/` too, so this is all you need locally. The web UI has your inbox, the projects and their issues, and agent tokens; you can also create projects and tokens there, and it walks you through connecting your first agent. It updates live as agents work. The data lives in `~/.munin/munin.db`.
+The tracker serves the web UI from `web/` too, so this is all you need locally. The web UI has your inbox, the projects and their issues, and agent tokens; you can also create projects and tokens there, and Settings has the command to connect an agent. It updates live as agents work. The data lives in `~/.munin/munin.db`.
 
 `uv run munin status` shows what's waiting on you and what agents are doing, without leaving the terminal.
 
