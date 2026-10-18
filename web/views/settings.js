@@ -1,5 +1,5 @@
-// Settings, behind your square in the topbar: GitHub, the agents that connect over MCP (a
-// token each), and notifications.
+// Settings, behind your square in the topbar: updates, GitHub, the agents that connect over MCP
+// (a token each), and notifications.
 
 import { api } from '../api.js';
 import { store, isWorking } from '../store.js';
@@ -7,25 +7,29 @@ import { h, PROVIDERS, providerMark, agentAvatar, statusIcon, time, topbar, bind
 import { notificationsSupported, notificationsOn, pushSupported, toggleNotifications } from '../notify.js';
 
 let created = null; // { name, token } for the token just created; shown once
+let updating = null; // the commit munin ran when you asked for an update, until it's back on a new one
 let provider = 'claude'; // the harness picked for the next agent; null for another one
 
 export const view = {
   title: () => 'Settings',
 
   async load() {
-    const [agents, github] = await Promise.all([api.agents(), api.github()]);
-    return { agents, github, me: store.me };
+    // GitHub can be slow to say what's new; Settings doesn't wait long for it.
+    const update = Promise.race([api.updateStatus(), new Promise((resolve) => setTimeout(resolve, 2500, null))]).catch(() => null);
+    const [agents, github, updates] = await Promise.all([api.agents(), api.github(), update]);
+    return { agents, github, updates, me: store.me };
   },
 
   leave() {
     created = null; // the token is only ever shown on the screen that created it
   },
 
-  render({ agents, github, me }, ctx) {
+  render({ agents, github, updates, me }, ctx) {
     const live = agents.filter((a) => !a.revoked);
     return h('div', { class: 'page' },
       topbar([h('span', { class: 'title' }, 'Settings')]),
       h('div', { class: 'agents-page' },
+        updatesSection(updates, ctx),
         githubSection(github, ctx),
         h('section', { class: 'section', id: 'outside-agents' },
           h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Agents'), h('span', { class: 'mono muted' }, `${live.length} connected`)),
@@ -42,6 +46,61 @@ export const view = {
   },
 };
 
+// What munin runs, what's newer, and a button that updates it. munin restarts on the way, so the
+// page waits for it to come back on the new version, then reloads.
+function updatesSection(updates, ctx) {
+  const head = (note) => h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'Updates'), note ? h('span', { class: 'mono muted' }, note) : null);
+  if (updating) {
+    return h('section', { class: 'section first', id: 'updates' }, head(),
+      h('p', { class: 'lead' }, 'Updating. munin restarts on its way and is back in a minute or so; this page reloads when it is.'));
+  }
+  if (!updates) {
+    return h('section', { class: 'section first', id: 'updates' }, head(), h('p', { class: 'muted' }, "Couldn't check for updates just now."));
+  }
+  if (!updates.can_update) {
+    return h('section', { class: 'section first', id: 'updates' }, head(),
+      h('p', { class: 'muted' }, "This munin wasn't set up by its install script, so it can't update itself: pull and restart it."));
+  }
+  const start = async () => {
+    try {
+      await api.updateNow();
+    } catch (err) {
+      toast(err.message, { error: true });
+      return;
+    }
+    updating = updates.commit;
+    ctx.rerender();
+    waitForUpdate();
+  };
+  return h('section', { class: 'section first', id: 'updates' },
+    head(updates.commit),
+    updates.behind
+      ? [
+        h('p', { class: 'lead' }, updates.releases.length
+          ? `${updates.releases.length === 1 ? 'A release is' : `${updates.releases.length} releases are`} out since this one:`
+          : 'There are changes on GitHub since this one.'),
+        updates.releases.length ? h('ul', { class: 'releases' }, updates.releases.map((r) => h('li', {}, r[0].toUpperCase() + r.slice(1)))) : null,
+        h('div', { class: 'setting' },
+          h('div', { class: 'setting-main' },
+            h('div', {}, 'Update munin'),
+            h('div', { class: 'hint' }, 'Takes a minute; munin restarts on the way. Or on the machine: munin update (with sudo on Linux).')),
+          h('button', { type: 'button', class: 'btn small primary', onclick: start }, 'Update now')),
+      ]
+      : h('p', { class: 'muted' }, 'munin is up to date.'));
+}
+
+// Ask until munin answers on a new version, then load the new page. Gives up after ten minutes.
+async function waitForUpdate() {
+  const until = Date.now() + 10 * 60 * 1000;
+  while (Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    const now = await api.updateStatus().catch(() => null);
+    if (now?.commit && now.commit !== updating) return location.reload();
+  }
+  updating = null;
+  toast("munin hasn't come back on a new version. See update.log next to its database.", { error: true });
+}
+
 function githubSection(github, ctx) {
   const input = bindDraft(h('input', { class: 'input', type: 'password', placeholder: 'ghp_… or github_pat_…', autocomplete: 'off', spellcheck: false, 'aria-label': 'GitHub token' }), 'github:token');
   const save = async (e) => {
@@ -55,7 +114,7 @@ function githubSection(github, ctx) {
       toast(err.message, { error: true });
     }
   };
-  return h('section', { class: 'section first', id: 'github' },
+  return h('section', { class: 'section', id: 'github' },
     h('div', { class: 'section-head' }, h('h2', { class: 'h1' }, 'GitHub'), h('span', { class: 'mono muted' }, github.token ? `token …${github.token.hint}` : 'no token')),
     h('p', { class: 'lead' }, "Pull requests linked to issues show their title and whether they've merged. Public repositories need no token; private ones, and more than 60 checks an hour, do."),
     h('form', { class: 'key-form', onsubmit: save },

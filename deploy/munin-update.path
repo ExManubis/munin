@@ -1,0 +1,10 @@
+# Starts munin-update when munin's Settings asks for an update. Installed by deploy/install.sh.
+
+[Unit]
+Description=munin's update button
+
+[Path]
+PathExists=/var/lib/munin/update-requested
+
+[Install]
+WantedBy=multi-user.target
