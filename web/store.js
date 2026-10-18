@@ -4,14 +4,8 @@ export const store = {
   me: { name: 'me', mcp_url: '', version: '' },
   projects: [],
   inbox: [],
-  meetings: [], // the runtime's meetings, each without its transcript
   snoozed: [], // questions put off till later, on issues snoozed until a time
   agents: [],
-  // From the agent runtime: its agents, and what they're waiting on you for.
-  runtimeAgents: [],
-  // What agents call you, from setup (runtime.me().name), or null while that's MUNIN_USER's "me".
-  human: null,
-  waiting: [],
   // The project the current screen is about; the new-issue dialog starts there.
   projectKey: null,
 };

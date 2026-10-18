@@ -1,12 +1,9 @@
 // Telling the human something needs them: a count in the tab title, a dot on the favicon,
 // and (opt-in) notifications. Where the browser can, they're push notifications that reach this
-// device with munin closed: each service pushes with keys of its own (the tracker its questions
-// and work for review, the runtime its agents' questions, approvals and assistants' messages),
-// through a service worker each (push/tracker/sw.js, push/runtime/sw.js). Elsewhere munin shows
-// notifications itself, while it's open in a tab.
+// device with munin closed: questions and work for review, through push/tracker/sw.js.
+// Elsewhere munin shows notifications itself, while it's open in a tab.
 
 import { api } from './api.js';
-import { runtime } from './runtime/index.js';
 import { store, remember } from './store.js';
 import { firstLine, toast } from './ui.js';
 import { waitingItems } from './waiting.js';
@@ -22,7 +19,6 @@ export function notificationsOn() {
 // The services that push, as this page reaches them.
 const pushers = () => [
   { name: 'tracker', status: () => api.push(), save: (s) => api.subscribePush(s), forget: (e) => api.forgetPush(e) },
-  ...(runtime.kind === 'runtime' ? [{ name: 'runtime', status: () => runtime.push(), save: (s) => runtime.subscribePush(s), forget: (e) => runtime.forgetPush(e) }] : []),
 ];
 const keyBytes = (key) => Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (key.length % 4)) % 4)), (c) => c.charCodeAt(0));
 const sameKey = (buffer, bytes) => Boolean(buffer) && new Uint8Array(buffer).every((b, i) => b === bytes[i]) && buffer.byteLength === bytes.length;
@@ -87,17 +83,20 @@ let lastFailure = null;
 // Flip the setting, saying what happened.
 export async function toggleNotifications() {
   const result = await setNotifications(!notificationsOn());
-  if (result === 'granted') toast(pushSupported ? 'Notifications on for this device: questions, approvals, work for review and your assistants\' messages reach it, even with munin closed.' : 'Notifications on. munin tells you when an agent asks something or finishes work, while it\'s open in a tab.');
+  if (result === 'granted') toast(pushSupported ? 'Notifications on for this device: questions and work for review reach it, even with munin closed.' : 'Notifications on. munin tells you when an agent asks something or finishes work, while it\'s open in a tab.');
   else if (result === 'denied') toast('Your browser blocks notifications from munin. Allow them in the site settings, then try again.', { error: true });
   else if (result === 'failed') toast(`munin couldn't set up notifications on this device: ${lastFailure}`, { error: true });
   else if (result === 'off') toast('Notifications off.');
   return result;
 }
 
-// On start: keep this device's subscriptions current (the runtime may have come up since, or a
-// service has new keys), and go where a tapped notification points.
+// On start: keep this device's subscription current (the tracker may have new keys), drop the
+// one munin's agent runtime had before it moved out (figbots), and go where a tapped
+// notification points.
 if (pushSupported) {
   if (notificationsOn()) subscribeAll().catch(() => {});
+  navigator.serviceWorker.getRegistration('push/runtime/')
+    .then((old) => old && old.scope.endsWith('/push/runtime/') && old.unregister()).catch(() => {});
   navigator.serviceWorker.addEventListener('message', (event) => {
     if (event.data?.munin === 'open') location.hash = event.data.hash || '#/';
   });

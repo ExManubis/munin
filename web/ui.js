@@ -3,7 +3,7 @@
 
 import { api } from './api.js';
 import { store, kindOf, isBusy } from './store.js';
-import { figbot, faceOf } from './figbot.js';
+import { figbot } from './figbot.js';
 import { claudeMark, isClaude } from './claude-mark.js';
 
 export const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl ';
@@ -103,37 +103,30 @@ export function icon(name, { color = C.muted, size = 12 } = {}) {
   return svg(size, '0 0 12 12', ICONS[name](color));
 }
 
-// Agents are Figbots, in their colour when they're munin's own and white when they connect
-// from outside, except Claude, which gets its own spark. People are solid squares with an
-// initial, and nobody (unassigned) is a dotted square.
+// Agents are pixel faces, white, except Claude, which gets its own spark. People are solid
+// squares with an initial, and nobody (unassigned) is a dotted square.
 export function avatar(name, { kind, idle = false, size = 18, state } = {}) {
   if (!name) return svg(size, '0 0 18 18', [frame18(C.muted, { 'stroke-dasharray': '1 1' })], { cls: 'avatar', label: 'Unassigned' });
   if ((kind || kindOf(name)) === 'agent') {
-    if (isClaude(name, ownNames())) return claudeMark({ size });
+    if (isClaude(name)) return claudeMark({ size });
     return figbot({ size, state: state || (idle ? 'idle' : 'working'), animate: false });
   }
   const style = size === 18 ? null : `width:${size}px;height:${size}px;font-size:${size < 16 ? 9 : 10}px`;
   return h('span', { class: 'avatar person', 'aria-hidden': 'true', style }, (name.trim()[0] || '?').toUpperCase());
 }
 
-const ownNames = () => store.runtimeAgents.map((a) => a.name);
-
-// What an agent is doing, for its face: the runtime knows for its own agents; for the rest,
-// the tracker does (working on something, or waiting for an answer).
+// What an agent is doing, for its face, from the tracker: working on something, waiting for
+// an answer, or idle.
 export function agentState(name) {
-  const own = store.runtimeAgents.find((a) => a.name === name);
-  if (own) return own.state;
   const agent = store.agents.find((a) => a.name === name);
   if (store.inbox.some((item) => item.question.author === name)) return 'asks';
   return agent && isBusy(agent) ? 'working' : 'idle';
 }
 
-// An agent's face, in its colour and with the expression for what it's doing.
+// An agent's face, with the expression for what it's doing.
 export function agentAvatar(name, { size = 18, state } = {}) {
-  if (isClaude(name, ownNames())) return claudeMark({ size, label: name });
-  const own = store.runtimeAgents.find((a) => a.name === name);
-  const shown = state || (own ? faceOf(own, agentState(name)) : agentState(name));
-  return figbot({ colour: own?.colour || 'white', state: shown, size, seed: name, label: name });
+  if (isClaude(name)) return claudeMark({ size, label: name });
+  return figbot({ colour: 'white', state: state || agentState(name), size, seed: name, label: name });
 }
 
 // Agents, people and nobody, each with the right square.
@@ -175,6 +168,12 @@ export function ago(value, long = false) {
 }
 
 // A <time> that app.js keeps current on every refresh.
+// What an issue's agents spent, in dollars.
+export function dollars(amount) {
+  if (amount > 0 && amount < 0.01) return '<$0.01';
+  return `$${amount.toFixed(2)}`;
+}
+
 export function time(value, { long = false, prefix = '', cls } = {}) {
   const date = parseTime(value);
   if (!date) return null;
