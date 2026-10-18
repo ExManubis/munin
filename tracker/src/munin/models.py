@@ -142,6 +142,23 @@ class PullRequest(Base):
     issue: Mapped[Issue] = relationship(back_populates="pull_requests")
 
 
+class Usage(Base):
+    """What an agent reported spending on an issue. Each report adds to the issue's total."""
+
+    __tablename__ = "usage"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(ForeignKey("issues.id"), index=True)
+    agent: Mapped[str] = mapped_column(String(100))
+    cost_usd: Mapped[float] = mapped_column(Float)
+    tokens_in: Mapped[int | None] = mapped_column(Integer, default=None)
+    tokens_out: Mapped[int | None] = mapped_column(Integer, default=None)
+    model: Mapped[str | None] = mapped_column(String(200), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    issue: Mapped[Issue] = relationship()
+
+
 class Event(Base):
     """Something that happened to an issue: created, moved, assigned, renamed, blocked."""
 

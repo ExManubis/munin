@@ -1,6 +1,7 @@
 import sqlite3
 
 from munin import issues as svc
+from munin import usage
 from munin.db import connect
 
 from conftest import CLAUDE
@@ -29,3 +30,16 @@ def test_an_older_database_is_brought_up_to_date(tmp_path):
         svc.update_issue(s, CLAUDE, "MUN-1", status="in_progress")
         assert svc.get_issue(s, "MUN-1").status_changed_at is not None
         assert [e.kind for e in svc.get_issue(s, "MUN-1").events] == ["status", "assignee"]
+
+
+def test_old_database_gets_usage_table(tmp_path):
+    path = tmp_path / "old.db"
+    with connect(path)() as s:
+        svc.create_project(s, "MUN", "munin")
+        svc.create_issue(s, CLAUDE, "MUN", "Thing")
+    with sqlite3.connect(path) as old:
+        old.execute("DROP TABLE usage")
+
+    with connect(path)() as s:
+        usage.report(s, CLAUDE, "MUN-1", 0.5)
+        assert usage.totals(s, [1])[1]["cost"] == 0.5

@@ -56,6 +56,7 @@ def test_tools_and_instructions(server):
         "update_issue",
         "link_pull_request",
         "add_comment",
+        "report_usage",
         "events",
         "wait_for_work",
     ]
