@@ -505,10 +505,10 @@ def unlink_pull_request(ref: str, pull_id: int, s: DB, actor: Human) -> IssueDet
 
 
 @router.get("/update")
-async def update_status(request: Request) -> dict:
-    """What munin runs, and what's newer on GitHub."""
+async def update_status(request: Request, fresh: bool = False) -> dict:
+    """What munin runs, and what's newer on GitHub; `fresh` asks GitHub now instead of within the hour."""
     settings, github = request.app.state.settings, request.app.state.github
-    return await asyncio.to_thread(updates.status, settings.db_path.parent, github.api, github.token)
+    return await asyncio.to_thread(updates.status, settings.db_path.parent, github.api, github.token, fresh)
 
 
 @router.post("/update", status_code=202)

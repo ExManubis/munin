@@ -8,6 +8,7 @@ import { notificationsSupported, notificationsOn, pushSupported, toggleNotificat
 
 let created = null; // { name, token } for the token just created; shown once
 let updating = null; // the commit munin ran when you asked for an update, until it's back on a new one
+let checking = false; // while asking GitHub what's new
 let provider = 'claude'; // the harness picked for the next agent; null for another one
 
 export const view = {
@@ -61,6 +62,14 @@ function updatesSection(updates, ctx) {
     return h('section', { class: 'section first', id: 'updates' }, head(),
       h('p', { class: 'muted' }, "This munin wasn't set up by its install script, so it can't update itself: pull and restart it."));
   }
+  const check = async () => {
+    checking = true;
+    ctx.rerender();
+    await api.updateStatus(true).catch(() => toast("Couldn't reach GitHub just now.", { error: true }));
+    checking = false;
+    ctx.reload();
+  };
+  const checkButton = h('button', { type: 'button', class: 'link', onclick: check, disabled: checking }, checking ? 'Checking…' : 'Check for updates');
   const start = async () => {
     try {
       await api.updateNow();
@@ -86,7 +95,8 @@ function updatesSection(updates, ctx) {
             h('div', { class: 'hint' }, 'Takes a minute; munin restarts on the way. Or on the machine: munin update (with sudo on Linux).')),
           h('button', { type: 'button', class: 'btn small primary', onclick: start }, 'Update now')),
       ]
-      : h('p', { class: 'muted' }, 'munin is up to date.'));
+      : null,
+    h('div', { class: 'update-check' }, updates.behind ? null : h('span', { class: 'muted' }, 'munin is up to date.'), checkButton));
 }
 
 // Ask until munin answers on a new version, then load the new page. Gives up after ten minutes.
