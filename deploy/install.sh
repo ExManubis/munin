@@ -5,9 +5,11 @@
 #   sudo git clone <munin's repository> /opt/munin
 #   sudo /opt/munin/deploy/install.sh
 #
-# Run it again after pulling to update. It only touches munin's own things: the munin user,
-# /var/lib/munin, /etc/munin, the munin-tracker service, /usr/local/bin/munin, and this machine's
-# tailscale serve path /. Set MUNIN_USERS to say who may use munin, if it isn't you (the
+# On Debian or Ubuntu it first installs what it needs and is missing (git, curl, Node, uv,
+# Tailscale), and has you sign in to Tailscale if you haven't. Run it again after pulling to
+# update. Beyond those, it only touches munin's own things: the munin user, /var/lib/munin,
+# /etc/munin, the munin-tracker service, /usr/local/bin/munin, and this machine's tailscale
+# serve path /. Set MUNIN_USERS to say who may use munin, if it isn't you (the
 # machine's Tailscale owner) or the machine is tagged.
 set -euo pipefail
 
@@ -27,11 +29,54 @@ setting() { sed -n "s/^$1=//p" "$CONF/environment" | tail -1; }
 case "$MUNIN_DIR" in
   /home/* | /root/*) fail "munin's services can't read $MUNIN_DIR. Put the checkout somewhere like /opt/munin." ;;
 esac
+has() { command -v "$1" > /dev/null 2>&1; }
+
+# On Debian or Ubuntu, put in what's missing; elsewhere, say what to install.
+if has apt-get; then
+  missing=()
+  for tool in git curl node; do has "$tool" || missing+=("$tool"); done
+  if [ ${#missing[@]} -gt 0 ]; then
+    say "Installing ${missing[*]}"
+    packages=("${missing[@]/node/nodejs}")
+    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates "${packages[@]}" > /dev/null \
+      || fail "couldn't install ${missing[*]} with apt-get."
+  fi
+  if ! has uv; then
+    say "Installing uv"
+    # Into /usr/local/bin, on root's PATH and the services'.
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh > /dev/null \
+      || fail "couldn't install uv. See https://docs.astral.sh/uv/getting-started/installation/"
+  fi
+  if ! has tailscale; then
+    say "Installing Tailscale"
+    if ! curl -fsSL https://tailscale.com/install.sh | sh > /dev/null 2>&1; then
+      # Its script only knows released Debian and Ubuntu versions it's been told about; the
+      # package is the same on newer ones, so take it from the latest it knows of.
+      . /etc/os-release
+      case "$ID" in
+        ubuntu) DIST=ubuntu SUITE=noble ;;
+        *) DIST=debian SUITE=bookworm ;;
+      esac
+      echo "  Tailscale's script doesn't know ${PRETTY_NAME:-this system}; using its $DIST $SUITE package."
+      curl -fsSL "https://pkgs.tailscale.com/stable/$DIST/$SUITE.noarmor.gpg" > /usr/share/keyrings/tailscale-archive-keyring.gpg
+      curl -fsSL "https://pkgs.tailscale.com/stable/$DIST/$SUITE.tailscale-keyring.list" > /etc/apt/sources.list.d/tailscale.list
+      apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tailscale > /dev/null \
+        || fail "couldn't install Tailscale. See https://tailscale.com/download/linux"
+    fi
+    systemctl enable --now --quiet tailscaled
+  fi
+fi
 need git "On Debian or Ubuntu: apt install git"
 need curl "On Debian or Ubuntu: apt install curl"
 need node "https://nodejs.org/en/download"
 need uv "curl -LsSf https://astral.sh/uv/install.sh | sh, and put it on root's PATH."
-need tailscale "https://tailscale.com/download, then: tailscale up"
+need tailscale "https://tailscale.com/download"
+
+# Signed in to Tailscale, or sign in now: it prints a link to open, and waits.
+if ! tailscale status > /dev/null 2>&1; then
+  say "Sign this machine in to Tailscale"
+  tailscale up || fail "Tailscale didn't come up. Try: tailscale up"
+fi
 
 # This machine on the tailnet: its name for munin's address, and its owner for MUNIN_USERS.
 read -r HOST OWNER HTTPS < <(tailscale status --json | node -e '
