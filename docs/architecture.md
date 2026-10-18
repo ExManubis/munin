@@ -17,7 +17,7 @@ agent runtime ──MCP──▶ tracker ◀──MCP── Claude Code, Codex, 
 
 | Piece | What it does | Built with | Status |
 |---|---|---|---|
-| **web** | The one frontend for all of munin: a topbar with AGENTS and TRACKER, each with its own sidebar | Plain JS modules, no build step | Built; the Agents part uses the runtime when it answers, and hides when it doesn't (`munin demo` and `?mock` use a mock) |
+| **web** | The one frontend for all of munin: a topbar with FIGBOTS, MEETINGS and TRACKER, each with its own sidebar | Plain JS modules, no build step | Built; the Figbots and Meetings parts use the runtime when it answers, and hide when it doesn't (`munin demo` and `?mock` use a mock) |
 | **tracker** | Projects, issues, comments, history, questions for you, agent tokens. An API for the frontend, MCP for agents | Python, FastAPI, SQLAlchemy, SQLite | Built; see `tracker.md` |
 | **agent runtime** | munin's own agents: their conversations, roles, models, routines and memory; keeps them working and survives restarts | Node, pi-durable and pi-ai, its own SQLite | A first version; `runtime-api.md` says what it does and what's next |
 | **edge** | One HTTPS address on the tailnet; says who you are; sends each path to its service | `tailscale serve` | Built: `deploy/install.sh` sets it up; see `server.md` |

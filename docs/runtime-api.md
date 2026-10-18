@@ -76,7 +76,7 @@ An agent's name is also its name in the tracker. That's how the frontend joins t
 | `decide(name, id, decision)` | `POST /runtime/api/agents/{name}/items/{id}/decide` | `once`, `always` or `deny` on an approval. `always` switches the matching ask-first rule off |
 | `undo(name, id)` | `POST /runtime/api/agents/{name}/items/{id}/undo` | Takes back an `always` for 8 seconds; the rule asks first again |
 | `stopRun(name, id)` | `POST /runtime/api/agents/{name}/runs/{id}/stop` | Stops after the step it's on |
-| `waiting()` | `GET /runtime/api/waiting` | Every open question and approval, as `{agent: Summary, item}`, oldest first |
+| `waiting()` | `GET /runtime/api/waiting` | Every open question and approval, and every meeting a figbot called you into, as `{agent: Summary, item}`, oldest first |
 | `issueCosts(ids?)` | `GET /runtime/api/issue-costs?issues=MUN-1,MUN-2` | What each issue cost: `{"MUN-12": {cost, tokens, agents: {forge: cost}}}`, dollars. A model response counts towards the issue its agent is on: the one it took or opened a worktree for, until it moves that issue on (to review, done, or back to the pile). Responses on no issue count only in the agent's own usage, which has every response. The tracker knows nothing of cost; the frontend joins the two on the issue page and in the project's list. Without `issues`, every issue counted so far |
 
 An **item** is one of:
@@ -97,6 +97,20 @@ An **item** is one of:
 ```
 
 `Issue` is `{id, title}`. Time rules ("TODAY · 09:15") and grouping are the frontend's job; the runtime only sends items.
+
+## Meetings
+
+Figbots talk in turns, with you able to join (meetings.js). A meeting has a title, participants (agent names, plus `null` for you), a transcript of speeches, and a status `open` or `closed`. Meetings live in a session doc of their own (`munin.meetings`), with who has been asked to speak, so a turn asked before a restart is still answered after it. Each figbot takes its turns in a session of its own for that meeting, a conversation apart from its chats with you: it keeps its model and who it is, but not its code, tracker, apps or the web, and its own conversation gets one "went to a meeting" line. A turn carries only what was said since that figbot's last turn (at most 24 speeches and 16,000 characters, saying how many were left out), with the meeting's rules: speak only when there's something new, don't repeat, and never reveal anything from private conversations. Creating a meeting, and every speech of yours, starts a discussion, as in Hermes Agent's group chats: up to 3 rounds, one turn at a time. Your @mentions pick who answers first (`@pip`; none, `@all` or `@everyone` means every figbot); after that a round asks only the figbots another one @mentioned and hasn't heard from since, so later rounds are opt-in. Whoever starts rotates each round, nobody speaks twice in a row, and a figbot with nothing new to hear since its last turn sits the round out, so a lone figbot waits for you. A round where nobody says anything settles the discussion; 3 rounds or 10 figbot speeches bound it. Either way the meeting waits for you, and a meeting's `state` says which: `talking`, `settled`, `bounded` or `closed`; `speaking` names the figbot whose turn it is now. Your speech starts a new discussion in place of one still going; a turn already asked finishes and its speech lands, and a turn whose answer never came within 10 minutes is let go. munin asks each figbot's turn as an input of its own kind, and the figbot answers with `speak_in_meeting` (its text; calling it with none, or with blank words, passes; `meeting` says which one when it was asked in several). A turn the agent ends without the tool still counts: what it said is its speech, and nothing (or a failed turn) is a pass. A figbot that writes `@you` (or `@user`, or your name) calls you in: the meeting's `needsYou` says who and what, it's on the waiting list as an item of kind `meeting` (`{id, kind, status, at, text, meeting: {id, title}}`), and your devices get a push, until you speak in it.
+
+| Mock | HTTP | Does |
+|---|---|---|
+| `meetings()` | `GET /runtime/api/meetings` | Every meeting, newest first, each without its transcript, with `last`: `{from, pass, text, at}` of its last speech |
+| `createMeeting(fields)` | `POST /runtime/api/meetings` | `{title, participants, first?}`; `participants` are agent names plus `null` for you; `first` is your opening speech. 422 without a title or without anyone to speak |
+| `meeting(id)` | `GET /runtime/api/meetings/{id}` | One in full, transcript included |
+| `speakInMeeting(id, text)` | `POST /runtime/api/meetings/{id}/speech` | Your speech; the round goes on afterwards. A closed meeting is a 409 |
+| `closeMeeting(id)` | `POST /runtime/api/meetings/{id}/close` | Ends it; turns already asked finish, no new ones start |
+
+A speech is `{id, from, at, pass, text}`, `from` an agent's name or `null` for you, `text` null on a pass. In the mock the transcript is stored but agents don't discuss: it's for the screens.
 
 ## Routines, memory and providers
 
@@ -216,7 +230,7 @@ The runtime (`runtime/src/`) is a thin layer over pi-durable:
 
 ## What this version does
 
-Real: agents and their settings, conversations with runs, questions with options, ask-first approvals with undo, coding tools, a worktree and a branch per issue, the tracker for coders and reviewers, routines on a schedule or a tracker trigger, memory, pause and resume, usage and cost per issue, models, the live stream, and everything surviving a restart.
+Real: agents and their settings, conversations with runs, questions with options, ask-first approvals with undo, coding tools, a worktree and a branch per issue, the tracker for coders and reviewers, routines on a schedule or a tracker trigger, memory, meetings (MUN-43), pause and resume, usage and cost per issue, models, the live stream, and everything surviving a restart.
 
 An agent in the tracker starts work when you tell it to, from its projects in the ABOUT panel, or when a routine says so: "Weekdays 09:00: continue the MUN project" keeps a coder on the pile, and "When an issue moves to In review" puts a reviewer on what lands. It keeps going until `wait_for_work` says there's nothing left.
 

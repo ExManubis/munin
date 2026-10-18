@@ -1,7 +1,8 @@
 // munin web UI: the topbar, routing, live updates, each part's sidebar and keyboard shortcuts.
-// munin has two parts, each with its own sidebar: AGENTS (munin's own agents, from the agent
-// runtime) and TRACKER (issues, from the tracker). Settings sits behind your square. Without a
-// runtime there's no AGENTS part, until one turns up.
+// munin has three parts, each with its own sidebar: FIGBOTS (munin's own agents, from the agent
+// runtime), MEETINGS (figbots talking in turns, also the runtime's) and TRACKER (issues, from the
+// tracker). Settings sits behind your square. Without a runtime there are no FIGBOTS or MEETINGS
+// parts, until one turns up.
 //
 // Each view exports { load(params), render(data, ctx), title(data) } and optionally
 // onKey(e, data, ctx), leave(), scope(params) and poll(data), which asks for polling
@@ -24,6 +25,7 @@ import { indexView as agentsIndexView, agentsSidebar } from './views/agents.js';
 import { view as conversationView } from './views/conversation.js';
 import { view as profileView } from './views/profile.js';
 import { view as newAgentView } from './views/new-agent.js';
+import { indexView as meetingsIndexView, newView as newMeetingView, roomView as meetingRoomView, meetingsSidebar } from './views/meetings.js';
 import { openSetup, setupOpen } from './setup.js';
 
 const ROUTES = [
@@ -31,13 +33,16 @@ const ROUTES = [
   [/^\/agents\/new$/, newAgentView, () => ({}), 'agents'],
   [/^\/agents\/([^/]+)$/, conversationView, (m) => ({ name: decodeURIComponent(m[1]) }), 'agents'],
   [/^\/agents\/([^/]+)\/profile$/, profileView, (m) => ({ name: decodeURIComponent(m[1]) }), 'agents'],
+  [/^\/meetings$/, meetingsIndexView, () => ({}), 'meetings'],
+  [/^\/meetings\/new$/, newMeetingView, () => ({}), 'meetings'],
+  [/^\/meetings\/([^/]+)$/, meetingRoomView, (m) => ({ id: decodeURIComponent(m[1]) }), 'meetings'],
   [/^\/inbox(?:\/(\d+))?$/, inboxView, (m) => ({ qid: m[1] }), 'tracker'],
   [/^\/projects$/, projectsView, () => ({}), 'tracker'],
   [/^\/projects\/([^/]+)$/, projectView, (m) => ({ key: decodeURIComponent(m[1]).toUpperCase() }), 'tracker'],
   [/^\/issues\/([^/]+)$/, issueView, (m) => ({ id: decodeURIComponent(m[1]).toUpperCase() }), 'tracker'],
   [/^\/settings$/, settingsView, () => ({}), 'settings'],
 ];
-const HOME = { agents: '#/agents', tracker: '#/inbox' };
+const HOME = { agents: '#/agents', meetings: '#/meetings', tracker: '#/inbox' };
 const hasAgents = () => runtime.kind !== 'none';
 const home = () => (hasAgents() ? HOME.agents : HOME.tracker);
 
@@ -72,12 +77,13 @@ const ctx = {
 // The tracker's projects, inbox and agents, and the runtime's agents and what's waiting.
 // A change in the runtime alone doesn't need the tracker asked again.
 async function refreshShared({ tracker = true } = {}) {
-  const [runtimeAgents, waiting, ...rest] = await Promise.all([
+  const [runtimeAgents, waiting, meetings, ...rest] = await Promise.all([
     runtime.agents(),
     runtime.waiting(),
+    hasAgents() ? runtime.meetings().catch(() => []) : [],
     ...(tracker ? [api.projects(), api.inbox(), api.agents(), api.snoozed()] : []),
   ]);
-  Object.assign(store, { runtimeAgents, waiting });
+  Object.assign(store, { runtimeAgents, waiting, meetings });
   if (tracker) {
     const [projects, inbox, agents, snoozed] = rest;
     Object.assign(store, { projects, inbox, agents, snoozed });
@@ -102,7 +108,7 @@ async function refresh({ live = false, tracker = true } = {}) {
   const mine = ++seq;
   const route = parseRoute();
   if (!route) return location.replace(home());
-  if (route.section === 'agents' && !hasAgents()) return location.replace(sectionHref('tracker'));
+  if ((route.section === 'agents' || route.section === 'meetings') && !hasAgents()) return location.replace(sectionHref('tracker'));
   try {
     await refreshShared({ tracker });
     const data = await route.view.load(route.params);
@@ -142,6 +148,7 @@ function sharedState() {
       !a.last_seen_at ? 'never' : Date.now() - Date.parse(a.last_seen_at) < 30 * 60 * 1000 ? 'live' : 'quiet']),
     store.projects,
     store.runtimeAgents,
+    store.meetings,
     store.inbox.map((item) => item.question.id),
     store.snoozed.map((item) => [item.question.id, item.issue.snoozed_until]),
   ];
@@ -224,12 +231,13 @@ function renderChrome(route, data) {
   app.className = `app section-${route.section}`;
 
   const key = JSON.stringify([route.path, route.section, data?.issue?.project, store.projects, store.inbox.length,
-    liveAgents().map((a) => [a.name, isWorking(a)]), store.runtimeAgents, waiting.length, store.me, runtime.kind]);
+    liveAgents().map((a) => [a.name, isWorking(a)]), store.runtimeAgents, store.meetings, waiting.length, store.me, runtime.kind]);
   if (key === chromeKey) return;
   chromeKey = key;
 
   renderAppbar(route, waiting);
   if (route.section === 'agents') sidebar.replaceChildren(...agentsSidebar(route));
+  else if (route.section === 'meetings') sidebar.replaceChildren(...meetingsSidebar(route));
   else if (route.section === 'settings') sidebar.replaceChildren(...settingsSidebar());
   else sidebar.replaceChildren(...trackerSidebar(route, data));
   renderTabbar(route);
@@ -249,7 +257,7 @@ function renderAppbar(route, waiting) {
   appbar.replaceChildren(...[
     h('a', { class: 'logo', href: home(), 'aria-label': 'munin' },
       h('img', { src: 'munin-lockup-dither-on-dark.svg', alt: 'munin', width: 122, height: 26 })),
-    hasAgents() ? h('nav', { class: 'section-tabs', 'aria-label': 'Parts of munin' }, tab('agents', 'Figbots'), tab('tracker', 'Tracker')) : null,
+    hasAgents() ? h('nav', { class: 'section-tabs', 'aria-label': 'Parts of munin' }, tab('agents', 'Figbots'), tab('meetings', 'Meetings'), tab('tracker', 'Tracker')) : null,
     h('div', { class: 'grow' }),
     h('button', { type: 'button', class: 'quick', onclick: openPalette }, icon('search'), h('span', {}, 'Search or jump to…'), kbd(`${MOD}K`)),
     waiting.length
@@ -323,8 +331,13 @@ function settingsSidebar() {
   ];
 }
 
+// Three small faces in a row, for the Meetings tab.
+const meetingsIcon = (on) => h('span', { class: ['meetings-icon', !on && 'dim'] },
+  ['white', 'ember', 'sky'].map((colour) => figbot({ colour, size: 10, state: 'idle', animate: false, seed: colour })));
+
 function renderTabbar(route) {
   const onAgents = route.section === 'agents';
+  const onMeetings = route.section === 'meetings';
   const onTracker = route.section === 'tracker';
   const tab = (href, lead, label, active, badge) => h('a', { class: ['tab', active && 'active'], href, 'aria-current': active ? 'page' : null },
     lead, h('span', {}, label), badge ? h('span', { class: 'badge' }, badge) : null);
@@ -332,8 +345,9 @@ function renderTabbar(route) {
   const agentsWaiting = store.waiting.length;
   tabbar.replaceChildren(...[
     hasAgents() ? tab(sectionHref('agents'), figbot({ size: 18, state: 'idle', animate: false, cls: onAgents ? null : 'dim' }), 'Figbots', onAgents, agentsWaiting) : null,
+    hasAgents() ? tab(sectionHref('meetings'), meetingsIcon(onMeetings), 'Meetings', onMeetings, store.meetings.filter((m) => m.needsYou && m.status === 'open').length) : null,
     tab(sectionHref('tracker'), icon('inbox', { size: 16, color: onTracker ? '#EDEDED' : '#7A7A7A' }), 'Tracker', onTracker, store.inbox.length),
-    action('plus', 'New', () => (onAgents ? (location.hash = '#/agents/new') : openNewIssue())),
+    action('plus', 'New', () => (onAgents ? (location.hash = '#/agents/new') : onMeetings ? (location.hash = '#/meetings/new') : openNewIssue())),
     action('search', 'Search', openPalette),
   ].filter(Boolean));
 }
@@ -358,11 +372,12 @@ document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (dialogOpen()) return;
   if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]')) return;
-  // G then F (or A, as it was) or T: go to Figbots or the Tracker.
-  if (Date.now() - pendingG < 1200 && (hasAgents() ? /^[aft]$/i : /^t$/i).test(e.key)) {
+  // G then F (or A, as it was), M or T: go to Figbots, Meetings or the Tracker.
+  if (Date.now() - pendingG < 1200 && (hasAgents() ? /^[afmt]$/i : /^t$/i).test(e.key)) {
     e.preventDefault();
     pendingG = 0;
-    location.hash = sectionHref(e.key.toLowerCase() === 't' ? 'tracker' : 'agents');
+    const key = e.key.toLowerCase();
+    location.hash = sectionHref(key === 't' ? 'tracker' : key === 'm' ? 'meetings' : 'agents');
     return;
   }
   if (e.key === 'g' || e.key === 'G') {
@@ -377,6 +392,9 @@ document.addEventListener('keydown', (e) => {
   } else if ((e.key === 'n' || e.key === 'N') && current.section === 'agents') {
     e.preventDefault();
     location.hash = '#/agents/new';
+  } else if ((e.key === 'n' || e.key === 'N') && current.section === 'meetings') {
+    e.preventDefault();
+    location.hash = '#/meetings/new';
   } else if (e.key === '?') {
     e.preventDefault();
     openShortcuts();

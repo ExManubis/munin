@@ -11,11 +11,11 @@ import { openDialog, closeDialog } from './dialogs.js';
 export function waitingItems() {
   const fromRuntime = store.waiting.map(({ agent, item }) => ({
     agent: agent.name,
-    kind: item.kind === 'approval' ? `Wants to ${item.what}` : 'Asks',
+    kind: item.kind === 'approval' ? `Wants to ${item.what}` : item.kind === 'meeting' ? `Calls you into ${item.meeting.title}` : 'Asks',
     text: item.kind === 'approval' ? item.target : item.text,
     at: item.at,
     issue: item.issue,
-    href: `#/agents/${encodeURIComponent(agent.name)}`,
+    href: item.kind === 'meeting' ? `#/meetings/${encodeURIComponent(item.meeting.id)}` : `#/agents/${encodeURIComponent(agent.name)}`,
   }));
   const asked = new Set(store.waiting.map(({ item }) => item.trackerQuestion).filter(Boolean));
   const fromTracker = store.inbox

@@ -75,7 +75,19 @@ const later = (ms) => Date.now() + ms;
 
 function seed(now) {
   const ago = (ms) => now - ms;
-  const s = { version: 1, seq: 0, agents: {}, items: {}, script: {}, pip: { riddle: null } };
+  const s = { version: 1, seq: 0, agents: {}, items: {}, script: {}, pip: { riddle: null }, meetings: {} };
+  // A meeting from this morning, where vera called you in.
+  const iso = (ms) => new Date(ago(ms)).toISOString();
+  s.meetings.sync = {
+    id: 'sync', title: 'Weekly sync', participants: ['forge', 'vera', 'hugin', null], status: 'open', createdAt: iso(52 * MIN), state: 'settled', speaking: null,
+    speeches: [
+      { id: 'sync-s1', from: null, at: iso(52 * MIN), pass: false, text: 'Quick sync: where are we with the Telegram work?' },
+      { id: 'sync-s2', from: 'forge', at: iso(51 * MIN), pass: false, text: 'Streaming tool output is in. Splitting long messages is next; @vera, can you review it this afternoon?' },
+      { id: 'sync-s3', from: 'vera', at: iso(50 * MIN), pass: false, text: 'Yes, after lunch. One question first: @you, do we ship before or after the offsite?' },
+      { id: 'sync-s4', from: 'hugin', at: iso(50 * MIN), pass: true, text: null },
+    ],
+    needsYou: { from: 'vera', text: 'Yes, after lunch. One question first: @you, do we ship before or after the offsite?', at: iso(50 * MIN) },
+  };
   // Issues the cast talks about. linkTracker() swaps in the real ids when the tracker has them.
   s.issues = {
     gateway: { id: 'MUN-45', title: 'Retry rate-limited calls with jitter' },
@@ -407,6 +419,51 @@ function need(name) {
   return agent;
 }
 
+// Meetings (meetings.js), as the mock keeps them.
+function meetingsInOrder() {
+  return Object.values(state.meetings || {}).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+function needMeeting(id) {
+  const meeting = (state.meetings || {})[id];
+  if (!meeting) throw new Error(`There's no meeting with the id ${id}.`);
+  return meeting;
+}
+function meetingOut(meeting) {
+  return {
+    ...meeting,
+    participants: meeting.participants.map((name) => (name ? { name, colour: state.agents[name]?.colour, role: state.agents[name]?.role, roleName: roleOf(state.agents[name]?.role)?.name } : { name: null, human: true })),
+  };
+}
+function meetingSummary(meeting) {
+  const last = meeting.speeches.at(-1) || null;
+  return { ...meetingOut({ ...meeting, speeches: [] }), last: last ? { from: last.from, pass: last.pass, text: last.text, at: last.at } : null };
+}
+
+// The cast's side of a meeting: each figbot you @named (or, without a name, the first two) says a
+// line in turn, then the room settles. No models, just enough for the screens.
+const MEETING_LINES = {
+  coder: (said) => `I can take that. ${said.length > 60 ? 'Breaking it into two issues first.' : 'Starting on it now.'}`,
+  reviewer: () => "I'll review whatever lands, as usual.",
+  assistant: () => 'Noted. I can put a slot in the calendar for it.',
+  researcher: () => 'I found two write-ups on this; I can summarise them.',
+  writer: () => 'I can draft the announcement once we decide.',
+};
+function mockDiscuss(meeting, said) {
+  const figbots = meeting.participants.filter(Boolean);
+  const named = figbots.filter((name) => new RegExp(`@${name}\\b`, 'i').test(said));
+  const queue = (named.length ? named : figbots.slice(0, 2)).filter((name) => state.agents[name]);
+  Object.assign(meeting, { state: queue.length ? 'talking' : 'settled', speaking: queue[0] || null });
+  queue.forEach((name, i) => {
+    setTimeout(() => {
+      if (meeting.status !== 'open') return;
+      const line = (MEETING_LINES[state.agents[name].role] || (() => 'Sounds good to me.'))(said);
+      meeting.speeches.push({ id: `${meeting.id}-s${meeting.speeches.length + 1}`, from: name, at: new Date().toISOString(), pass: false, text: line });
+      Object.assign(meeting, queue[i + 1] ? { speaking: queue[i + 1] } : { state: 'settled', speaking: null });
+      changed();
+    }, 1800 * (i + 1));
+  });
+}
+
 function findItem(name, id) {
   const item = itemsOf(name).find((i) => i.id === id);
   if (!item) throw new Error('That has gone from the conversation.');
@@ -650,6 +707,10 @@ export const mock = {
     const out = [];
     for (const agent of agentsInOrder()) {
       for (const item of itemsOf(agent.name)) if (isOpen(item)) out.push({ agent: summary(agent), item: outward(item) });
+    }
+    for (const meeting of Object.values(state.meetings || {})) {
+      const from = meeting.status === 'open' && meeting.needsYou && state.agents[meeting.needsYou.from];
+      if (from) out.push({ agent: summary(from), item: { id: `${meeting.id}-you`, kind: 'meeting', status: 'open', at: meeting.needsYou.at, text: meeting.needsYou.text, meeting: { id: meeting.id, title: meeting.title } } });
     }
     return out.sort((a, b) => a.item.at.localeCompare(b.item.at));
   },
@@ -1038,6 +1099,50 @@ export const mock = {
   reset() {
     state = seed(Date.now());
     changed();
+  },
+
+  // Meetings (meetings.js): a dummy transcript in the mock, so the screens work without a runtime.
+  async meetings() {
+    return meetingsInOrder().map((m) => meetingSummary(m));
+  },
+
+  async meeting(id) {
+    return meetingOut(needMeeting(id));
+  },
+
+  async createMeeting(fields = {}) {
+    const title = String(fields.title || '').trim();
+    if (!title) throw new Error('A meeting needs a title.');
+    const participants = [...new Set((fields.participants || []).map((p) => (p == null ? null : String(p).toLowerCase())))];
+    if (!participants.length) throw new Error('Invite at least one agent, or join yourself.');
+    for (const p of participants) if (p && !state.agents[p]) throw new Error(`There's no agent called ${p}.`);
+    const meeting = { id: `m${Date.now().toString(36)}`, title, participants, status: 'open', speeches: [], createdAt: new Date().toISOString(), state: 'settled', speaking: null, needsYou: null };
+    if (String(fields.first || '').trim()) meeting.speeches.push({ id: `${meeting.id}-s1`, from: null, at: new Date().toISOString(), pass: false, text: String(fields.first).trim() });
+    state.meetings ||= {};
+    state.meetings[meeting.id] = meeting;
+    mockDiscuss(meeting, String(fields.first || ''));
+    changed();
+    return meetingOut(meeting);
+  },
+
+  async speakInMeeting(id, text) {
+    const meeting = needMeeting(id);
+    const said = String(text || '').trim();
+    if (!said) throw new Error('Say something, or close the meeting.');
+    if (meeting.status !== 'open') throw new Error('That meeting is closed.');
+    meeting.speeches.push({ id: `${meeting.id}-s${meeting.speeches.length + 1}`, from: null, at: new Date().toISOString(), pass: false, text: said });
+    meeting.needsYou = null;
+    mockDiscuss(meeting, said);
+    changed();
+    return meetingOut(meeting);
+  },
+
+  async closeMeeting(id) {
+    const meeting = needMeeting(id);
+    if (meeting.status !== 'open') throw new Error('That meeting is already closed.');
+    Object.assign(meeting, { status: 'closed', state: 'closed', speaking: null, needsYou: null });
+    changed();
+    return meetingOut(meeting);
   },
 };
 

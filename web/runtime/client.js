@@ -88,6 +88,11 @@ export function connect(base) {
     removeApp: (id) => call('DELETE', `/apps/${enc(id)}`),
     setRepo: (key, fields) => call('PUT', `/repos/${enc(key)}`, fields),
     removeRepo: (key) => call('DELETE', `/repos/${enc(key)}`),
+    meetings: () => call('GET', '/meetings'),
+    meeting: (id) => call('GET', `/meetings/${enc(id)}`),
+    createMeeting: (fields) => call('POST', '/meetings', fields),
+    speakInMeeting: (id, text) => call('POST', `/meetings/${enc(id)}/speech`, { text }),
+    closeMeeting: (id) => call('POST', `/meetings/${enc(id)}/close`, {}),
     subscribe(fn) {
       listeners.add(fn);
       listen();
