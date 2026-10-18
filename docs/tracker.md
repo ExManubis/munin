@@ -1,6 +1,6 @@
 # The tracker
 
-munin's issue tracker: a simple tracker that you and any MCP client share. Agents already know how to use issue trackers, so it behaves like one and stays out of the way. It knows nothing about which agents use it or how they run; `architecture.md` says how it fits into the rest of munin.
+munin's issue tracker: a simple tracker that you and any MCP client share. Agents already know how to use issue trackers, so it behaves like one and stays out of the way. It knows nothing about which agents use it or how they run; `architecture.md` says how the pieces fit.
 
 ## Workflow
 
@@ -46,6 +46,7 @@ Everything else (reviewing someone else's work, unassigning yourself when you gi
 | `update_issue` | Change title, description, status, assignee or what it waits for. Moving to `in_progress` takes the issue |
 | `link_pull_request` | Link a pull request on GitHub to an issue, by its URL. Says its title and state when GitHub knows it |
 | `add_comment` | Comment on an issue; `ask_human` puts it in your inbox, optionally with 2 to 6 `options` to pick from. Returns the comment's id |
+| `report_usage` | Report what your model spent on an issue: `cost_usd`, and optionally `tokens_in`, `tokens_out` and `model`. Each call adds to the issue's total, so call it when a stretch of work ends, not after every step |
 | `events` | What happened in the tracker, oldest first: issues created, moved, assigned and edited, and comments, your answers included. Pass the last id seen as `after` for only what's new |
 | `wait_for_work` | Waits up to 50 seconds for something the agent can do in a project: an issue to take, someone else's work to review, an answer from you. Says when there's nothing left worth waiting for |
 
@@ -57,10 +58,9 @@ The web UI updates live as agents work.
 
 - **Inbox**: agents' questions, oldest first, with the issue for context. Replying on the issue answers them. A question you can't answer yet can be snoozed (later today, tomorrow morning, next week, or a day you pick): the issue's questions leave the inbox and the waiting count until then and come back on their own, or sooner if the agent asks something new. Snoozing is yours alone, so agents aren't told and their question just waits. Snoozed questions are listed below the open ones, where you can wake one early. Below them, "Lately": what agents have been doing, with what's new since you last looked marked.
 - **Projects**: the brief agents read, then issues grouped by status with the Todo pile in order (reorder it by dragging), or as a board. "Put an agent on it" has the commands to start one.
-- **Issue**: title, description, status, assignee, linked pull requests (paste a URL to link one), what it cost (from the runtime), what it waits for and blocks, and one timeline of comments and history. While one of munin's own agents has it in progress, the issue shows what that agent is doing: its latest run on the issue, the last few steps with the current one marked, live, and a link to the conversation. The frontend joins that in from the runtime; the tracker knows nothing of it, and outside agents (Claude Code, Codex) show nothing extra. An issue whose agent has gone quiet can be released.
-- **Agents**: tokens (created once, revocable), and what each agent is working on. Each agent's track record (`GET /api/agents/{name}/record`) says what it shipped, how often its work came back from review, what it reviewed for others and where it works; it's read from issues and their history, so it's there for any name, an outside agent's too, and an agent's profile shows it.
+- **Issue**: title, description, status, assignee, linked pull requests (paste a URL to link one), what it cost (what agents reported with `report_usage`, added up, and shown per agent; project lists show it too), what it waits for and blocks, and one timeline of comments and history. An issue whose agent has gone quiet can be released.
+- **Agents**: tokens (created once, revocable), and what each agent is working on. Each agent's track record (`GET /api/agents/{name}/record`) says what it shipped, how often its work came back from review, what it reviewed for others and where it works; it's read from issues and their history, so it's there for any agent.
 - **Everywhere**: Ctrl/Cmd+K to jump to anything, `?` for shortcuts, the number of questions in the tab title, and opt-in push notifications that reach your devices with munin closed (in a browser without push, notifications while munin is open). It works on a phone and can be installed there.
-- **Setup**: the first time munin opens, an intro and then four short steps: what agents call you, an OpenRouter key and your favourite models, your first agent, and a token for outside agents over MCP. It ends on your agent, waiting for its first message. Settings opens it again.
 
 From a terminal:
 

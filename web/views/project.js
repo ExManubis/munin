@@ -1,13 +1,12 @@
 // A project's issues, as a list grouped by status or as a board, with its brief and the
 // reorderable Todo pile. Also the plain list of projects that the phone tab bar opens.
 
-import { withCosts, dollars } from '../runtime/costs.js';
 import { api, ApiError } from '../api.js';
 import { store, openCount, quietAgent, remember } from '../store.js';
 import { markdown } from '../markdown.js';
 import { openNewIssue, openNewProject } from '../dialogs.js';
 import {
-  h, kbd, MOD, icon, svg, personAvatar, statusIcon, time, parseTime, topbar, logoMark, bindDraft, drafts, onModEnter, toast, firstLine, changeIssue, agentPrompts, priorityChip,
+  h, kbd, MOD, icon, svg, dollars, personAvatar, statusIcon, time, parseTime, topbar, logoMark, bindDraft, drafts, onModEnter, toast, firstLine, changeIssue, agentPrompts, priorityChip,
 } from '../ui.js';
 
 const GROUPS = [
@@ -35,7 +34,7 @@ export const view = {
   async load({ key }) {
     const project = store.projects.find((p) => p.key === key);
     if (!project) throw new ApiError(`No project with key ${key}.`, 404);
-    const issues = await withCosts(await api.issues({ project: key, status: 'all' }));
+    const issues = await api.issues({ project: key, status: 'all' });
     return { project, issues };
   },
 

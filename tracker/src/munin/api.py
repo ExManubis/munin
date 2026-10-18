@@ -295,7 +295,6 @@ def me(request: Request) -> dict:
         "you": _you(request),
         "mcp_url": f"{base}/mcp",
         "version": version("munin"),
-        "demo": settings.demo,
     }
 
 
