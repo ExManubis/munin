@@ -453,6 +453,10 @@ select option { background: var(--ink); color: var(--text); }
 .agent-row.revoked .agent-name { color: var(--muted); }
 .agent-seen { font: 13px/18px var(--sans); color: var(--text-2); }
 .agent-action { text-align: right; }
+.providers { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.provider { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 1px dashed var(--line); color: var(--muted); background: none; font: inherit; font-size: 13px; cursor: pointer; }
+.provider:hover { color: var(--text); }
+.provider.active { border-style: solid; border-color: var(--text); color: var(--text); }
 .add-agent { display: flex; gap: 12px; }
 .add-agent .input { max-width: 320px; height: 40px; padding: 0 14px; }
 .token { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; padding: 16px; border: 1px dotted var(--text); }

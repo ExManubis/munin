@@ -184,6 +184,8 @@ class Agent(Base):
     name: Mapped[str] = mapped_column(String(100), unique=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     token_hint: Mapped[str] = mapped_column(String(10))
+    # Which harness the agent runs in (one of agents.PROVIDERS), for its mark; empty if unsaid.
+    provider: Mapped[str | None] = mapped_column(String(20), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)

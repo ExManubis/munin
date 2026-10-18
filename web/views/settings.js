@@ -3,11 +3,11 @@
 
 import { api } from '../api.js';
 import { store, isWorking } from '../store.js';
-import { h, agentAvatar, statusIcon, time, topbar, bindDraft, drafts, toast, copyButton, toggle } from '../ui.js';
+import { h, PROVIDERS, providerMark, agentAvatar, statusIcon, time, topbar, bindDraft, drafts, toast, copyButton, toggle } from '../ui.js';
 import { notificationsSupported, notificationsOn, pushSupported, toggleNotifications } from '../notify.js';
 
 let created = null; // { name, token } for the token just created; shown once
-let tab = 'claude';
+let provider = 'claude'; // the harness picked for the next agent; null for another one
 
 export const view = {
   title: () => 'Settings',
@@ -130,9 +130,9 @@ async function revoke(name, ctx) {
   ctx.reload();
 }
 
-async function issueToken(name, ctx) {
+async function issueToken(name, ctx, pick = null) {
   try {
-    const agent = await api.addAgent(name);
+    const agent = await api.addAgent(name, pick);
     created = { name: agent.name, token: agent.token };
     drafts.delete('agent:name');
   } catch (err) {
@@ -156,21 +156,37 @@ function connect(agents, me, ctx) {
     if (!value) return name.focus();
     const existing = agents.find((a) => a.name === value && !a.revoked);
     if (existing && !confirm(`${value} already has a token. Replace it? The old one stops working.`)) return;
-    await issueToken(value, ctx);
+    await issueToken(value, ctx, provider);
   };
+  // Picking a harness suggests its name, unless you've written one of your own.
+  const pick = (id) => () => {
+    const suggested = PROVIDERS.find((p) => p.id === provider)?.name || '';
+    provider = id;
+    if (!name.value.trim() || name.value.trim() === suggested) {
+      name.value = PROVIDERS.find((p) => p.id === id)?.name || '';
+      drafts.set('agent:name', name.value);
+    }
+    ctx.rerender();
+  };
+  const choice = (id, label) => h('button', {
+    type: 'button',
+    class: ['provider', provider === id && 'active'],
+    role: 'radio',
+    'aria-checked': String(provider === id),
+    onclick: pick(id),
+  }, id ? providerMark(id, { size: 14 }) : null, h('span', {}, label));
 
   const token = created ? created.token : 'mun_…';
   const command = `claude mcp add --transport http munin ${me.mcp_url} --header "Authorization: Bearer ${token}"`;
   const json = JSON.stringify({ mcpServers: { munin: { type: 'http', url: me.mcp_url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2);
-  const snippet = tab === 'claude' ? command : json;
-  const setTab = (t) => () => {
-    tab = t;
-    ctx.rerender();
-  };
+  const snippet = provider === 'claude' ? command : json;
 
   return h('section', { class: 'section' },
     h('div', { class: 'section-head' }, h('h2', {}, 'Connect an outside agent')),
-    h('p', { class: 'muted section-lead' }, 'Name it after the client, like claude-code or codex. You get a token for it, shown once.'),
+    h('p', { class: 'muted section-lead' }, 'Pick what it runs in, and name it. You get a token for it, shown once.'),
+    h('div', { class: 'providers', role: 'radiogroup', 'aria-label': 'What it runs in' },
+      PROVIDERS.map((p) => choice(p.id, p.label)),
+      choice(null, 'Other')),
     h('form', { class: 'add-agent', onsubmit: add },
       name,
       h('button', { type: 'submit', class: 'btn primary' }, 'Create token')),
@@ -182,13 +198,10 @@ function connect(agents, me, ctx) {
         h('code', { class: 'token-value' }, created.token),
         h('p', { class: 'hint' }, 'Shown once: munin only keeps a hash. If you lose it, create a new token for the same name.'))
       : null,
-    h('div', { class: 'tabs', role: 'tablist' },
-      h('button', { type: 'button', role: 'tab', 'aria-selected': String(tab === 'claude'), onclick: setTab('claude') }, 'Claude Code'),
-      h('button', { type: 'button', role: 'tab', 'aria-selected': String(tab === 'json'), onclick: setTab('json') }, 'Any MCP client')),
     h('div', { class: 'snippet' },
       h('pre', {}, h('code', {}, snippet)),
       copyButton(() => snippet)),
     h('p', { class: 'hint' }, created
-      ? (tab === 'claude' ? `Run this where ${created.name} works.` : 'Add this to the client\'s MCP config.')
+      ? (provider === 'claude' ? `Run this where ${created.name} works.` : 'Add this to its MCP config.')
       : 'The token fills into the command once you create it.'));
 }

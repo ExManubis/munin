@@ -25,8 +25,11 @@ const MARKS = [
   [/^(copilot|github-?copilot)/i, 'copilot', COPILOT, shaded(WHITE)],
 ];
 
-// The mark for an agent's name, or null when it has none here.
-export function moreMark(name, options) {
-  const found = MARKS.find(([pattern]) => pattern.test(name || ''));
+// The mark for a harness (cursor, gemini, copilot), or null when it has none here.
+export function moreMark(provider, options) {
+  const found = MARKS.find(([, id]) => id === provider);
   return found ? pathMark(found[1], found[2], found[3], options) : null;
 }
+
+// Whether an agent's name looks like that harness's, like gemini-cli for gemini.
+moreMark.matches = (provider, name) => MARKS.some(([pattern, id]) => id === provider && pattern.test(name || ''));

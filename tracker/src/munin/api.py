@@ -142,6 +142,8 @@ class ActivityOut(EventOut):
 
 class AgentOut(BaseModel):
     name: str
+    # The harness it runs in, for its mark: one of agents.PROVIDERS, or None.
+    provider: str | None = None
     token_hint: str
     created_at: UTCDateTime
     last_seen_at: UTCDateTime | None
@@ -231,6 +233,7 @@ def _issue_detail_out(issue: Issue) -> IssueDetailOut:
 def _agent_out(agent: Agent, working_on: list[Issue]) -> AgentOut:
     return AgentOut(
         name=agent.name,
+        provider=agent.provider,
         token_hint=agent.token_hint,
         created_at=agent.created_at,
         last_seen_at=agent.last_seen_at,
@@ -279,6 +282,7 @@ class CommentIn(BaseModel):
 
 class AgentIn(BaseModel):
     name: str
+    provider: str | None = None
 
 
 # Routes
@@ -550,7 +554,7 @@ def list_agents(s: DB) -> list[AgentOut]:
 
 @router.post("/agents", status_code=201)
 def add_agent(body: AgentIn, s: DB) -> NewAgentOut:
-    agent, token = agent_svc.add_agent(s, body.name)
+    agent, token = agent_svc.add_agent(s, body.name, body.provider)
     return NewAgentOut(**_agent_out(agent, []).model_dump(), token=token)
 
 
