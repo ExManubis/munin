@@ -15,12 +15,14 @@ NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 # "me" is how an agent refers to itself in list_issues; the rest mean unassigned.
 RESERVED_NAMES = {"me", *UNASSIGNED}
 # The harnesses munin has a mark for. An agent in any other harness has no provider.
-PROVIDERS = ("claude", "codex", "pi", "opencode", "cursor", "gemini", "copilot")
+PROVIDERS = ("claude", "grokbot", "codex", "pi", "opencode", "cursor", "gemini", "copilot")
 
 
 def provider_for(command: str) -> str | None:
     """The provider of a CLI command, like claude or codex, if munin knows it."""
     name = command.lower()
+    if name.startswith("grok"):
+        return "grokbot"
     return next((p for p in PROVIDERS if name.startswith(p)), None)
 
 

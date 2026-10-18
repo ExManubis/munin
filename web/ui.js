@@ -111,6 +111,7 @@ export function icon(name, { color = C.muted, size = 12 } = {}) {
 // suggests for it.
 export const PROVIDERS = [
   { id: 'claude', label: 'Claude Code', name: 'claude-code' },
+  { id: 'grokbot', label: 'Grok Bot', name: 'grokbot' },
   { id: 'codex', label: 'Codex', name: 'codex' },
   { id: 'pi', label: 'pi', name: 'pi' },
   { id: 'opencode', label: 'opencode', name: 'opencode' },
@@ -128,7 +129,7 @@ function providerOf(name) {
   if (isPi(name)) return 'pi';
   if (isCodex(name)) return 'codex';
   if (isOpencode(name)) return 'opencode';
-  return ['cursor', 'gemini', 'copilot'].find((id) => moreMark.matches(id, name)) || null;
+  return ['grokbot', 'cursor', 'gemini', 'copilot'].find((id) => moreMark.matches(id, name)) || null;
 }
 
 // A harness's mark, or null for one munin has no mark for.
