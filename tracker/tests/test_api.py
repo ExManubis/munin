@@ -59,6 +59,7 @@ def test_agent_tokens_are_shown_once_and_can_be_revoked(client):
     assert "token" not in listed[0]
 
     assert client.delete("/api/agents/claude-code").json()["revoked"] is True
+    assert client.get("/api/agents").json() == []  # gone, not listed as revoked
     assert client.delete("/api/agents/nobody").status_code == 404
 
 

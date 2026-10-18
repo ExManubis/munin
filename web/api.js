@@ -63,6 +63,6 @@ export const api = {
   push: () => get('/api/push'),
   subscribePush: (subscription) => request('POST', '/api/push', { subscription }),
   forgetPush: (endpoint) => request('DELETE', '/api/push', { endpoint }),
-  addAgent: (name) => request('POST', '/api/agents', { name }),
+  addAgent: (name, provider = null) => request('POST', '/api/agents', { name, provider }),
   revokeAgent: (name) => request('DELETE', `/api/agents/${enc(name)}`),
 };

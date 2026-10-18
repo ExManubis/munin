@@ -99,7 +99,7 @@ def run_agents(
     try:
         with sessions() as s:
             for agent_name in _free_names(s, prefix, count):
-                agent, token = agents.add_agent(s, agent_name)
+                agent, token = agents.add_agent(s, agent_name, agents.provider_for(Path(parts[0]).name))
                 config = configs / f"{agent.name}.json"
                 config.write_text(json.dumps(_mcp_config(settings, token)))
                 values = {

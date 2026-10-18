@@ -5,6 +5,10 @@ import { api } from './api.js';
 import { store, kindOf, isBusy } from './store.js';
 import { figbot } from './figbot.js';
 import { claudeMark, isClaude } from './claude-mark.js';
+import { piMark, isPi } from './pi-mark.js';
+import { codexMark, isCodex } from './codex-mark.js';
+import { opencodeMark, isOpencode } from './opencode-mark.js';
+import { moreMark } from './more-marks.js';
 
 export const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl ';
 
@@ -103,13 +107,45 @@ export function icon(name, { color = C.muted, size = 12 } = {}) {
   return svg(size, '0 0 12 12', ICONS[name](color));
 }
 
-// Agents are pixel faces, white, except Claude, which gets its own spark. People are solid
-// squares with an initial, and nobody (unassigned) is a dotted square.
+// The harnesses munin has a mark for: what you pick when you connect an agent, and the name it
+// suggests for it.
+export const PROVIDERS = [
+  { id: 'claude', label: 'Claude Code', name: 'claude-code' },
+  { id: 'codex', label: 'Codex', name: 'codex' },
+  { id: 'pi', label: 'pi', name: 'pi' },
+  { id: 'opencode', label: 'opencode', name: 'opencode' },
+  { id: 'cursor', label: 'Cursor', name: 'cursor' },
+  { id: 'gemini', label: 'Gemini CLI', name: 'gemini-cli' },
+  { id: 'copilot', label: 'Copilot', name: 'copilot' },
+];
+
+// The harness an agent runs in: what was picked when it was connected, or else a guess from its
+// name (claude-code, codex-2), for agents connected before munin asked.
+function providerOf(name) {
+  const said = store.agents.find((a) => a.name === name)?.provider;
+  if (said) return said;
+  if (isClaude(name)) return 'claude';
+  if (isPi(name)) return 'pi';
+  if (isCodex(name)) return 'codex';
+  if (isOpencode(name)) return 'opencode';
+  return ['cursor', 'gemini', 'copilot'].find((id) => moreMark.matches(id, name)) || null;
+}
+
+// A harness's mark, or null for one munin has no mark for.
+export function providerMark(provider, opts) {
+  if (provider === 'claude') return claudeMark(opts);
+  if (provider === 'pi') return piMark(opts);
+  if (provider === 'codex') return codexMark(opts);
+  if (provider === 'opencode') return opencodeMark(opts);
+  return provider ? moreMark(provider, opts) : null;
+}
+
+// Agents wear their harness's mark, and a white pixel face when munin has none for it. People are
+// solid squares with an initial, and nobody (unassigned) is a dotted square.
 export function avatar(name, { kind, idle = false, size = 18, state } = {}) {
   if (!name) return svg(size, '0 0 18 18', [frame18(C.muted, { 'stroke-dasharray': '1 1' })], { cls: 'avatar', label: 'Unassigned' });
   if ((kind || kindOf(name)) === 'agent') {
-    if (isClaude(name)) return claudeMark({ size });
-    return figbot({ size, state: state || (idle ? 'idle' : 'working'), animate: false });
+    return providerMark(providerOf(name), { size }) || figbot({ size, state: state || (idle ? 'idle' : 'working'), animate: false });
   }
   const style = size === 18 ? null : `width:${size}px;height:${size}px;font-size:${size < 16 ? 9 : 10}px`;
   return h('span', { class: 'avatar person', 'aria-hidden': 'true', style }, (name.trim()[0] || '?').toUpperCase());
@@ -125,8 +161,8 @@ export function agentState(name) {
 
 // An agent's face, with the expression for what it's doing.
 export function agentAvatar(name, { size = 18, state } = {}) {
-  if (isClaude(name)) return claudeMark({ size, label: name });
-  return figbot({ colour: 'white', state: state || agentState(name), size, seed: name, label: name });
+  return providerMark(providerOf(name), { size, label: name })
+    || figbot({ colour: 'white', state: state || agentState(name), size, seed: name, label: name });
 }
 
 // Agents, people and nobody, each with the right square.

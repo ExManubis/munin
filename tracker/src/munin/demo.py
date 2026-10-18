@@ -19,8 +19,8 @@ GLM = Actor("glm", "agent")
 
 def seed(s: Session, user: str) -> None:
     me = Actor(user, "human")
-    for agent in (CLAUDE, CODEX, CLAUDE_1, PI, GLM):
-        agents.add_agent(s, agent.name)
+    for agent, provider in ((CLAUDE, "claude"), (CODEX, "codex"), (CLAUDE_1, "claude"), (PI, "pi"), (GLM, None)):
+        agents.add_agent(s, agent.name, provider)
 
     svc.create_project(
         s,
