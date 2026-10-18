@@ -53,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     agent = commands.add_parser("agent", help="manage agent tokens").add_subparsers(dest="action", required=True)
     agent_add = agent.add_parser("add", help="create an agent and print its token (or a new token for an existing one)")
     agent_add.add_argument("name", help="name the agent shows up as, like claude-code")
+    agent_add.add_argument("--provider", choices=agents.PROVIDERS, help="the harness it runs in, for its mark")
     agent.add_parser("list", help="list agents")
     agent_revoke = agent.add_parser("revoke", help="stop an agent's token working")
     agent_revoke.add_argument("name")
@@ -175,7 +176,7 @@ def _ago(moment: datetime) -> str:
 
 def _agent(s, settings: Settings, args: argparse.Namespace) -> int:
     if args.action == "add":
-        agent, token = agents.add_agent(s, args.name)
+        agent, token = agents.add_agent(s, args.name, args.provider)
         print(f"Token for {agent.name} (shown once):\n\n  {token}\n")
         print("Claude Code:")
         # Behind the edge, agents on other machines reach munin at its public address.
