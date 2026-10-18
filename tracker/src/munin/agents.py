@@ -1,4 +1,5 @@
-"""Agent tokens. Each agent gets its own token, so one can be revoked without touching the others."""
+"""Agent tokens. Each agent gets its own token, so one can be revoked without touching the others.
+Revoking an agent removes it; its issues and comments keep its name."""
 
 import hashlib
 import re
@@ -28,7 +29,8 @@ def _hash(token: str) -> str:
 
 
 def list_agents(s: Session) -> list[Agent]:
-    return list(s.scalars(select(Agent).order_by(Agent.name)))
+    # Agents revoked before revoking removed them are gone too.
+    return list(s.scalars(select(Agent).where(Agent.revoked_at.is_(None)).order_by(Agent.name)))
 
 
 def add_agent(s: Session, name: str, provider: str | None = None) -> tuple[Agent, str]:
@@ -58,6 +60,7 @@ def revoke_agent(s: Session, name: str) -> Agent:
     if agent is None:
         raise NotFound(f"No agent named {name!r}.")
     agent.revoked_at = utcnow()
+    s.delete(agent)
     s.commit()
     return agent
 

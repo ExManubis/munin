@@ -74,21 +74,18 @@ function table(agents, ctx) {
           h('span', { class: 'label', role: 'columnheader' }, 'Doing'),
           h('span', { class: 'label', role: 'columnheader' }, 'Token'),
           h('span', { role: 'columnheader' })),
-        agents.map((a) => h('div', { class: ['agent-row', a.revoked && 'revoked'], role: 'row' },
+        agents.map((a) => h('div', { class: 'agent-row', role: 'row' },
           h('span', { class: 'agent-name', role: 'cell' }, agentAvatar(a.name), h('span', {}, a.name)),
           h('span', { class: 'agent-seen', role: 'cell' }, doing(a)),
           h('span', { class: 'mono muted', role: 'cell' }, `mun_…${a.token_hint}`),
           h('span', { class: 'agent-action', role: 'cell' },
-            a.revoked
-              ? h('button', { type: 'button', class: 'link', onclick: () => issueToken(a.name, ctx) }, 'New token')
-              : h('button', { type: 'button', class: 'link', onclick: () => revoke(a.name, ctx) }, 'Revoke')))))
+            h('button', { type: 'button', class: 'link', onclick: () => revoke(a.name, ctx) }, 'Revoke')))))
       : h('p', { class: 'muted' }, 'No agents yet. Add one below, then paste the command into its terminal.'));
 }
 
 // Working on what, idle since when, or never connected.
 function doing(agent) {
   const seen = agent.last_seen_at ? time(agent.last_seen_at, { long: true, prefix: 'seen ', cls: 'muted' }) : null;
-  if (agent.revoked) return h('span', { class: 'agent-state' }, h('span', { class: 'label' }, 'Revoked'));
   if (!agent.last_seen_at) return h('span', { class: 'agent-state muted' }, 'Never connected');
   if (!isWorking(agent)) return h('span', { class: 'agent-state' }, h('span', { class: 'state' }, 'Idle'), ' · ', seen);
   return h('span', { class: 'agent-state' },
@@ -119,7 +116,7 @@ function notifications(ctx) {
 }
 
 async function revoke(name, ctx) {
-  if (!confirm(`Revoke ${name}'s token? It stops working right away.`)) return;
+  if (!confirm(`Revoke ${name}? Its token stops working right away and it's removed from munin. Its issues and comments stay.`)) return;
   try {
     await api.revokeAgent(name);
     if (created && created.name === name) created = null;

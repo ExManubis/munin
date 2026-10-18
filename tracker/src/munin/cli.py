@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     agent_add.add_argument("name", help="name the agent shows up as, like claude-code")
     agent_add.add_argument("--provider", choices=agents.PROVIDERS, help="the harness it runs in, for its mark")
     agent.add_parser("list", help="list agents")
-    agent_revoke = agent.add_parser("revoke", help="stop an agent's token working")
+    agent_revoke = agent.add_parser("revoke", help="stop an agent's token working and remove the agent")
     agent_revoke.add_argument("name")
 
     project = commands.add_parser("project", help="manage projects").add_subparsers(dest="action", required=True)
