@@ -2,6 +2,8 @@
 # munin's command line on this Mac: the tracker's `munin`, with munin's settings, as in
 # `munin status` or `munin project add MUN munin`. Installed as ~/.munin/bin/munin by
 # deploy/install-mac.sh.
+# `munin update` brings munin up to date.
+[ "${1:-}" = update ] && exec "@MUNIN_DIR@/deploy/update.sh"
 set -a
 . "@HOME@/.munin/environment"
 set +a

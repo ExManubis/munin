@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from munin import agents as agent_svc
 from munin import issues as svc
 from munin import record as record_svc
+from munin import updates
 from munin import usage as usage_svc
 from munin.issues import Actor, Invalid
 from munin.push import PushError
@@ -501,6 +502,23 @@ def link_pull_request(ref: str, body: PullRequestIn, request: Request, s: DB, ac
 def unlink_pull_request(ref: str, pull_id: int, s: DB, actor: Human) -> IssueDetailOut:
     svc.unlink_pull_request(s, actor, ref, pull_id)
     return _issue_detail_out(svc.get_issue(s, ref))
+
+
+@router.get("/update")
+async def update_status(request: Request) -> dict:
+    """What munin runs, and what's newer on GitHub."""
+    settings, github = request.app.state.settings, request.app.state.github
+    return await asyncio.to_thread(updates.status, settings.db_path.parent, github.api, github.token)
+
+
+@router.post("/update", status_code=202)
+def update_now(request: Request) -> dict:
+    """Start an update. munin restarts on its way through, and is back in a minute or so."""
+    data_dir = request.app.state.settings.db_path.parent
+    if not updates.installed(data_dir):
+        raise Invalid("This munin wasn't set up by its install script, so it can't update itself. Pull and restart it.")
+    updates.request(data_dir)
+    return {"started": True}
 
 
 @router.get("/github")

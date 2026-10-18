@@ -1,0 +1,13 @@
+# Runs deploy/update.sh as root when the update button in munin's Settings asks for it (munin
+# writes /var/lib/munin/update-requested, which munin-update.path watches). Installed by
+# deploy/install.sh, which fills in where munin is.
+
+[Unit]
+Description=munin update
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/rm -f /var/lib/munin/update-requested
+ExecStart=@MUNIN_DIR@/deploy/update.sh
+StandardOutput=append:/var/lib/munin/update.log
+StandardError=append:/var/lib/munin/update.log

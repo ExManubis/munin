@@ -291,6 +291,7 @@ function settingsSidebar() {
   return [
     h('div', { class: 'label nav-heading first' }, 'Settings'),
     h('nav', { class: 'nav', 'aria-label': 'Settings' },
+      jump('updates', 'Updates'),
       jump('github', 'GitHub'),
       jump('outside-agents', 'Agents'),
       jump('notifications', 'Notifications')),

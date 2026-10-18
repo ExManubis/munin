@@ -8,7 +8,7 @@
 # On Debian or Ubuntu it first installs what it needs and is missing (git, curl, Node, uv,
 # Tailscale), and has you sign in to Tailscale if you haven't. Run it again after pulling to
 # update. Beyond those, it only touches munin's own things: the munin user, /var/lib/munin,
-# /etc/munin, the munin-tracker service, /usr/local/bin/munin, and this machine's tailscale
+# /etc/munin, the munin-tracker and munin-update services, /usr/local/bin/munin, and this machine's tailscale
 # serve path /. Set MUNIN_USERS to say who may use munin, if it isn't you (the
 # machine's Tailscale owner) or the machine is tagged.
 set -euo pipefail
@@ -24,6 +24,11 @@ fail() {
 }
 need() { command -v "$1" > /dev/null 2>&1 || fail "this needs $1. $2"; }
 setting() { sed -n "s/^$1=//p" "$CONF/environment" | tail -1; }
+# What munin is now, for Settings to tell when there's something newer on GitHub.
+version_file() {
+  repo=$(git -C "$MUNIN_DIR" remote get-url origin 2> /dev/null | sed -e 's#.*github\.com[:/]##' -e 's#\.git$##')
+  printf '{"commit": "%s", "repo": "%s"}\n' "$(git -C "$MUNIN_DIR" rev-parse HEAD)" "$repo" > "$1"
+}
 
 [ "$(id -u)" = 0 ] || fail "run this as root: sudo $0"
 case "$MUNIN_DIR" in
@@ -120,11 +125,17 @@ else
   echo "Kept $CONF/environment."
 fi
 say "Services"
-sed -e "s|@MUNIN_DIR@|$MUNIN_DIR|g" "$MUNIN_DIR/deploy/munin-tracker.service" > /etc/systemd/system/munin-tracker.service
+for unit in munin-tracker.service munin-update.service munin-update.path; do
+  sed -e "s|@MUNIN_DIR@|$MUNIN_DIR|g" "$MUNIN_DIR/deploy/$unit" > "/etc/systemd/system/$unit"
+done
 sed -e "s|@MUNIN_DIR@|$MUNIN_DIR|g" "$MUNIN_DIR/deploy/munin" > /usr/local/bin/munin
 chmod 755 /usr/local/bin/munin
 systemctl daemon-reload
 systemctl enable --quiet munin-tracker
+# The update button in Settings: munin-update.path runs munin-update when munin asks for it.
+systemctl enable --now --quiet munin-update.path
+version_file "$DATA/version"
+chown munin:munin "$DATA/version"
 systemctl restart munin-tracker
 
 # munin's own agents moved out to figbots. A server set up before that still has their service:

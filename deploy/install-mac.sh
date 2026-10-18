@@ -25,6 +25,11 @@ fail() {
 }
 need() { command -v "$1" > /dev/null 2>&1 || fail "this needs $1. $2"; }
 setting() { sed -n "s/^$1=//p" "$HERE/environment" | tail -1; }
+# What munin is now, for Settings to tell when there's something newer on GitHub.
+version_file() {
+  repo=$(git -C "$MUNIN_DIR" remote get-url origin 2> /dev/null | sed -e 's#.*github\.com[:/]##' -e 's#\.git$##')
+  printf '{"commit": "%s", "repo": "%s"}\n' "$(git -C "$MUNIN_DIR" rev-parse HEAD)" "$repo" > "$1"
+}
 # A template with @NAME@ filled in from NAME=value arguments; plists get their values XML-escaped.
 render() {
   node -e '
@@ -111,6 +116,16 @@ if [ -f "$AGENTS/munin.runtime.plist" ]; then
 fi
 render "$MUNIN_DIR/deploy/mac/munin" "MUNIN_DIR=$MUNIN_DIR" "HOME=$HOME" > "$HERE/bin/munin"
 chmod 755 "$HERE/bin/munin"
+
+# The update button in Settings: munin.update runs deploy/update.sh when munin asks for it. While
+# an update runs inside it, it's left loaded: reloading it would stop the update halfway.
+updater="$AGENTS/munin.update.plist"
+render "$MUNIN_DIR/deploy/mac/munin.update.plist" "MUNIN_DIR=$MUNIN_DIR" "HOME=$HOME" "PATH=$SERVICE_PATH" > "$updater"
+if [ -z "${MUNIN_UPDATING:-}" ]; then
+  launchctl bootout "gui/$UID_NOW/munin.update" 2> /dev/null || true
+  for _ in 1 2 3 4 5; do launchctl bootstrap "gui/$UID_NOW" "$updater" 2> /dev/null && break || sleep 1; done
+fi
+version_file "$HERE/version"
 
 TRACKER=$(setting MUNIN_PORT)
 url="http://127.0.0.1:${TRACKER:=7777}/api/me"

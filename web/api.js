@@ -50,6 +50,8 @@ export const api = {
   linkPullRequest: (id, url) => request('POST', `/api/issues/${enc(id)}/pull-requests`, { url }),
   unlinkPullRequest: (id, pullId) => request('DELETE', `/api/issues/${enc(id)}/pull-requests/${pullId}`),
   github: () => get('/api/github'),
+  updateStatus: () => get('/api/update'),
+  updateNow: () => request('POST', '/api/update'),
   setGithubToken: (token) => request('PUT', '/api/github', { token }),
   comment: (id, body) => request('POST', `/api/issues/${enc(id)}/comments`, { body }),
 
