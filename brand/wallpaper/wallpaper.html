@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>munin wallpaper</title>
+<!--
+  Dark munin wallpapers with an ASCII-glyph texture.
+  Serve brand/ over http (fonts and getImageData need it) and open
+  wallpaper/wallpaper.html?v=eclipse2|drift2|orbit|nordlys|yggdrasil|ginnungagap|bifrost|ravens|vortex|shear|horizon|eclipse|wing|drift|rain&w=2880&h=1800&seed=7
+  Other params: fs (glyph size at 2880 wide, a multiple of 16), glyphs=0 (base only),
+  reveal (how strongly a hidden lockup shows, 0..1), and for fitting other screens:
+  cell (exact cell size in px; keep it a multiple of 16 unless the glyphs are runes),
+  logo=horizontal|stacked, ls=1|2, x and y (where the lockup's centre sits, 0..1).
+  Compositions are drawn in units of the screen height around a fixed centre, so other aspect
+  ratios crop or extend the same scene rather than squashing it.
+-->
+<style>
+  @font-face { font-family: "Munin Block"; src: url("../final/font/MuninBlock-Regular.woff2") format("woff2"); }
+  html, body { margin: 0; background: #0a0a0a; }
+  canvas { display: block; width: 100vw; height: auto; }
+</style>
+</head>
+<body>
+<canvas id="out"></canvas>
+<script>
+const Q = new URLSearchParams(location.search);
+const W = +(Q.get('w') || 2880), H = +(Q.get('h') || 1800);
+const V = Q.get('v') || 'horizon';
+const S = H / 1800;                                   // geometry scale
+// The hidden-lockup variants use small square cells, so the lockup's pixel grid maps onto the glyph grid.
+const QUIET_VARIANTS = ['eclipse2', 'drift2', 'orbit', 'nordlys', 'yggdrasil', 'ginnungagap', 'bifrost', 'ravens', 'vortex', 'shear'];
+const GRID = QUIET_VARIANTS.includes(V) ? [16, 1, 1] : [32, 0.8125, 1];
+const FS = Q.has('cell') ? +Q.get('cell') : 16 * Math.max(1, Math.round(+(Q.get('fs') || GRID[0]) * S / 16));   // whole font pixels only
+const CW = Math.round(FS * GRID[1]), CH = Math.round(FS * GRID[2]);
+const COLS = Math.floor(W / CW), ROWS = Math.floor(H / CH);
+const OX = Math.floor((W - COLS * CW) / 2), OY = Math.floor((H - ROWS * CH) / 2);
+const PAPER = '#f4f4f4';
+const LOGOS = {
+  horizontal: '../final/png/lockup-horizontal/munin-lockup-horizontal-white@2x.png',
+  stacked: '../final/png/lockup-stacked/munin-lockup-stacked-white@2x.png',
+};
+
+// ── helpers ─────────────────────────────────────────────────────────────────
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const R = mulberry(+(Q.get('seed') || 7));
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0)); return t * t * (3 - 2 * t); };
+
+const PERM = new Uint8Array(512);
+{ const p = [...Array(256).keys()]; for (let i = 255; i > 0; i--) { const j = Math.floor(R() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; } for (let i = 0; i < 512; i++) PERM[i] = p[i & 255]; }
+const grad = (h, x, y) => { const a = h * 0.02454369; return Math.cos(a) * x + Math.sin(a) * y; };
+const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+function noise(x, y) {
+  const X = Math.floor(x), Y = Math.floor(y); x -= X; y -= Y;
+  const xi = X & 255, yi = Y & 255, u = fade(x), v = fade(y);
+  const aa = grad(PERM[PERM[xi] + yi], x, y), ba = grad(PERM[PERM[xi + 1] + yi], x - 1, y);
+  const ab = grad(PERM[PERM[xi] + yi + 1], x, y - 1), bb = grad(PERM[PERM[xi + 1] + yi + 1], x - 1, y - 1);
+  const l1 = aa + (ba - aa) * u, l2 = ab + (bb - ab) * u;
+  return l1 + (l2 - l1) * v;
+}
+function fbm(x, y, oct = 5) { let s = 0, a = 0.5; for (let i = 0; i < oct; i++) { s += a * noise(x, y); x *= 2.03; y *= 2.03; a *= 0.5; } return s; }
+
+function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+// Run fn with a blur filter, composite op and alpha, then put the context back.
+function fx(ctx, { blur = 0, op = 'source-over', alpha = 1 } = {}, fn) {
+  ctx.save(); ctx.globalCompositeOperation = op; ctx.globalAlpha = alpha;
+  if (blur) ctx.filter = `blur(${blur}px)`;
+  fn(); ctx.restore();
+}
+// Paint a low-res greyscale field fn(u, v) → 0..1 scaled up to the full canvas. v spans 0..1 down the screen and
+// u runs at the same scale across it, centred on 0.8 (so at 16:10 it spans 0..1.6). fw × fh is the budget at
+// 2880×1800; other sizes keep the same density with square field pixels.
+const U0 = 0.8 - W / H / 2;
+function field(ctx, fw0, fh0, fn, opts) {
+  const budget = fw0 * fh0 * (W * H) / (2880 * 1800);
+  const fw = Math.max(2, Math.round(Math.sqrt(budget * W / H))), fh = Math.max(2, Math.round(budget / fw));
+  const c = canvas(fw, fh), x = c.getContext('2d'), d = x.createImageData(fw, fh);
+  for (let j = 0; j < fh; j++) for (let i = 0; i < fw; i++) {
+    const g = 255 * clamp(fn(U0 + i / fw * W / H, j / fh)), k = (j * fw + i) * 4;
+    d.data[k] = d.data[k + 1] = d.data[k + 2] = g; d.data[k + 3] = 255;
+  }
+  x.putImageData(d, 0, 0);
+  fx(ctx, opts, () => { ctx.imageSmoothingQuality = 'high'; ctx.drawImage(c, 0, 0, W, H); });
+}
+function ring(ctx, cx, cy, r, lw, style) { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.lineWidth = lw; ctx.strokeStyle = style; ctx.stroke(); }
+function disc(ctx, cx, cy, r, style) { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = style; ctx.fill(); }
+const grey = (v, a = 1) => `rgba(${v},${v},${v},${a})`;
+
+// ── compositions ────────────────────────────────────────────────────────────
+// Each paints the base image and says where the lockup goes (x, y as fractions; align c = centre, l = left edge).
+// Optional: gain (how readily glyphs light up), floor (faint glyphs everywhere) with floorMask(x, y) → 0..1
+// and floorEven (an even floor rather than patches), baseAlpha (how much of the base shows under the glyphs),
+// dim (darken the base behind the lockup), alpha (brightest glyph), weight (how heavy the glyphs get),
+// bloom and streak (their strength), glyphs: 'runes' for the rune set, ramp and egg (replace the glyph ramp
+// and the hidden line).
+// hide: draw the lockup with the glyphs instead of on top. ls is cells per logo unit: 1, or 2 for one cell
+// per dithered sub-pixel. reveal lifts the glyphs inside it, carve dims the ones around it, ghost is a faint glow.
+// rowShift (cells per glyph row) slides a hidden lockup's rows along with a sliced base.
+
+// The quiet texture the hidden-lockup variants share.
+const QUIET = { alpha: 0.36, weight: 0.55, floor: 0.22, floorEven: true, gain: 1.3, bloom: 0.5, streak: 0.12 };
+
+// Drift II's smoke: soft bands rising to the right, bent by noise.
+const BANDS = [[0.47, 0.2, 0.35], [0.5, 0.06, 0.9], [0.56, 0.1, 0.4], [0.41, 0.035, 0.5]];   // [centre, width, brightness]
+function ribbons(u, v) {
+  const wx = u + 0.3 * fbm(u * 0.7 + 3, v * 0.7, 4), wy = v + 0.12 * fbm(u * 0.7, v * 0.7 + 9, 4);
+  let s = 0;
+  for (const [off, wid, br] of BANDS) {
+    const d = (wy - (off - 0.1 * (wx - 0.8) + 0.05 * Math.sin(wx * 2.2 + off * 13))) / wid;
+    s += br * Math.exp(-d * d);
+  }
+  const veil = 0.6 + 0.4 * smooth(-0.3, 0.4, fbm(wx * 2, wy * 3 + 4, 4));
+  return s * veil * 0.42 * smooth(-0.2, 0.6, u) + 0.012;
+}
+
+const VARIANTS = {
+  eclipse2(b) {
+    b.fillStyle = '#030303'; b.fillRect(0, 0, W, H);
+    const cx = W * 0.56, cy = H * 0.5, rd = H * 0.27;
+    field(b, 576, 360, (u, v) => {
+      const x = (u - U0) * H - cx, y = v * H - cy, r = Math.hypot(x, y) / rd, a = Math.atan2(y, x);
+      const ca = Math.cos(a), sa = Math.sin(a), wob = fbm(ca * 1.3 + 3, sa * 1.3 + 7, 4);
+      const r0 = 1 + 0.06 * wob;                                        // the void isn't quite round
+      const inner = smooth(r0 - 0.06, r0 + 0.02, r);
+      const fall = Math.exp(-Math.max(0, r - r0) * (2.3 - 1.3 * smooth(-0.3, 0.4, fbm(ca * 2.2 + 1, sa * 2.2 + 5, 4))));
+      const wisps = 0.55 + 0.45 * smooth(-0.35, 0.35, fbm(x / rd * 1.4 + 2 * wob, y / rd * 1.4, 4));
+      return inner * fall * wisps * 0.62 + 0.012;
+    }, { blur: 5 * S });
+    return {
+      logo: 'stacked', x: cx / W, y: cy / H, hide: { ls: 1, reveal: 0.2, carve: 0.45, ghost: 0.03 },
+      alpha: 0.34, weight: 0.55, floor: 0.24, floorEven: true, gain: 1.2, bloom: 0.5, streak: 0.12,
+    };
+  },
+
+  drift2(b) {
+    b.fillStyle = '#030303'; b.fillRect(0, 0, W, H);
+    field(b, 576, 360, ribbons, { blur: 14 * S });
+    return { ...QUIET, logo: 'horizontal', x: 0.5, y: 0.5, hide: { ls: 2, reveal: 0.14, carve: 0.35, ghost: 0.025 } };
+  },
+
+  orbit(b) {
+    b.fillStyle = '#030303'; b.fillRect(0, 0, W, H);
+    const cx = W * 0.5, cy = H * 0.52, R = W * 0.36, flat = 0.3, tilt = -0.18;
+    const ct = Math.cos(tilt), st = Math.sin(tilt);
+    const rings = [[1, 0.03, 1], [0.94, 0.08, 0.4], [1.07, 0.05, 0.5], [0.86, 0.02, 0.35]];   // [radius, width, brightness]
+    field(b, 576, 360, (u, v) => {
+      const x = (u - U0) * H - cx, y = v * H - cy, xr = (x * ct - y * st) / R, yr = (x * st + y * ct) / flat / R;
+      const wx = xr + 0.06 * fbm(xr * 1.5 + 2, yr * 1.5, 4), wy = yr + 0.06 * fbm(xr * 1.5, yr * 1.5 + 7, 4);
+      const r = Math.hypot(wx, wy), front = 0.35 + 0.65 * smooth(-0.6, 1, Math.sin(Math.atan2(wy, wx)));
+      let s = 0;
+      for (const [r0, w, br] of rings) { const d = (r - r0) / w; s += br * Math.exp(-d * d); }
+      const veil = 0.6 + 0.4 * smooth(-0.3, 0.4, fbm(wx * 3, wy * 3 + 4, 4));
+      return s * front * veil * 0.45 + 0.08 * Math.exp(-r * r * 3) + 0.012;
+    }, { blur: 8 * S });
+    return { ...QUIET, logo: 'horizontal', x: 0.5, y: 0.5, hide: { ls: 2, reveal: 0.12, carve: 0.35, ghost: 0.02 } };
+  },
+
+  // Northern lights: curtains hanging from a wavy hem, folded, combed into vertical rays.
+  nordlys(b) {
+    b.fillStyle = '#030303'; b.fillRect(0, 0, W, H);
+    const curtains = [[0.52, 0.3, 1], [0.42, 0.2, 0.6], [0.62, 0.22, 0.5], [0.34, 0.15, 0.35]];   // [hem, height, brightness]
+    field(b, 720, 450, (u, v) => {
+      let s = 0;
+      for (const [hem, height, br] of curtains) {
+        const yb = hem + 0.09 * Math.sin(u * 1.3 * (1 + hem) + hem * 9) + 0.06 * fbm(u * 1.2 + hem * 4, hem * 7, 3);
+        const above = yb - v, fold = u + 0.06 * Math.sin(u * 7 + above * 5 + hem * 3);
+        const rays = 0.3 + 0.7 * Math.pow(smooth(-0.25, 0.45, fbm(fold * 16, hem * 11, 3)), 1.5);
+        const h = height * (0.6 + 0.6 * smooth(-0.3, 0.4, fbm(u * 1.8 + 9, hem, 3)));
+        const curtain = above >= 0 ? Math.exp(-above / h) : Math.exp(-((above / 0.03) ** 2));
+        s += br * curtain * rays * smooth(-0.1, 0.5, fbm(u * 0.9 + hem * 2, 2.5, 3) + 0.25);
+      }
+      return s * 0.45 + 0.04 * smooth(0.55, 1, v) + 0.012;
+    }, { blur: 3 * S });
+    return { ...QUIET, streak: 0.2, glyphs: 'runes', logo: 'horizontal', x: 0.5, y: 0.5, hide: { ls: 2, reveal: 0.15, carve: 0.35, ghost: 0.025 } };
+  },
+
+  // The world tree: luminous branches and roots spreading from one node, half lost in mist.
+  yggdrasil(b) {
+    b.fillStyle = '#030303'; b.fillRect(0, 0, W, H);
+    const tree = canvas(W, H), t = tree.getContext('2d');
+    t.lineCap = 'round'; t.globalCompositeOperation = 'screen';
+    const grow = (x, y, a, len, w, depth, br) => {
+      const bend = (R() - 0.5) * 0.8, ex = x + Math.cos(a) * len, ey = y + Math.sin(a) * len;
+      const mx = (x + ex) / 2 - Math.sin(a) * len * bend * 0.3, my = (y + ey) / 2 + Math.cos(a) * len * bend * 0.3;
+      t.beginPath(); t.moveTo(x, y); t.quadraticCurveTo(mx, my, ex, ey);
+      t.lineWidth = w; t.strokeStyle = grey(235, br); t.stroke();
+      if (depth === 0 || len < 8 * S) return;
+      const n = depth > 6 ? 2 : 2 + (R() < 0.35 ? 1 : 0);
+      for (let i = 0; i < n; i++) {
+        const spread = lerp(-0.55, 0.55, i / (n - 1)) + (R() - 0.5) * 0.3;
+        grow(ex, ey, a + spread + bend * 0.3, len * (0.68 + R() * 0.12), w * 0.68, depth - 1, br * 0.86);
+      }
+    };
+    const cx = W * 0.5, cy = H * 0.52;
+    for (let i = 0; i < 3; i++) grow(cx, cy, -Math.PI / 2 + (i - 1) * 0.7, H * 0.17, 26 * S, 9, 0.5);   // crown
+    for (let i = 0; i < 3; i++) grow(cx, cy, Math.PI / 2 + (i - 1) * 0.8, H * 0.12, 20 * S, 8, 0.38);   // roots
+    fx(b, { op: 'screen', alpha: 0.8, blur: 40 * S }, () => b.drawImage(tree, 0, 0));
+    fx(b, { op: 'screen', alpha: 0.7, blur: 8 * S }, () => b.drawImage(tree, 0, 0));
+    fx(b, { op: 'screen', alpha: 0.5, blur: 1.5 * S }, () => b.drawImage(tree, 0, 0));
+    field(b, 288, 180, (u, v) => 0.3 + 0.7 * smooth(-0.3, 0.35, fbm(u * 2 + 3, v * 2, 4)), { op: 'multiply', blur: 10 * S });
+    return { ...QUIET, glyphs: 'runes', logo: 'horizontal', x: 0.5, y: 0.52, hide: { ls: 2, reveal: 0.15, carve: 0.35, ghost: 0.025 } };
+  },
+
+  // The void before the world: ice filaments on the left, fire billows on the right, nothing between.
+  ginnungagap(b) {
+    b.fillStyle = '#030303'; b.fillRect(0, 0, W, H);
+    field(b, 720, 450, (u, v) => {
+      const gap = (u - 0.8) - 0.3 * (v - 0.5) + 0.06 * fbm(v * 3 + 2, u, 4), side = smooth(0.02, 0.3, Math.abs(gap));
+      let s;
+      if (gap < 0) s = Math.pow(clamp(1 - Math.abs(fbm(u * 3.2 + 7, v * 3.2, 5) * 2)), 8) * 0.75 + 0.04;
+      else {
+        const wx = u * 2.2 + 0.9 * fbm(u * 1.2, v * 1.2 + 5, 4), wy = v * 2.2 + 1;
+        s = Math.pow(smooth(-0.15, 0.5, fbm(wx, wy, 5)), 1.4) * 0.85 + 0.06;
+      }
+      return s * side * 0.6 + 0.012;
+    }, { blur: 2.5 * S });
+    return { ...QUIET, glyphs: 'runes', logo: 'horizontal', x: 0.5, y: 0.5, hide: { ls: 2, reveal: 0.13, carve: 0.35, ghost: 0.02 } };
+  },
+
+  // The bridge: an arc of bands across the sky, with fine interference fringes and mist below.
+  bifrost(b) {
+    b.fillStyle = '#030303'; b.fillRect(0, 0, W, H);
+    const cx = 0.8, cy = 1.45, R0 = 1.12;
+    field(b, 960, 600, (u, v) => {
+      const wx = u + 0.03 * fbm(u * 2, v * 2, 3), wy = v + 0.03 * fbm(u * 2 + 5, v * 2, 3);
+      let band = 0, r = 0, a = 0;
+      for (const [k, br] of [[-1, 0.55], [0, 1], [1, 0.55]]) {
+        const rk = Math.hypot(wx - cx, wy - cy - k * 0.025), t = (rk - R0 - k * 0.035) / 0.16;
+        band += br * Math.exp(-t * t * 2) * (0.55 + 0.45 * Math.cos(t * 9 + 1 + k)) * (0.6 + 0.4 * Math.sin(rk * 160 + k * 2));
+        if (!k) { r = rk; a = Math.atan2(wy - cy, wx - cx); }
+      }
+      const along = 0.5 + 0.5 * smooth(-0.3, 0.3, fbm(a * 3 + 4, 1.5, 3));
+      const mist = r < R0 ? 0.12 * Math.exp(-(R0 - r) / 0.25) : 0;
+      return (band * along * 0.42 + mist) + 0.012;
+    }, { blur: 2 * S });
+    return { ...QUIET, glyphs: 'runes', logo: 'horizontal', x: 0.5, y: 0.37, hide: { ls: 2, reveal: 0.13, carve: 0.35, ghost: 0.02 } };
+  },
+
+  // Thought and memory: two streams of smoke winding round each other, crossing where the lockup is.
+  ravens(b) {
+    b.fillStyle = '#030303'; b.fillRect(0, 0, W, H);
+    field(b, 576, 360, (u, v) => {
+      let s = 0;
+      for (const ph of [0, Math.PI]) {
+        const t = u * 2.4 + 1.22 + ph;
+        const yc = 0.5 + 0.17 * Math.sin(t) * (0.7 + 0.3 * Math.sin(u * 0.9)) + 0.04 * fbm(u * 1.5 + ph, 1, 3);
+        const depth = 0.5 + 0.5 * Math.cos(t), d = (v - yc) / (0.02 + 0.06 * depth);
+        s += (0.35 + 0.65 * depth) * Math.exp(-d * d) * (0.55 + 0.45 * smooth(-0.3, 0.35, fbm(u * 4 + ph, v * 6, 4)));
+      }
+      return s * 0.5 * smooth(-0.1, 0.4, u) * smooth(1.7, 1.2, u) + 0.05 * Math.exp(-(((v - 0.5) / 0.25) ** 2)) + 0.012;
+    }, { blur: 6 * S });
+    return { ...QUIET, logo: 'stacked', x: 0.5, y: 0.5, hide: { ls: 2, reveal: 0.13, carve: 0.35, ghost: 0.02 } };
+  },
+
+  // A spiral of smoke pulled into a bright core, written in binary.
+  vortex(b) {
+    b.fillStyle = '#030303'; b.fillRect(0, 0, W, H);
+    const cx = 0.92, cy = 0.46;
+    field(b, 576, 360, (u, v) => {
+      const x = u - cx, y = (v - cy) * 1.3, r = Math.hypot(x, y) + 1e-4, a = Math.atan2(y, x);
+      const warp = 1.2 * fbm(u * 1.6 + 1, v * 1.6 + 3, 4);
+      const arms = 0.5 + 0.5 * Math.cos(2 * a - 5 * Math.log(r) + warp * 3);
+      const smoke = 0.5 + 0.5 * smooth(-0.3, 0.35, fbm(x * 4 + warp, y * 4, 4));
+      return (Math.pow(arms, 2.2) * Math.exp(-r * 2.2) * smoke * 0.85 + 0.35 * Math.exp(-r * r * 40)) * 0.75 + 0.012;
+    }, { blur: 4 * S });
+    return {
+      ...QUIET, ramp: ['·', '.', ':', '1', '1', '0', '0', '8'], egg: '01101101 01110101 01101110 01101001 01101110',
+      logo: 'horizontal', x: 0.5, y: 0.5, hide: { ls: 2, reveal: 0.14, carve: 0.35, ghost: 0.02 },
+    };
+  },
+
+  // Drift II cut into rows and slid sideways like a corrupted memory; the lockup tears with it.
+  shear(b) {
+    const src = canvas(W, H), s = src.getContext('2d');
+    s.fillStyle = '#030303'; s.fillRect(0, 0, W, H);
+    field(s, 576, 360, ribbons, { blur: 14 * S });
+    b.fillStyle = '#030303'; b.fillRect(0, 0, W, H);
+    const shift = new Int16Array(ROWS), strips = [];
+    for (let r = 0; r < ROWS;) {
+      const n = 1 + Math.floor(R() * R() * 14), off = R() < 0.55 ? Math.round((R() - 0.5) * 2 * (6 + R() * R() * COLS * 0.35)) : 0;
+      strips.push([r, Math.min(n, ROWS - r), off, R() < 0.18 ? Math.round((R() - 0.5) * COLS * 0.5) : 0]);
+      for (let k = 0; k < n && r < ROWS; k++, r++) shift[r] = off;
+    }
+    b.drawImage(src, 0, 0, W, OY, 0, 0, W, OY);
+    for (const [r, n, off, echo] of strips) {
+      const y = OY + r * CH, h = n * CH;
+      b.drawImage(src, 0, y, W, h, off * CW, y, W, h);
+      if (echo) fx(b, { op: 'screen', alpha: 0.45 }, () => b.drawImage(src, 0, y, W, h, (off + echo) * CW, y, W, h));
+    }
+    return { ...QUIET, rowShift: shift, logo: 'horizontal', x: 0.5, y: 0.5, hide: { ls: 2, reveal: 0.15, carve: 0.35, ghost: 0.02 } };
+  },
+
+  horizon(b) {
+    const g = b.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#030303'); g.addColorStop(0.5, '#0a0a0a'); g.addColorStop(0.67, '#1a1a1a'); g.addColorStop(1, '#050505');
+    b.fillStyle = g; b.fillRect(0, 0, W, H);
+    field(b, 288, 180, (u, v) => Math.max(0, fbm(u * 2.4, v * 2.4 + 1.7) + 0.12) * 0.22 * smooth(0, 0.7, v), { op: 'screen', blur: 24 * S });
+    const cx = W / 2, cy = H * 1.9, r = H * 1.22, top = cy - r;
+    const rim = b.createRadialGradient(cx, top, 0, cx, top, W * 0.6);
+    rim.addColorStop(0, grey(245)); rim.addColorStop(0.45, grey(205, 0.6)); rim.addColorStop(1, grey(160, 0));
+    fx(b, { op: 'screen', alpha: 0.5, blur: 150 * S }, () => ring(b, cx, cy, r + 70 * S, 280 * S, rim));
+    fx(b, { op: 'screen', alpha: 0.85, blur: 36 * S }, () => ring(b, cx, cy, r + 10 * S, 36 * S, rim));
+    fx(b, { op: 'screen', blur: 2 * S }, () => ring(b, cx, cy, r, 4 * S, rim));
+    const body = b.createLinearGradient(0, top, 0, H);
+    body.addColorStop(0, '#111'); body.addColorStop(0.12, '#070707'); body.addColorStop(1, '#020202');
+    fx(b, { blur: 4 * S }, () => disc(b, cx, cy, r - 3 * S, body));
+    return { logo: 'horizontal', k: 4, x: 0.5, y: 0.4, align: 'c', floor: 0.14, floorMask: (x, y) => (Math.hypot(x - cx, y - cy) > r ? 1 : 0) };
+  },
+
+  eclipse(b) {
+    b.fillStyle = '#040404'; b.fillRect(0, 0, W, H);
+    const cx = W * 0.62, cy = H * 0.47, rd = H * 0.25;
+    const halo = b.createRadialGradient(cx, cy, rd * 0.95, cx, cy, rd * 3);
+    halo.addColorStop(0, grey(235, 0.6)); halo.addColorStop(0.18, grey(200, 0.22)); halo.addColorStop(0.5, grey(160, 0.06)); halo.addColorStop(1, grey(120, 0));
+    b.fillStyle = halo; b.fillRect(0, 0, W, H);
+    const rays = canvas(W, H), rx = rays.getContext('2d');
+    rx.globalCompositeOperation = 'screen';
+    for (let i = 0; i < 1400; i++) {
+      const a = R() * Math.PI * 2, n = fbm(Math.cos(a) * 1.8 + 4, Math.sin(a) * 1.8 + 4, 4);
+      const len = rd * (0.08 + Math.max(0, n + 0.2) * 2.2 * Math.pow(R(), 1.5));
+      const lg = rx.createLinearGradient(cx + Math.cos(a) * rd, cy + Math.sin(a) * rd, cx + Math.cos(a) * (rd + len), cy + Math.sin(a) * (rd + len));
+      lg.addColorStop(0, grey(240, 0.16)); lg.addColorStop(1, grey(240, 0));
+      rx.beginPath(); rx.moveTo(cx + Math.cos(a) * rd, cy + Math.sin(a) * rd); rx.lineTo(cx + Math.cos(a) * (rd + len), cy + Math.sin(a) * (rd + len));
+      rx.lineWidth = (1 + R() * 4) * S; rx.strokeStyle = lg; rx.stroke();
+    }
+    fx(b, { op: 'screen', blur: 5 * S }, () => b.drawImage(rays, 0, 0));
+    fx(b, { op: 'screen', blur: 10 * S }, () => ring(b, cx, cy, rd, 14 * S, grey(240, 0.9)));
+    fx(b, { op: 'screen', blur: 1.5 * S }, () => ring(b, cx, cy, rd, 2.5 * S, grey(250)));
+    fx(b, { blur: 1.5 * S }, () => disc(b, cx, cy, rd - 1 * S, '#030303'));
+    const shine = b.createRadialGradient(cx - rd * 0.4, cy - rd * 0.5, 0, cx - rd * 0.4, cy - rd * 0.5, rd * 1.2);
+    shine.addColorStop(0, grey(40, 0.35)); shine.addColorStop(1, grey(40, 0));
+    fx(b, { op: 'screen' }, () => disc(b, cx, cy, rd - 2 * S, shine));
+    return { logo: 'stacked', k: 4, x: cx / W, y: cy / H, align: 'c', floor: 0.12, floorMask: (x, y) => smooth(rd, rd * 1.15, Math.hypot(x - cx, y - cy)) };
+  },
+
+  wing(b) {
+    b.fillStyle = '#050505'; b.fillRect(0, 0, W, H);
+    const root = [W * 1.02, H * 1.12], N = 11;
+    for (let i = 0; i < N; i++) {
+      const t = i / (N - 1), ang = lerp(-2.5, -1.62, t) + (R() - 0.5) * 0.05;
+      const len = H * lerp(1.45, 1.0, t) * (0.92 + R() * 0.16), wid = H * lerp(0.075, 0.05, t), bend = H * lerp(0.2, 0.1, t);
+      const tip = [root[0] + Math.cos(ang) * len, root[1] + Math.sin(ang) * len];
+      const nx = Math.sin(ang), ny = -Math.cos(ang), mid = [(root[0] + tip[0]) / 2, (root[1] + tip[1]) / 2];
+      const c1 = [mid[0] + nx * (bend + wid), mid[1] + ny * (bend + wid)], c2 = [mid[0] + nx * (bend - wid), mid[1] + ny * (bend - wid)];
+      const br = 0.45 + 0.55 * Math.pow(R(), 0.7);
+      const lg = b.createLinearGradient(root[0], root[1], tip[0], tip[1]);
+      lg.addColorStop(0, grey(255, 0)); lg.addColorStop(0.4, grey(220, 0.16 * br)); lg.addColorStop(0.82, grey(235, 0.62 * br)); lg.addColorStop(1, grey(255, 0));
+      const blade = () => { b.beginPath(); b.moveTo(...root); b.quadraticCurveTo(...c1, ...tip); b.quadraticCurveTo(...c2, ...root); b.fillStyle = lg; b.fill(); };
+      fx(b, { op: 'screen', blur: (14 + R() * 36) * S }, blade);
+      fx(b, { op: 'screen', alpha: 0.9, blur: 1.5 * S }, () => { b.beginPath(); b.moveTo(...root); b.quadraticCurveTo(...c1, ...tip); b.lineWidth = 2.5 * S; b.strokeStyle = lg; b.stroke(); });
+    }
+    return { logo: 'horizontal', k: 3, x: 0.075, y: 0.5, align: 'l', gain: 1.5, floor: 0.1 };
+  },
+
+  drift(b) {
+    b.fillStyle = '#050505'; b.fillRect(0, 0, W, H);
+    // Ribbons of smoke rising to the right: [centre line, wave, width, brightness].
+    const strands = [[0.4, 0.1, 0.05, 1], [0.46, 0.13, 0.12, 0.45], [0.33, 0.07, 0.022, 0.85], [0.56, 0.09, 0.03, 0.4]];
+    field(b, 480, 300, (u, v) => {
+      let s = 0;
+      for (const [off, amp, wid, br] of strands) {
+        const yc = off - 0.16 * (u - 0.8) + amp * Math.sin(u * 2.1 + off * 9) + 0.08 * fbm(u * 1.3 + off * 5, off * 3, 3);
+        const d = (v - yc) / (wid * (0.7 + 0.6 * smooth(0, 1.6, u)));
+        s += br * Math.exp(-d * d) * (0.5 + 0.5 * smooth(-0.3, 0.3, fbm(u * 3 + off * 7, v * 2, 3)));
+      }
+      return s * 0.6;
+    }, { blur: 6 * S });
+    return { logo: 'horizontal', k: 3, x: 0.075, y: 0.82, align: 'l', gain: 0.95, floor: 0.1 };
+  },
+
+  rain(b) {
+    b.fillStyle = '#040404'; b.fillRect(0, 0, W, H);
+    const drops = canvas(W, H), d = drops.getContext('2d');
+    d.globalCompositeOperation = 'screen';
+    for (let c = 0; c < COLS; c++) {
+      const env = smooth(-0.15, 0.45, fbm(c * 0.06, 3.1, 3)), x = OX + c * CW;
+      const n = 1 + Math.floor(R() * 3);
+      for (let k = 0; k < n; k++) {
+        const head = R() * H * 1.15, len = H * (0.12 + R() * 0.55), br = env * (0.35 + 0.65 * R());
+        if (br < 0.03) continue;
+        const lg = d.createLinearGradient(0, head - len, 0, head);
+        lg.addColorStop(0, grey(235, 0)); lg.addColorStop(0.85, grey(235, 0.55 * br)); lg.addColorStop(1, grey(250, br));
+        d.fillStyle = lg; d.fillRect(x + CW * 0.12, head - len, CW * 0.76, len);
+      }
+    }
+    fx(b, { op: 'screen', blur: 6 * S }, () => b.drawImage(drops, 0, 0));
+    const glow = b.createRadialGradient(W / 2, H * 0.5, 0, W / 2, H * 0.5, W * 0.55);
+    glow.addColorStop(0, grey(120, 0.12)); glow.addColorStop(1, grey(120, 0));
+    fx(b, { op: 'screen' }, () => { b.fillStyle = glow; b.fillRect(0, 0, W, H); });
+    return { logo: 'horizontal', k: 4, x: 0.5, y: 0.5, align: 'c', dim: true, gain: 2.2, baseAlpha: 0.45, floor: 0.08 };
+  },
+};
+
+// ── glyph texture ───────────────────────────────────────────────────────────
+const RAMP = ['.', '·', ':', '-', '=', '+', '*', '×', 'x', '1', '/', '\\', '|', 'X', '0', '#', '%', '@'];
+const EGG = 'munin remembers';
+
+// Elder Futhark runes drawn as strokes in a cap-height box, to sit on the same grid as Munin Block.
+// Polylines in box units (x 0..1 left to right, y 0..1 top to bottom). Othala, Sowilo, Algiz and Tiwaz
+// are left out on purpose: they're the ones hate groups have taken up.
+const RUNES = {
+  'ᚠ': [[[0.2, 0], [0.2, 1]], [[0.2, 0.3], [0.85, 0]], [[0.2, 0.6], [0.85, 0.3]]],
+  'ᚢ': [[[0.15, 1], [0.15, 0], [0.85, 0.35], [0.85, 1]]],
+  'ᚦ': [[[0.2, 0], [0.2, 1]], [[0.2, 0.25], [0.85, 0.5], [0.2, 0.75]]],
+  'ᚨ': [[[0.2, 0], [0.2, 1]], [[0.2, 0], [0.85, 0.3]], [[0.2, 0.3], [0.85, 0.6]]],
+  'ᚱ': [[[0.2, 1], [0.2, 0], [0.85, 0.25], [0.2, 0.5], [0.85, 1]]],
+  'ᚲ': [[[0.8, 0.15], [0.25, 0.5], [0.8, 0.85]]],
+  'ᚷ': [[[0.1, 0.05], [0.9, 0.95]], [[0.9, 0.05], [0.1, 0.95]]],
+  'ᚹ': [[[0.2, 1], [0.2, 0], [0.85, 0.25], [0.2, 0.5]]],
+  'ᚺ': [[[0.15, 0], [0.15, 1]], [[0.85, 0], [0.85, 1]], [[0.15, 0.35], [0.85, 0.65]]],
+  'ᚾ': [[[0.5, 0], [0.5, 1]], [[0.15, 0.35], [0.85, 0.6]]],
+  'ᛁ': [[[0.5, 0], [0.5, 1]]],
+  'ᛇ': [[[0.5, 0], [0.5, 1]], [[0.5, 0], [0.85, 0.2]], [[0.5, 1], [0.15, 0.8]]],
+  'ᛒ': [[[0.2, 0], [0.2, 1], [0.85, 0.75], [0.2, 0.5], [0.85, 0.25], [0.2, 0]]],
+  'ᛖ': [[[0.15, 1], [0.15, 0], [0.5, 0.3], [0.85, 0], [0.85, 1]]],
+  'ᛗ': [[[0.15, 1], [0.15, 0], [0.85, 0.4]], [[0.85, 1], [0.85, 0], [0.15, 0.4]]],
+  'ᛚ': [[[0.2, 1], [0.2, 0], [0.85, 0.3]]],
+  'ᛜ': [[[0.5, 0.2], [0.85, 0.5], [0.5, 0.8], [0.15, 0.5], [0.5, 0.2]]],
+  'ᛞ': [[[0.15, 0], [0.15, 1], [0.85, 0], [0.85, 1], [0.15, 0]]],
+};
+const RUNE_RAMP = ['ᛁ', 'ᚲ', 'ᛚ', 'ᚾ', 'ᛇ', 'ᚠ', 'ᚢ', 'ᚹ', 'ᚦ', 'ᚷ', 'ᚨ', 'ᚱ', 'ᛜ', 'ᚺ', 'ᛖ', 'ᛗ', 'ᛒ', 'ᛞ'];
+const RUNE_EGG = 'ᛗᚢᚾᛁᚾ';                                   // munin
+
+function luminance(src) {
+  const c = canvas(COLS, ROWS), x = c.getContext('2d', { willReadFrequently: true });
+  x.imageSmoothingQuality = 'high';
+  x.drawImage(src, OX, OY, COLS * CW, ROWS * CH, 0, 0, COLS, ROWS);
+  const d = x.getImageData(0, 0, COLS, ROWS).data, L = new Float32Array(COLS * ROWS);
+  for (let i = 0; i < L.length; i++) L[i] = (0.2126 * d[i * 4] + 0.7152 * d[i * 4 + 1] + 0.0722 * d[i * 4 + 2]) / 255;
+  return L;
+}
+
+// The lockup as glyph cells: how much of each cell the logo covers, sampled from the @2x PNG
+// (one PNG pixel per dithered sub-pixel, two per unit).
+function logoCells(logo, ls, x, y) {
+  const c = canvas(logo.width, logo.height), g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(logo, 0, 0);
+  const d = g.getImageData(0, 0, logo.width, logo.height).data, step = 2 / ls;
+  const w = logo.width / step, h = logo.height / step;
+  const c0 = Math.round((x * W - OX) / CW - w / 2), r0 = Math.round((y * H - OY) / CH - h / 2);
+  const cov = new Float32Array(COLS * ROWS);
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+    let s = 0;
+    for (let v = 0; v < step; v++) for (let u = 0; u < step; u++) s += d[((j * step + v) * logo.width + i * step + u) * 4 + 3];
+    const col = c0 + i, r = r0 + j;
+    if (col >= 0 && col < COLS && r >= 0 && r < ROWS) cov[r * COLS + col] = s / (255 * step * step);
+  }
+  return { cov, x: OX + c0 * CW, y: OY + r0 * CH, w: w * CW, h: h * CH };
+}
+
+// White with alpha per cell, for drawing a cell-resolution mask at full size.
+function cellMask(values) {
+  const c = canvas(COLS, ROWS), x = c.getContext('2d'), d = x.createImageData(COLS, ROWS);
+  for (let i = 0; i < values.length; i++) { d.data.fill(255, i * 4, i * 4 + 3); d.data[i * 4 + 3] = 255 * clamp(values[i]); }
+  x.putImageData(d, 0, 0);
+  return c;
+}
+
+// How strongly each cell lights up: the base's brightness, a faint floor everywhere, nothing near a drawn
+// lockup; a hidden lockup lifts its own cells and dims the ones just around it.
+function strength(L, spec, keep, cov) {
+  const K = new Float32Array(COLS * ROWS), gain = spec.gain || 1;
+  for (let r = 0; r < ROWS; r++) for (let col = 0; col < COLS; col++) {
+    const i = r * COLS + col;
+    let k = smooth(0.035, 0.6, L[i] * gain);
+    if (spec.floor) {
+      const m = spec.floorMask ? spec.floorMask(OX + (col + 0.5) * CW, OY + (r + 0.5) * CH) : 1;
+      const patch = smooth(-0.25, 0.35, fbm(col * 0.045 + 11, r * 0.07 + 3, 3));
+      k = Math.max(k, spec.floor * m * (spec.floorEven ? 0.75 + 0.25 * patch : patch));
+    }
+    if (cov) {
+      if (cov[i] > 0) k = Math.min(1, k + spec.hide.reveal * cov[i]);
+      else {
+        let edge = false;
+        for (let dr = -1; dr <= 1 && !edge; dr++) for (let dc = -1; dc <= 1; dc++) if (cov[(r + dr) * COLS + col + dc] > 0) { edge = true; break; }
+        if (edge) k *= 1 - spec.hide.carve;
+      }
+    }
+    K[i] = k * keep(col, r);
+  }
+  return K;
+}
+
+// The tagline hides in the run of cells whose glow is most even and closest to a middling strength,
+// away from the lockup so it doesn't read as a caption.
+function eggSpot(K, near, n) {
+  let best = null, score = Infinity;
+  for (let r = 2; r < ROWS - 2; r++) for (let col = 2; col < COLS - n - 2; col++) {
+    if (near(col, r) || near(col + n, r)) continue;
+    let sum = 0, lo = 1, hi = 0;
+    for (let e = 0; e < n; e++) { const k = K[r * COLS + col + e]; sum += k; lo = Math.min(lo, k); hi = Math.max(hi, k); }
+    if (lo < 0.15) continue;
+    const s = Math.abs(sum / n - 0.32) + (hi - lo) * 0.5;
+    if (s < score) { score = s; best = [col, r]; }
+  }
+  return best;
+}
+
+function glyphLayer(K, near, spec, cov) {
+  const A = spec.alpha ?? 0.85, weight = spec.weight ?? 0.9, runes = spec.glyphs === 'runes';
+  const ramp = spec.ramp || (runes ? RUNE_RAMP : RAMP), heavy = Math.ceil(ramp.length * 0.45);
+  const tag = spec.egg || (runes ? RUNE_EGG : EGG);
+  const c = canvas(W, H), g = c.getContext('2d');
+  g.font = `${FS}px "Munin Block"`; g.fillStyle = g.strokeStyle = PAPER;
+  g.lineWidth = Math.max(1, Math.round(FS / 9)); g.lineCap = 'square'; g.lineJoin = 'miter';
+  const adv = {}, cap = Math.round(FS * 11 / 16), base = Math.round((CH + cap) / 2);
+  const rw = Math.round(FS * 0.44), rx = Math.round((CW - rw) / 2), ry = Math.round((CH - cap) / 2);
+  const put = (ch, col, row, a) => {
+    g.globalAlpha = a;
+    const x = OX + col * CW, y = OY + row * CH;
+    if (RUNES[ch]) {
+      g.beginPath();
+      for (const line of RUNES[ch]) line.forEach(([px, py], i) => g[i ? 'lineTo' : 'moveTo'](x + rx + Math.round(px * rw), y + ry + Math.round(py * cap)));
+      g.stroke();
+      return;
+    }
+    adv[ch] ??= g.measureText(ch).width;
+    g.fillText(ch, x + Math.round((CW - adv[ch]) / 2), y + base);
+  };
+  const egg = eggSpot(K, near, tag.length);
+  for (let r = 0; r < ROWS; r++) for (let col = 0; col < COLS; col++) {
+    const k = K[r * COLS + col], inLogo = cov && cov[r * COLS + col] > 0.5;
+    const e = egg && r === egg[1] ? col - egg[0] : -1;
+    if (e >= 0 && e < tag.length) { if (tag[e] !== ' ') put(tag[e], col, r, A * 0.7 * Math.pow(k, 0.85)); continue; }
+    // Cells inside a hidden lockup are always filled, with the heavier glyphs.
+    if (!inLogo && (k <= 0 || R() > 0.3 + 0.7 * k)) continue;
+    const a = A * Math.pow(k, 0.85) * (inLogo ? 0.8 + 0.2 * R() : 0.5 + 0.5 * R());
+    if (a < 0.02) continue;
+    const ch = inLogo ? ramp[ramp.length - 1 - Math.floor(R() * heavy)]
+      : ramp[clamp(Math.floor((k * weight + (R() - 0.5) * 0.6) * ramp.length), 0, ramp.length - 1)];
+    put(ch, col, r, a);
+  }
+  return c;
+}
+
+// Alpha following the base's brightness; used to keep the column streaks where there's light.
+const litMask = (L, gain) => cellMask(L.map(l => smooth(0.03, 0.35, l * gain)));
+
+// ── render ──────────────────────────────────────────────────────────────────
+(async () => {
+  await document.fonts.load(`${FS}px "Munin Block"`);
+  const img = {};
+  for (const [k, src] of Object.entries(LOGOS)) { img[k] = new Image(); img[k].src = src; await img[k].decode(); }
+
+  const base = canvas(W, H), b = base.getContext('2d');
+  const spec = VARIANTS[V](b);
+  if (Q.has('logo')) spec.logo = Q.get('logo');
+  if (spec.hide && Q.has('ls')) spec.hide.ls = +Q.get('ls');
+  if (Q.has('x')) spec.x = +Q.get('x');
+  if (Q.has('y')) spec.y = +Q.get('y');
+
+  const logo = img[spec.logo], hide = spec.hide;
+  if (hide && Q.has('reveal')) hide.reveal = +Q.get('reveal');
+  const cells = hide && logoCells(logo, hide.ls, spec.x, spec.y);
+  let cov = cells && cells.cov;
+  if (cov && spec.rowShift) {
+    const torn = new Float32Array(cov.length);
+    for (let r = 0; r < ROWS; r++) for (let col = 0; col < COLS; col++) {
+      const to = col + spec.rowShift[r];
+      if (to >= 0 && to < COLS) torn[r * COLS + to] = cov[r * COLS + col];
+    }
+    cov = torn;
+  }
+  const k = hide ? 1 : Math.max(1, Math.round(spec.k * S));
+  const lw = hide ? cells.w : logo.width * k, lh = hide ? cells.h : logo.height * k;
+  const lx = hide ? cells.x : Math.round(spec.align === 'l' ? spec.x * W : spec.x * W - lw / 2);
+  const ly = hide ? cells.y : Math.round(spec.y * H - lh / 2);
+  const pad = 8 * k;                                 // 4 units of clear space; a unit is 2k px here
+  if (hide) fx(b, { op: 'screen', alpha: hide.ghost, blur: CW * 1.5 }, () => b.drawImage(cellMask(cov), OX, OY, COLS * CW, ROWS * CH));
+  if (spec.dim) {
+    const dg = b.createRadialGradient(lx + lw / 2, ly + lh / 2, 0, lx + lw / 2, ly + lh / 2, lw * 0.9);
+    dg.addColorStop(0, 'rgba(4,4,4,0.95)'); dg.addColorStop(0.55, 'rgba(4,4,4,0.8)'); dg.addColorStop(1, 'rgba(4,4,4,0)');
+    b.fillStyle = dg; b.fillRect(0, 0, W, H);
+  }
+  // Glyphs fade out over three cells as they reach a drawn lockup's clear space.
+  const keep = hide ? () => 1 : (col, r) => {
+    const x = OX + (col + 0.5) * CW, y = OY + (r + 0.5) * CH;
+    const dx = Math.max(lx - pad - x, 0, x - (lx + lw + pad)), dy = Math.max(ly - pad - y, 0, y - (ly + lh + pad));
+    return smooth(0, 3 * CH, Math.hypot(dx, dy));
+  };
+  const near = (col, r) => {
+    const x = OX + (col + 0.5) * CW, y = OY + (r + 0.5) * CH, m = 10 * CH;
+    return x > lx - m && x < lx + lw + m && y > ly - m && y < ly + lh + m;
+  };
+
+  const out = document.getElementById('out'); out.width = W; out.height = H;
+  const o = out.getContext('2d');
+  const glyphsOn = Q.get('glyphs') !== '0';
+  o.fillStyle = '#000'; o.fillRect(0, 0, W, H);
+  fx(o, { alpha: glyphsOn ? spec.baseAlpha ?? 1 : 1 }, () => o.drawImage(base, 0, 0));
+
+  if (glyphsOn) {
+    const L = luminance(base), glyphs = glyphLayer(strength(L, spec, keep, cov), near, spec, cov);
+    const bloom = spec.bloom ?? 1;
+    // Column streaks: the glyphs smeared vertically, kept to where the base is lit.
+    const smear = canvas(W, Math.max(2, Math.round(H / (CH * 5)))), sx = smear.getContext('2d');
+    sx.imageSmoothingQuality = 'high'; sx.drawImage(glyphs, 0, 0, W, smear.height);
+    const streaks = canvas(W, H), st = streaks.getContext('2d');
+    st.imageSmoothingQuality = 'high'; st.drawImage(smear, 0, 0, W, H);
+    st.globalCompositeOperation = 'destination-in'; st.drawImage(litMask(L, spec.gain || 1), OX, OY, COLS * CW, ROWS * CH);
+    fx(o, { op: 'screen', alpha: spec.streak ?? 0.45 }, () => o.drawImage(streaks, 0, 0));
+    fx(o, { op: 'screen', alpha: 0.35 * bloom, blur: 14 * S }, () => o.drawImage(glyphs, 0, 0));
+    fx(o, { op: 'screen', alpha: 0.55 * bloom, blur: 2.5 * S }, () => o.drawImage(glyphs, 0, 0));
+    fx(o, { op: 'screen' }, () => o.drawImage(glyphs, 0, 0));
+  }
+
+  // grain and vignette
+  const tile = canvas(256, 256), tx = tile.getContext('2d'), td = tx.createImageData(256, 256);
+  for (let i = 0; i < td.data.length; i += 4) { td.data[i] = td.data[i + 1] = td.data[i + 2] = R() * 255; td.data[i + 3] = 255; }
+  tx.putImageData(td, 0, 0);
+  fx(o, { op: 'soft-light', alpha: 0.18 }, () => { o.fillStyle = o.createPattern(tile, 'repeat'); o.fillRect(0, 0, W, H); });
+  const vg = o.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, Math.hypot(W, H) * 0.6);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+  o.fillStyle = vg; o.fillRect(0, 0, W, H);
+
+  if (!hide) { o.imageSmoothingEnabled = false; o.drawImage(logo, lx, ly, lw, lh); }
+  document.title = `munin wallpaper · ${V} · done`;
+})();
+</script>
+</body>
+</html>
